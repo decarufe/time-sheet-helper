@@ -1,7 +1,616 @@
 @page "/sources"
+@rendermode InteractiveServer
+@implements IDisposable
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.App.Services
+@using TimeSheetHelper.App.Sync
+@using TimeSheetHelper.Collectors.DevOps.Common
+@using TimeSheetHelper.Collectors.Microsoft365
+@using TimeSheetHelper.Collectors.Windows
+@using TimeSheetHelper.Collectors.Windows.VsCode
+@using TimeSheetHelper.Core.Collectors
+@using TimeSheetHelper.Core.Secrets
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Storage
+@inject FocusTracker Tracker
+@inject VsCodeIngestService VsCode
+@inject SyncScheduler Scheduler
+@inject ISecretStore Secrets
+@inject IProcessRunner Processes
+@inject GraphAuthenticator Graph
+@inject ForecastRunner ForecastOps
+@inject ForecastSession ForecastSession
+@inject ForecastTaskReader TaskReader
+@inject ForecastDiscovery Discovery
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject TimeProvider Clock
 
 <PageTitle>Sources — Time Sheet Helper</PageTitle>
 
-<h1>Sources</h1>
+<div class="page">
+    <header class="page-header">
+        <h1>Sources</h1>
+        <p class="muted">
+            D'où viennent les activités, et les accès dont l'application a besoin.
+            @if (Scheduler.IsRunning)
+            {
+                <span class="pill running">Synchronisation en cours@(Scheduler.CurrentCollector is { } c ? $" : {UiLabels.Collector(c)}" : "")…</span>
+            }
+            else if (Scheduler.NextRunUtc is { } next)
+            {
+                <span>Prochaine synchronisation automatique vers @next.ToLocalTime().ToString("HH:mm").</span>
+            }
+            else
+            {
+                <span>Synchronisation automatique désactivée.</span>
+            }
+        </p>
+        <button class="primary" disabled="@IsBusy("sync:*")" @onclick="() => SyncAsync(null)">
+            @(IsBusy("sync:*") ? "Synchronisation…" : "Tout synchroniser maintenant")
+        </button>
+        <OpStatus State="@Op("sync:*")" />
+    </header>
 
-<p class="muted">À venir.</p>
+    <h2>Surveillance locale</h2>
+    <div class="cards">
+        <article class="card">
+            <header class="card-head">
+                <h3>Fenêtre active (Windows)</h3>
+                @if (Tracker.IsPaused)
+                {
+                    <span class="pill warn">En pause</span>
+                }
+                else
+                {
+                    <span class="pill ok">Active</span>
+                }
+            </header>
+            @if (Tracker.IsPaused)
+            {
+                <p>La surveillance de la fenêtre active est en pause : rien n'est enregistré.</p>
+            }
+            else if (Tracker.Current is { } current)
+            {
+                <dl>
+                    <dt>Maintenant</dt>
+                    <dd>
+                        @switch (current.State)
+                        {
+                            case FocusState.Idle:
+                                <span>Inactif (aucune saisie clavier ou souris)</span>
+                                break;
+                            case FocusState.Locked:
+                                <span>Session verrouillée</span>
+                                break;
+                            default:
+                                <strong>@current.ProcessName</strong>
+                                @if (!string.IsNullOrWhiteSpace(current.Title))
+                                {
+                                    <span class="muted"> — @current.Title</span>
+                                }
+                                break;
+                        }
+                    </dd>
+                    @if ((current.FilePath ?? current.Folder) is { } where)
+                    {
+                        <dt>Fichier / dossier</dt>
+                        <dd><code>@where</code></dd>
+                    }
+                    @if (Tracker.CurrentSinceUtc is { } since)
+                    {
+                        <dt>Depuis</dt>
+                        <dd>@since.ToLocalTime().ToString("HH:mm:ss")</dd>
+                    }
+                </dl>
+            }
+            else
+            {
+                <p class="muted">En attente du premier changement de fenêtre…</p>
+            }
+            <div class="card-actions">
+                <button @onclick="TogglePause">@(Tracker.IsPaused ? "Reprendre la surveillance" : "Mettre en pause")</button>
+                <a href="activite">Voir l'activité brute</a>
+            </div>
+        </article>
+
+        <article class="card">
+            <header class="card-head">
+                <h3>Extension VS Code</h3>
+                @if (VsCode.LastHeartbeatUtc is { } beat && Now - beat < TimeSpan.FromMinutes(5))
+                {
+                    <span class="pill ok">Connectée</span>
+                }
+                else
+                {
+                    <span class="pill muted-pill">Aucun signal récent</span>
+                }
+            </header>
+            @if (VsCode.LastHeartbeatUtc is { } lastBeat)
+            {
+                <p>Dernier signal reçu @UiLabels.Ago(lastBeat, Now) (@lastBeat.ToLocalTime().ToString("HH:mm:ss")).</p>
+            }
+            else
+            {
+                <p>Aucun signal reçu depuis le démarrage de l'application.</p>
+            }
+            <p class="hint">L'extension envoie un signal toutes les 30 secondes environ quand VS Code est ouvert. Elle lit le jeton dans <code>@IngestEndpoints.TokenFilePath</code>.</p>
+        </article>
+    </div>
+
+    <h2>Sources synchronisées</h2>
+    <p class="muted">Synchronisées automatiquement pour la semaine en cours (et la semaine précédente le lundi matin), ou à la demande.</p>
+    <div class="cards">
+        @foreach (var collector in Scheduler.Collectors)
+        {
+            var name = collector.Name;
+            var status = statuses.GetValueOrDefault(name);
+            var last = Scheduler.GetLastResult(name);
+            var key = "sync:" + name;
+            <article class="card">
+                <header class="card-head">
+                    <h3>@UiLabels.Collector(name) <span class="code-name">@name</span></h3>
+                    @if (status is null)
+                    {
+                        <span class="pill muted-pill">Vérification…</span>
+                    }
+                    else if (status.IsConfigured)
+                    {
+                        <span class="pill ok">Prête</span>
+                    }
+                    else
+                    {
+                        <span class="pill warn">À configurer</span>
+                    }
+                </header>
+                @if (status is { IsConfigured: false })
+                {
+                    <p class="warn-text">@status.Message</p>
+                }
+                else if (status?.Message is { } info)
+                {
+                    <p>@info</p>
+                }
+
+                @if (last is null)
+                {
+                    <p class="muted">Pas encore synchronisée depuis le démarrage.</p>
+                }
+                else
+                {
+                    <p>
+                        @switch (last.Outcome)
+                        {
+                            case CollectorSyncOutcome.Succeeded:
+                                <span>Dernière synchronisation @UiLabels.Ago(last.FinishedUtc, Now) : <strong>@last.EventCount</strong> événement(s).</span>
+                                break;
+                            case CollectorSyncOutcome.NotConfigured:
+                                <span>Ignorée @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
+                                break;
+                            default:
+                                <span class="error-text">Échec @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
+                                break;
+                        }
+                    </p>
+                    @if (last.Warnings.Count > 0)
+                    {
+                        <ul class="warnings">
+                            @foreach (var warning in last.Warnings.Take(5))
+                            {
+                                <li>@warning</li>
+                            }
+                            @if (last.Warnings.Count > 5)
+                            {
+                                <li class="muted">… et @(last.Warnings.Count - 5) autre(s).</li>
+                            }
+                        </ul>
+                    }
+                }
+                <div class="card-actions">
+                    <button disabled="@(IsBusy(key) || IsBusy("sync:*"))" @onclick="() => SyncAsync(name)">
+                        @(IsBusy(key) ? "Synchronisation…" : "Synchroniser cette semaine")
+                    </button>
+                </div>
+                <OpStatus State="@Op(key)" />
+            </article>
+        }
+    </div>
+
+    <h2>Accès et identifiants</h2>
+    <p class="muted">Les jetons sont conservés dans le Gestionnaire d'identification Windows. Ils ne sont jamais affichés.</p>
+    <div class="cards">
+        @foreach (var secret in SecretDefinitions)
+        {
+            var configured = secretStates.GetValueOrDefault(secret.Name);
+            var key = "secret:" + secret.Name;
+            <article class="card">
+                <header class="card-head">
+                    <h3>@secret.Label</h3>
+                    @if (configured)
+                    {
+                        <span class="pill ok">Configuré</span>
+                    }
+                    else
+                    {
+                        <span class="pill muted-pill">Absent</span>
+                    }
+                </header>
+                <p class="hint">@secret.Help</p>
+                <div class="secret-row">
+                    <label class="visually-hidden" for="@("in-" + secret.Name)">@secret.Label</label>
+                    <input id="@("in-" + secret.Name)" type="password" autocomplete="off" spellcheck="false"
+                           placeholder="@(configured ? "Nouvelle valeur pour remplacer" : "Coller la valeur")"
+                           value="@secretInputs.GetValueOrDefault(secret.Name)"
+                           @oninput="e => secretInputs[secret.Name] = e.Value?.ToString()" />
+                    <button class="primary" disabled="@(IsBusy(key) || string.IsNullOrWhiteSpace(secretInputs.GetValueOrDefault(secret.Name)))"
+                            @onclick="() => SaveSecretAsync(secret)">
+                        @(configured ? "Remplacer" : "Enregistrer")
+                    </button>
+                </div>
+                <div class="card-actions">
+                    @if (secret.Name == SecretNames.GitHubToken)
+                    {
+                        <button disabled="@IsBusy(key)" @onclick="UseGhTokenAsync">Utiliser gh auth token</button>
+                    }
+                    @if (configured)
+                    {
+                        @if (confirmDeleteSecret == secret.Name)
+                        {
+                            <span class="confirm">
+                                Supprimer ce jeton ?
+                                <button class="danger" @onclick="() => DeleteSecretAsync(secret)">Confirmer</button>
+                                <button @onclick="() => confirmDeleteSecret = null">Annuler</button>
+                            </span>
+                        }
+                        else
+                        {
+                            <button class="danger-outline" @onclick="() => confirmDeleteSecret = secret.Name">Supprimer</button>
+                        }
+                    }
+                </div>
+                <OpStatus State="@Op(key)" />
+            </article>
+        }
+
+        <article class="card">
+            <header class="card-head">
+                <h3>Microsoft 365</h3>
+                @if (!Graph.IsConfigured)
+                {
+                    <span class="pill warn">À configurer</span>
+                }
+                else if (m365SignedIn is null)
+                {
+                    <span class="pill muted-pill">Vérification…</span>
+                }
+                else if (m365SignedIn == true)
+                {
+                    <span class="pill ok">Connecté</span>
+                }
+                else
+                {
+                    <span class="pill warn">Non connecté</span>
+                }
+            </header>
+            <p class="hint">Calendrier, courriels envoyés et conversations Teams (métadonnées seulement) via Microsoft Graph.</p>
+            @if (!Graph.IsConfigured)
+            {
+                <p class="warn-text">Inscription d'application manquante : renseignez <code>Microsoft365:TenantId</code> et <code>Microsoft365:ClientId</code> dans <code>appsettings.Local.json</code>.</p>
+            }
+            else
+            {
+                <div class="card-actions">
+                    <button class="primary" disabled="@IsBusy("m365")" @onclick="SignInM365Async">Se connecter</button>
+                    <button disabled="@(IsBusy("m365") || m365SignedIn != true)" @onclick="SignOutM365Async">Se déconnecter</button>
+                </div>
+                <p class="hint">La connexion ouvre une fenêtre Windows (ou le navigateur) pour choisir le compte.</p>
+            }
+            <OpStatus State="@Op("m365")" />
+        </article>
+    </div>
+
+    <h2>Forecast</h2>
+    <article class="card wide">
+        <header class="card-head">
+            <h3>Feuille de temps Forecast</h3>
+            <span class="pill @(activeTasks > 0 ? "ok" : "warn")">@activeTasks tâche(s) active(s)</span>
+        </header>
+        <p class="hint">
+            Forecast est piloté dans Edge avec un profil dédié : la session reste ouverte entre deux utilisations.
+            @if (lastTaskSeenUtc is { } seen)
+            {
+                <span>Tâches lues pour la dernière fois @UiLabels.Ago(seen, Now).</span>
+            }
+        </p>
+        @if (ForecastOps.CurrentOperation is { } running)
+        {
+            <p class="pill running">En cours : @running</p>
+        }
+        <div class="card-actions">
+            <button class="primary" disabled="@ForecastOps.IsBusy" @onclick="ForecastLoginAsync">Se connecter à Forecast</button>
+            <button disabled="@ForecastOps.IsBusy" @onclick="ForecastSyncTasksAsync">Synchroniser les tâches</button>
+            <button disabled="@ForecastOps.IsBusy" @onclick="ForecastDiscoverAsync">Découverte de l'interface</button>
+        </div>
+        <OpStatus State="@Op("forecast")" />
+        @if (discoveryFolder is not null)
+        {
+            <div class="folder">
+                <span>Captures de la découverte :</span>
+                <code>@discoveryFolder</code>
+                <button @onclick="() => OpenFolder(discoveryFolder)">Ouvrir dans l'Explorateur</button>
+            </div>
+            <p class="hint">Ces fichiers contiennent vos données Forecast ; ils servent à ajuster les sélecteurs de l'automatisation.</p>
+        }
+    </article>
+</div>
+
+@code {
+    private sealed record SecretDefinition(string Name, string Label, string Help);
+
+    private static readonly SecretDefinition[] SecretDefinitions =
+    [
+        new(SecretNames.GitHubToken, "Jeton GitHub",
+            "Jeton personnel (lecture seule : repo, read:org). Sans jeton, la session de GitHub CLI (gh) est utilisée si elle existe."),
+        new(SecretNames.AzureDevOpsPat, "Jeton d'accès Azure DevOps (PAT)",
+            "Portées en lecture : Code, Work Items, Build. Les organisations sont configurées dans AzureDevOps:Organizations."),
+        new(SecretNames.AnthropicApiKey, "Clé d'API Anthropic",
+            "Utilisée pour classer les activités avec Claude, uniquement si Engine:Claude:Enabled est activé."),
+    ];
+
+    private readonly Dictionary<string, CollectorStatus?> statuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, bool> secretStates = [];
+    private readonly Dictionary<string, string?> secretInputs = [];
+    private readonly Dictionary<string, OpState> ops = [];
+    private string? confirmDeleteSecret;
+    private bool? m365SignedIn;
+    private int activeTasks;
+    private DateTime? lastTaskSeenUtc;
+    private string? discoveryFolder;
+    private System.Threading.Timer? refreshTimer;
+    private bool disposed;
+
+    private DateTime Now => Clock.GetUtcNow().UtcDateTime;
+
+    protected override async Task OnInitializedAsync()
+    {
+        RefreshSecretStates();
+        discoveryFolder = LatestDiscoveryFolder();
+        await LoadTaskCountAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        Scheduler.Changed += OnSchedulerChanged;
+        refreshTimer = new System.Threading.Timer(_ => Refresh(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+
+        // Status checks can be slow (gh, MSAL): run them after the first render, in parallel.
+        var checks = Scheduler.Collectors.Select(RefreshStatusAsync).ToList();
+        checks.Add(RefreshM365Async());
+        await Task.WhenAll(checks);
+    }
+
+    private OpState Op(string key) => ops.TryGetValue(key, out var state) ? state : OpState.Idle;
+
+    private bool IsBusy(string key) => Op(key).Busy;
+
+    /// <summary>Runs a long operation without blocking the circuit; the returned text is shown as success.</summary>
+    private async Task RunOpAsync(string key, string busyText, Func<Task<string?>> action)
+    {
+        if (IsBusy(key))
+            return;
+        ops[key] = new OpState(true, busyText, null);
+        StateHasChanged();
+        try
+        {
+            var message = await action();
+            ops[key] = new OpState(false, message, null);
+        }
+        catch (Exception ex)
+        {
+            ops[key] = new OpState(false, null, ex.Message);
+        }
+        if (!disposed)
+            StateHasChanged();
+    }
+
+    private async Task RefreshStatusAsync(ICollector collector)
+    {
+        try
+        {
+            statuses[collector.Name] = await collector.GetStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            statuses[collector.Name] = new CollectorStatus(false, $"État indisponible : {ex.Message}");
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshM365Async()
+    {
+        try
+        {
+            m365SignedIn = Graph.IsConfigured && await Graph.IsSignedInAsync();
+        }
+        catch
+        {
+            m365SignedIn = false;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshSecretStates()
+    {
+        foreach (var secret in SecretDefinitions)
+        {
+            try
+            {
+                secretStates[secret.Name] = !string.IsNullOrWhiteSpace(Secrets.Get(secret.Name));
+            }
+            catch
+            {
+                secretStates[secret.Name] = false;
+            }
+        }
+    }
+
+    private async Task LoadTaskCountAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        activeTasks = await db.ForecastTasks.CountAsync(t => t.IsActive);
+        lastTaskSeenUtc = await db.ForecastTasks.MaxAsync(t => (DateTime?)t.LastSeenUtc);
+    }
+
+    private void TogglePause() => Tracker.SetPaused(!Tracker.IsPaused);
+
+    private Task SyncAsync(string? collectorName) =>
+        RunOpAsync(collectorName is null ? "sync:*" : "sync:" + collectorName, "Synchronisation en cours…", async () =>
+        {
+            var results = await Scheduler.RunNowAsync(collectorName);
+            foreach (var collector in Scheduler.Collectors.Where(c => collectorName is null || c.Name == collectorName))
+                _ = RefreshStatusAsync(collector);
+            var count = results.Sum(r => r.EventCount);
+            var failed = results.Count(r => r.Outcome == CollectorSyncOutcome.Failed);
+            return failed > 0
+                ? throw new InvalidOperationException($"{count} événement(s) ; {failed} source(s) en échec (voir les cartes).")
+                : $"Terminé : {count} événement(s).";
+        });
+
+    private Task SaveSecretAsync(SecretDefinition secret) =>
+        RunOpAsync("secret:" + secret.Name, "Enregistrement…", () =>
+        {
+            var value = secretInputs.GetValueOrDefault(secret.Name)?.Trim();
+            if (string.IsNullOrEmpty(value))
+                throw new InvalidOperationException("Valeur vide.");
+            Secrets.Set(secret.Name, value);
+            secretInputs[secret.Name] = null;
+            RefreshSecretStates();
+            RefreshRelatedStatus(secret.Name);
+            return Task.FromResult<string?>("Enregistré.");
+        });
+
+    private Task DeleteSecretAsync(SecretDefinition secret)
+    {
+        confirmDeleteSecret = null;
+        return RunOpAsync("secret:" + secret.Name, "Suppression…", () =>
+        {
+            Secrets.Delete(secret.Name);
+            RefreshSecretStates();
+            RefreshRelatedStatus(secret.Name);
+            return Task.FromResult<string?>("Supprimé.");
+        });
+    }
+
+    private Task UseGhTokenAsync() =>
+        RunOpAsync("secret:" + SecretNames.GitHubToken, "Lecture du jeton de GitHub CLI…", async () =>
+        {
+            var result = await Processes.RunAsync("gh", ["auth", "token"]);
+            if (result is null)
+                throw new InvalidOperationException("GitHub CLI (gh) introuvable : installez-le ou ajoutez-le au PATH.");
+            var token = result.StandardOutput.Trim();
+            if (!result.Succeeded || token.Length == 0)
+                throw new InvalidOperationException("Aucune session gh : exécutez « gh auth login » dans un terminal.");
+            Secrets.Set(SecretNames.GitHubToken, token);
+            RefreshSecretStates();
+            RefreshRelatedStatus(SecretNames.GitHubToken);
+            return "Jeton de la session gh enregistré.";
+        });
+
+    private void RefreshRelatedStatus(string secretName)
+    {
+        var collectorName = secretName switch
+        {
+            SecretNames.GitHubToken => "github",
+            SecretNames.AzureDevOpsPat => "azuredevops",
+            _ => null,
+        };
+        if (Scheduler.Collectors.FirstOrDefault(c => c.Name == collectorName) is { } collector)
+            _ = RefreshStatusAsync(collector);
+    }
+
+    private Task SignInM365Async() =>
+        RunOpAsync("m365", "Connexion à Microsoft 365… terminez la connexion dans la fenêtre ouverte.", async () =>
+        {
+            var user = await Graph.SignInAsync();
+            await RefreshM365Async();
+            foreach (var collector in Scheduler.Collectors.Where(c => c.Name is "calendar" or "email" or "teams"))
+                _ = RefreshStatusAsync(collector);
+            return user is null ? "Connecté." : $"Connecté en tant que {user}.";
+        });
+
+    private Task SignOutM365Async() =>
+        RunOpAsync("m365", "Déconnexion…", async () =>
+        {
+            await Graph.SignOutAsync();
+            await RefreshM365Async();
+            return "Déconnecté.";
+        });
+
+    private Task ForecastLoginAsync() =>
+        RunOpAsync("forecast", "Ouverture de Forecast dans Edge… connectez-vous si la page de connexion s'affiche.", () =>
+            ForecastOps.RunAsync<string?>("connexion", async ct =>
+            {
+                await ForecastSession.EnsureLoggedInAsync(ct);
+                return "Connecté à Forecast. La session est conservée pour les prochaines utilisations.";
+            }));
+
+    private Task ForecastSyncTasksAsync() =>
+        RunOpAsync("forecast", "Lecture des tâches dans Forecast…", async () =>
+        {
+            var result = await ForecastOps.RunAsync("synchronisation des tâches", ct => TaskReader.SyncTasksAsync(ct));
+            await LoadTaskCountAsync();
+            return result.Warning is not null ? throw new InvalidOperationException(result.Warning) : result.Summary;
+        });
+
+    private Task ForecastDiscoverAsync() =>
+        RunOpAsync("forecast", "Découverte de l'interface Forecast (rien n'est enregistré dans Forecast)…", async () =>
+        {
+            discoveryFolder = await ForecastOps.RunAsync("découverte", ct => Discovery.RunAsync(ct));
+            return "Découverte terminée.";
+        });
+
+    private void OpenFolder(string path)
+    {
+        try
+        {
+            LocalFolders.OpenInExplorer(path);
+        }
+        catch (Exception ex)
+        {
+            ops["forecast"] = new OpState(false, null, ex.Message);
+        }
+    }
+
+    private static string? LatestDiscoveryFolder()
+    {
+        try
+        {
+            var root = Path.Combine(DataPaths.Root, "forecast-discovery");
+            return Directory.Exists(root)
+                ? Directory.EnumerateDirectories(root).OrderDescending(StringComparer.Ordinal).FirstOrDefault()
+                : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    private void OnSchedulerChanged() => Refresh();
+
+    private void Refresh()
+    {
+        if (disposed)
+            return;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        Scheduler.Changed -= OnSchedulerChanged;
+        refreshTimer?.Dispose();
+    }
+}

@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\TimeSheetHelper.Forecast\TimeSheetHelper.Forecast.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Engine\TimeSheetHelper.Engine.csproj" />
+    <ProjectReference Include="..\..\src\TimeSheetHelper.App\TimeSheetHelper.App.csproj" />
   </ItemGroup>
 
   <ItemGroup>

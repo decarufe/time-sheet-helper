@@ -3,7 +3,7 @@ using TimeSheetHelper.Collectors.Windows;
 
 namespace TimeSheetHelper.App;
 
-/// <summary>Notification-area icon: open the UI, pause tracking, quit. Runs its own STA message loop.</summary>
+/// <summary>Notification-area icon: open the UI, pause tracking, quit, weekly reminder. Runs its own STA message loop.</summary>
 public sealed class TrayIcon(FocusTracker tracker, IHostApplicationLifetime lifetime, IConfiguration configuration) : IHostedService
 {
     private Thread? _thread;
@@ -49,6 +49,19 @@ public sealed class TrayIcon(FocusTracker tracker, IHostApplicationLifetime life
         icon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
         icon.ContextMenuStrip.Items.Add("Quitter", null, (_, _) => lifetime.StopApplication());
         icon.DoubleClick += (_, _) => OpenUi();
+
+        // Weekly reminder: checked every minute on this STA thread (WinForms timer), clicking the balloon opens the UI.
+        var reminder = new WeeklyReminder(configuration.GetSection(ReminderOptions.SectionName).Get<ReminderOptions>() ?? new());
+        icon.BalloonTipClicked += (_, _) => OpenUi();
+        using var reminderTimer = new System.Windows.Forms.Timer { Interval = 60_000 };
+        reminderTimer.Tick += (_, _) =>
+        {
+            if (!reminder.IsDue(DateTime.Now))
+                return;
+            reminder.MarkShown(DateTime.Now);
+            icon.ShowBalloonTip(15_000, "Time Sheet Helper", WeeklyReminder.Message, ToolTipIcon.Info);
+        };
+        reminderTimer.Start();
 
         _context = new ApplicationContext();
         Application.Run(_context);

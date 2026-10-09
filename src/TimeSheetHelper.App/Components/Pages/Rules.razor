@@ -1,7 +1,533 @@
 @page "/regles"
+@rendermode InteractiveServer
+@using System.Text.RegularExpressions
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.Core.Activities
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Core.Rules
+@using TimeSheetHelper.Engine.Allocation
+@using TimeSheetHelper.Engine.Rules
+@using TimeSheetHelper.Storage
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject ActivityStore Activities
+@inject RuleEvaluator Evaluator
+@inject SlotAllocator Allocator
 
 <PageTitle>Règles — Time Sheet Helper</PageTitle>
 
-<h1>Règles</h1>
+<div class="page">
+    <header class="page-header">
+        <h1>Règles</h1>
+        <p class="muted">
+            Une règle associe les activités qui remplissent une condition à une tâche Forecast.
+            Les règles sont essayées dans l'ordre : la première qui correspond l'emporte.
+        </p>
+    </header>
 
-<p class="muted">À venir.</p>
+    @if (loadError is not null)
+    {
+        <p class="alert error" role="alert">@loadError</p>
+    }
+
+    <section>
+        <div class="section-head">
+            <h2>Règles (@rules.Count)</h2>
+            <button class="primary" @onclick="StartCreate" disabled="@(form is not null && form.Id == 0)">Nouvelle règle</button>
+        </div>
+
+        @if (rules.Count == 0)
+        {
+            <p class="muted empty">Aucune règle pour l'instant. Créez-en une, ou corrigez une plage dans la vue Semaine pour qu'une règle soit apprise.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="rules">
+                    <thead>
+                        <tr>
+                            <th class="num">#</th>
+                            <th>Nom</th>
+                            <th>Condition</th>
+                            <th>Tâche Forecast</th>
+                            <th>Origine</th>
+                            <th>Active</th>
+                            <th class="actions-col"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var i = 0; i < rules.Count; i++)
+                        {
+                            var rule = rules[i];
+                            var index = i;
+                            <tr class="@(rule.Enabled ? "" : "disabled") @(form?.Id == rule.Id ? "editing" : "")">
+                                <td class="num">@(index + 1)</td>
+                                <td>@rule.Name</td>
+                                <td>
+                                    <span class="muted">@UiLabels.Field(rule.Field)</span>
+                                    <span class="muted">@UiLabels.Operator(rule.Operator)</span>
+                                    <code>@rule.Pattern</code>
+                                </td>
+                                <td>@TaskName(rule.ForecastTaskId)</td>
+                                <td><span class="origin origin-@rule.Origin">@UiLabels.Origin(rule.Origin)</span></td>
+                                <td>
+                                    <label class="switch">
+                                        <input type="checkbox" checked="@rule.Enabled" @onchange="e => ToggleEnabledAsync(rule, (bool)e.Value!)"
+                                               aria-label="@($"Règle « {rule.Name} » active")" />
+                                    </label>
+                                </td>
+                                <td class="actions">
+                                    <button class="icon" title="Monter" aria-label="Monter" disabled="@(index == 0)" @onclick="() => MoveAsync(index, -1)">↑</button>
+                                    <button class="icon" title="Descendre" aria-label="Descendre" disabled="@(index == rules.Count - 1)" @onclick="() => MoveAsync(index, 1)">↓</button>
+                                    <button @onclick="() => StartEdit(rule)">Modifier</button>
+                                    @if (confirmDeleteId == rule.Id)
+                                    {
+                                        <span class="confirm">
+                                            Supprimer ?
+                                            <button class="danger" @onclick="() => DeleteAsync(rule)">Confirmer</button>
+                                            <button @onclick="() => confirmDeleteId = null">Annuler</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button class="danger-outline" @onclick="() => confirmDeleteId = rule.Id">Supprimer</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    @if (form is not null)
+    {
+        <section class="card editor" aria-labelledby="editor-title">
+            <h2 id="editor-title">@(form.Id == 0 ? "Nouvelle règle" : $"Modifier « {form.OriginalName} »")</h2>
+
+            <div class="form-grid">
+                <label for="rule-name">Nom</label>
+                <div>
+                    <input id="rule-name" type="text" @bind="form.Name" @bind:event="oninput" placeholder="ex. : Client Contoso — dépôt api" />
+                    @if (submitted && string.IsNullOrWhiteSpace(form.Name))
+                    {
+                        <p class="field-error">Le nom est obligatoire.</p>
+                    }
+                </div>
+
+                <label for="rule-field">Champ</label>
+                <select id="rule-field" @bind="form.Field" @bind:after="UpdatePreview">
+                    @foreach (var field in Enum.GetValues<RuleField>())
+                    {
+                        <option value="@field">@UiLabels.Field(field)</option>
+                    }
+                </select>
+
+                <label for="rule-operator">Opérateur</label>
+                <select id="rule-operator" @bind="form.Operator" @bind:after="UpdatePreview">
+                    @foreach (var op in Enum.GetValues<RuleOperator>())
+                    {
+                        <option value="@op">@UiLabels.Operator(op)</option>
+                    }
+                </select>
+
+                <label for="rule-pattern">Motif</label>
+                <div>
+                    <input id="rule-pattern" type="text" class="mono" @bind="form.Pattern" @bind:event="oninput" @bind:after="UpdatePreview"
+                           placeholder="@(form.Operator == RuleOperator.Regex ? @"ex. : ^contoso/(api|web)$" : "ex. : contoso")" />
+                    @if (PatternError is { } patternError)
+                    {
+                        <p class="field-error" role="alert">@patternError</p>
+                    }
+                    else if (form.Field == RuleField.Source)
+                    {
+                        <p class="hint">Sources : @string.Join(", ", Enum.GetNames<ActivitySource>())</p>
+                    }
+                    else
+                    {
+                        <p class="hint">La comparaison ne tient pas compte des majuscules.</p>
+                    }
+                </div>
+
+                <label for="rule-task">Tâche Forecast</label>
+                <div>
+                    <select id="rule-task" @bind="form.ForecastTaskId">
+                        <option value="0">— Choisir une tâche —</option>
+                        @foreach (var task in tasks.Where(t => t.IsActive || t.Id == form.ForecastTaskId))
+                        {
+                            <option value="@task.Id">@task.DisplayName@(task.IsActive ? "" : " (inactive)")</option>
+                        }
+                    </select>
+                    @if (tasks.Count == 0)
+                    {
+                        <p class="hint">Aucune tâche en cache : synchronisez les tâches dans <a href="sources">Sources</a>.</p>
+                    }
+                    else if (submitted && form.ForecastTaskId == 0)
+                    {
+                        <p class="field-error">Choisissez une tâche.</p>
+                    }
+                </div>
+
+                <span></span>
+                <label class="checkbox"><input type="checkbox" @bind="form.Enabled" /> Règle active</label>
+            </div>
+
+            <div class="preview" aria-live="polite">
+                <h3>Aperçu — @UiLabels.WeekTitle(previewWeek)</h3>
+                <div class="preview-week">
+                    <button class="icon" aria-label="Semaine précédente" @onclick="() => ChangePreviewWeekAsync(-7)">‹</button>
+                    <button class="icon" aria-label="Semaine suivante" @onclick="() => ChangePreviewWeekAsync(7)">›</button>
+                </div>
+                @if (previewLoading)
+                {
+                    <p class="muted">Chargement des activités…</p>
+                }
+                else if (preview is null)
+                {
+                    <p class="muted">Saisissez un motif pour voir les activités de la semaine qui correspondent.</p>
+                }
+                else
+                {
+                    <p class="preview-stats">
+                        <strong>@preview.Count</strong> activité(s) sur @preview.Total,
+                        <strong>@FormatMinutes(preview.Minutes)</strong> de durée cumulée@(preview.PointEvents > 0 ? $", dont {preview.PointEvents} événement(s) ponctuel(s) (commit, courriel…)" : "").
+                        @if (preview.Shadowed > 0)
+                        {
+                            <br /><span class="warn-text">@preview.Shadowed de ces activités sont déjà attribuées par une règle placée avant celle-ci.</span>
+                        }
+                    </p>
+                    @if (preview.Samples.Count > 0)
+                    {
+                        <table class="samples">
+                            <thead><tr><th>Quand</th><th>Source</th><th>Valeur du champ</th><th class="num">Durée</th></tr></thead>
+                            <tbody>
+                                @foreach (var a in preview.Samples)
+                                {
+                                    <tr>
+                                        <td class="nowrap">@UiLabels.LocalDateTime(a.StartUtc)</td>
+                                        <td>@a.Source</td>
+                                        <td class="value"><code>@RuleEvaluator.GetField(a, form.Field)</code></td>
+                                        <td class="num">@(a.EndUtc is null ? "—" : FormatMinutes((int)Math.Round(a.Duration.TotalMinutes)))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (preview.Count > preview.Samples.Count)
+                        {
+                            <p class="muted">… et @(preview.Count - preview.Samples.Count) autre(s).</p>
+                        }
+                    }
+                    <p class="hint">Durée cumulée des activités : les sources peuvent se chevaucher (fenêtre active + VS Code), ce n'est pas le temps qui sera saisi.</p>
+                }
+            </div>
+
+            @if (saveError is not null)
+            {
+                <p class="alert error" role="alert">@saveError</p>
+            }
+
+            <div class="buttons">
+                <button class="primary" @onclick="SaveAsync">@(form.Id == 0 ? "Créer la règle" : "Enregistrer")</button>
+                <button @onclick="CancelEdit">Annuler</button>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private const int SampleCount = 12;
+
+    private List<Rule> rules = [];
+    private List<ForecastTask> tasks = [];
+    private Dictionary<int, ForecastTask> taskById = [];
+    private RuleForm? form;
+    private bool submitted;
+    private int? confirmDeleteId;
+    private string? loadError;
+    private string? saveError;
+
+    private DateOnly previewWeek = UiLabels.MondayOf(DateOnly.FromDateTime(DateTime.Today));
+    private IReadOnlyList<ActivityEvent>? weekActivities;
+    private DateTime previewFromUtc, previewToUtc;
+    private bool previewLoading;
+    private PreviewResult? preview;
+
+    private sealed class RuleForm
+    {
+        public int Id { get; init; }
+        public string? OriginalName { get; init; }
+        public string Name { get; set; } = "";
+        public RuleField Field { get; set; } = RuleField.Folder;
+        public RuleOperator Operator { get; set; } = RuleOperator.Contains;
+        public string Pattern { get; set; } = "";
+        public int ForecastTaskId { get; set; }
+        public bool Enabled { get; set; } = true;
+    }
+
+    private sealed record PreviewResult(int Count, int Total, int Minutes, int PointEvents, int Shadowed, IReadOnlyList<ActivityEvent> Samples);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Impossible de charger les règles : {ex.Message}";
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        rules = await db.Rules.AsNoTracking().OrderBy(r => r.Order).ThenBy(r => r.Id).ToListAsync();
+        tasks = await db.ForecastTasks.AsNoTracking().ToListAsync();
+        tasks = tasks.OrderBy(t => t.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
+        taskById = tasks.ToDictionary(t => t.Id);
+    }
+
+    private string TaskName(int id) =>
+        taskById.TryGetValue(id, out var task) ? task.DisplayName + (task.IsActive ? "" : " (inactive)") : $"Tâche #{id} inconnue";
+
+    private string? PatternError
+    {
+        get
+        {
+            if (form is null)
+                return null;
+            if (string.IsNullOrWhiteSpace(form.Pattern))
+                return submitted ? "Le motif est obligatoire." : null;
+            if (form.Operator != RuleOperator.Regex)
+                return null;
+            try
+            {
+                _ = new Regex(form.Pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+                return null;
+            }
+            catch (ArgumentException ex)
+            {
+                return $"Expression régulière invalide : {ex.Message}";
+            }
+        }
+    }
+
+    private async Task StartCreate()
+    {
+        confirmDeleteId = null;
+        saveError = null;
+        submitted = false;
+        form = new RuleForm();
+        await EnsurePreviewDataAsync();
+        UpdatePreview();
+    }
+
+    private async Task StartEdit(Rule rule)
+    {
+        confirmDeleteId = null;
+        saveError = null;
+        submitted = false;
+        form = new RuleForm
+        {
+            Id = rule.Id,
+            OriginalName = rule.Name,
+            Name = rule.Name,
+            Field = rule.Field,
+            Operator = rule.Operator,
+            Pattern = rule.Pattern,
+            ForecastTaskId = rule.ForecastTaskId,
+            Enabled = rule.Enabled,
+        };
+        await EnsurePreviewDataAsync();
+        UpdatePreview();
+    }
+
+    private void CancelEdit()
+    {
+        form = null;
+        preview = null;
+        saveError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (form is null)
+            return;
+        submitted = true;
+        saveError = null;
+        if (string.IsNullOrWhiteSpace(form.Name) || form.ForecastTaskId == 0 || string.IsNullOrWhiteSpace(form.Pattern) || PatternError is not null)
+            return;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (form.Id == 0)
+            {
+                var maxOrder = await db.Rules.Select(r => (int?)r.Order).MaxAsync() ?? 0;
+                db.Rules.Add(new Rule
+                {
+                    Name = form.Name.Trim(),
+                    Field = form.Field,
+                    Operator = form.Operator,
+                    Pattern = form.Pattern.Trim(),
+                    ForecastTaskId = form.ForecastTaskId,
+                    Enabled = form.Enabled,
+                    Order = maxOrder + 1,
+                    Origin = "user",
+                    CreatedUtc = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                var rule = await db.Rules.FindAsync(form.Id);
+                if (rule is null)
+                {
+                    saveError = "Cette règle n'existe plus.";
+                    return;
+                }
+                rule.Name = form.Name.Trim();
+                rule.Field = form.Field;
+                rule.Operator = form.Operator;
+                rule.Pattern = form.Pattern.Trim();
+                rule.ForecastTaskId = form.ForecastTaskId;
+                rule.Enabled = form.Enabled;
+            }
+
+            await db.SaveChangesAsync();
+            form = null;
+            preview = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            saveError = $"Enregistrement impossible : {ex.Message}";
+        }
+    }
+
+    private async Task ToggleEnabledAsync(Rule rule, bool enabled)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await db.Rules.Where(r => r.Id == rule.Id).ExecuteUpdateAsync(s => s.SetProperty(r => r.Enabled, enabled));
+            rule.Enabled = enabled;
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Modification impossible : {ex.Message}";
+        }
+    }
+
+    private async Task MoveAsync(int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= rules.Count)
+            return;
+
+        try
+        {
+            // Renumber 1..n in the displayed order, then swap the two rules.
+            var ordered = rules.Select(r => r.Id).ToList();
+            (ordered[index], ordered[target]) = (ordered[target], ordered[index]);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tracked = await db.Rules.ToDictionaryAsync(r => r.Id);
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                if (tracked.TryGetValue(ordered[i], out var rule))
+                    rule.Order = i + 1;
+            }
+            await db.SaveChangesAsync();
+            await LoadAsync();
+            UpdatePreview();
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Réordonnancement impossible : {ex.Message}";
+        }
+    }
+
+    private async Task DeleteAsync(Rule rule)
+    {
+        confirmDeleteId = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await db.Rules.Where(r => r.Id == rule.Id).ExecuteDeleteAsync();
+            if (form?.Id == rule.Id)
+                CancelEdit();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Suppression impossible : {ex.Message}";
+        }
+    }
+
+    private async Task ChangePreviewWeekAsync(int days)
+    {
+        previewWeek = previewWeek.AddDays(days);
+        weekActivities = null;
+        await EnsurePreviewDataAsync();
+        UpdatePreview();
+    }
+
+    private async Task EnsurePreviewDataAsync()
+    {
+        if (weekActivities is not null)
+            return;
+        previewLoading = true;
+        try
+        {
+            (previewFromUtc, _) = Allocator.DayBounds(previewWeek);
+            (_, previewToUtc) = Allocator.DayBounds(previewWeek.AddDays(6));
+            weekActivities = (await Activities.GetRangeAsync(previewFromUtc, previewToUtc))
+                .Where(a => a.Source is not (ActivitySource.Idle or ActivitySource.Locked))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            saveError = $"Activités de la semaine illisibles : {ex.Message}";
+            weekActivities = [];
+        }
+        finally
+        {
+            previewLoading = false;
+        }
+    }
+
+    private void UpdatePreview()
+    {
+        if (form is null || weekActivities is null || string.IsNullOrWhiteSpace(form.Pattern) || PatternError is not null)
+        {
+            preview = null;
+            return;
+        }
+
+        var pattern = form.Pattern.Trim();
+        var matches = weekActivities.Where(a => Evaluator.Matches(form.Field, form.Operator, pattern, a)).ToList();
+
+        // Rules evaluated before this one (lower order) win: count what they already capture.
+        var currentOrder = form.Id == 0 ? int.MaxValue : rules.FirstOrDefault(r => r.Id == form.Id)?.Order ?? int.MaxValue;
+        var before = RuleEvaluator.Prepare(rules.Where(r => r.Id != form.Id && r.Order <= currentOrder));
+        var shadowed = before.Count == 0 ? 0 : matches.Count(a => Evaluator.FirstMatch(a, before) is not null);
+
+        var minutes = (int)Math.Round(matches
+            .Where(a => a.EndUtc is not null)
+            .Sum(a => (Min(a.EndUtc!.Value, previewToUtc) - Max(a.StartUtc, previewFromUtc)).TotalMinutes is var m && m > 0 ? m : 0));
+
+        preview = new PreviewResult(
+            matches.Count,
+            weekActivities.Count,
+            minutes,
+            matches.Count(a => a.EndUtc is null),
+            shadowed,
+            matches.OrderByDescending(a => a.Duration).ThenBy(a => a.StartUtc).Take(SampleCount).ToList());
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+    private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
+
+    private static string FormatMinutes(int minutes) =>
+        minutes >= 60 ? $"{minutes / 60} h {minutes % 60:00}" : $"{minutes} min";
+}
