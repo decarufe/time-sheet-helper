@@ -1,0 +1,140 @@
+using Microsoft.Extensions.Options;
+using TimeSheetHelper.Core.Activities;
+using TimeSheetHelper.Core.Rules;
+using TimeSheetHelper.Engine.Grouping;
+using TimeSheetHelper.Engine.Rules;
+
+namespace TimeSheetHelper.Engine.Allocation;
+
+/// <summary>How an activity takes part in slot allocation.</summary>
+public enum ActivityRole
+{
+    /// <summary>Interval of active work (Focus, VsCode, ClaudeCode).</summary>
+    Active,
+
+    /// <summary>Idle or locked time: removes active time, never work by itself.</summary>
+    Mask,
+
+    /// <summary>Attended calendar meeting.</summary>
+    Meeting,
+
+    /// <summary>Point event (commit, e-mail, ...) widened to an implicit window, or another dated evidence.</summary>
+    Evidence,
+}
+
+/// <summary>What an activity votes for: a Forecast task (rule match) or an unclassified group.</summary>
+public readonly record struct Candidate(int? TaskId, string? GroupKey)
+{
+    public static Candidate ForTask(int taskId) => new(taskId, null);
+    public static Candidate ForGroup(string groupKey) => new(null, groupKey);
+
+    public override string ToString() => TaskId is { } id ? $"task:{id}" : GroupKey ?? "";
+}
+
+/// <summary>An activity ready for allocation: its role, effective interval and candidate.</summary>
+public sealed record ResolvedActivity(ActivityEvent Activity, ActivityRole Role, Interval Window, Candidate? Candidate, int? RuleId = null);
+
+/// <summary>Applies rules, group keys, evidence windows and meeting filters to raw activities.</summary>
+public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilder groupKeys, IOptions<EngineOptions> options)
+{
+    public const string CommitKind = "commit";
+
+    /// <param name="activities">Activities, ideally including some before the range so commit windows can find the previous commit.</param>
+    /// <param name="rules">Rules; disabled ones are skipped.</param>
+    public IReadOnlyList<ResolvedActivity> Resolve(IEnumerable<ActivityEvent> activities, IEnumerable<Rule> rules)
+    {
+        var ordered = RuleEvaluator.Prepare(rules);
+        var sorted = activities.OrderBy(a => a.StartUtc).ToList();
+        var windows = ComputeEvidenceWindows(sorted);
+        var result = new List<ResolvedActivity>(sorted.Count);
+
+        foreach (var activity in sorted)
+        {
+            var role = RoleOf(activity);
+            if (role is null)
+                continue;
+
+            if (role == ActivityRole.Mask)
+            {
+                result.Add(new(activity, ActivityRole.Mask, new(activity.StartUtc, activity.EndUtc!.Value), null));
+                continue;
+            }
+
+            var window = role == ActivityRole.Evidence && windows.TryGetValue(activity, out var w)
+                ? w
+                : new Interval(activity.StartUtc, activity.EndUtc ?? activity.StartUtc);
+            if (window.IsEmpty)
+                continue;
+
+            var rule = ruleEvaluator.FirstMatch(activity, ordered);
+            var candidate = rule is not null
+                ? Candidate.ForTask(rule.ForecastTaskId)
+                : Candidate.ForGroup(groupKeys.Build(activity));
+            result.Add(new(activity, role.Value, window, candidate, rule?.Id));
+        }
+
+        return result;
+    }
+
+    /// <summary>Role of an activity, or null when it carries no time information to allocate.</summary>
+    public ActivityRole? RoleOf(ActivityEvent activity)
+    {
+        var o = options.Value;
+        var isPoint = activity.EndUtc is null || activity.EndUtc <= activity.StartUtc;
+
+        switch (activity.Source)
+        {
+            case ActivitySource.Idle or ActivitySource.Locked:
+                return isPoint ? null : ActivityRole.Mask;
+
+            case ActivitySource.Focus or ActivitySource.VsCode or ActivitySource.ClaudeCode:
+                return isPoint ? ActivityRole.Evidence : ActivityRole.Active;
+
+            case ActivitySource.Calendar:
+                if (isPoint || o.IsIgnoredCalendarKind(activity.Kind) || activity.Duration > o.MaxMeetingDuration)
+                    return null;
+                return ActivityRole.Meeting;
+
+            default:
+                return ActivityRole.Evidence;
+        }
+    }
+
+    /// <summary>
+    /// Implicit window before each point event. A commit's window never reaches back before the previous
+    /// commit in the same repository: the work before that belongs to the earlier commit.
+    /// </summary>
+    public Dictionary<ActivityEvent, Interval> ComputeEvidenceWindows(IReadOnlyList<ActivityEvent> sortedActivities)
+    {
+        var o = options.Value;
+        var result = new Dictionary<ActivityEvent, Interval>(ReferenceEqualityComparer.Instance);
+        var lastCommitByRepo = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        var previousCommitStart = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var activity in sortedActivities)
+        {
+            var isPoint = activity.EndUtc is null || activity.EndUtc <= activity.StartUtc;
+            if (!isPoint || activity.Source is ActivitySource.Idle or ActivitySource.Locked or ActivitySource.Calendar)
+                continue;
+
+            var start = activity.StartUtc - o.GetEvidenceWindow(activity.Source, activity.Kind);
+
+            if (string.Equals(activity.Kind, CommitKind, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(activity.Repo))
+            {
+                // The same commit can be reported by several sources (LocalGit + GitHub) at the same instant;
+                // only a strictly earlier commit bounds the window.
+                if (lastCommitByRepo.TryGetValue(activity.Repo, out var last) && last < activity.StartUtc)
+                    previousCommitStart[activity.Repo] = last;
+
+                if (previousCommitStart.TryGetValue(activity.Repo, out var previous) && previous > start)
+                    start = previous;
+
+                lastCommitByRepo[activity.Repo] = activity.StartUtc;
+            }
+
+            result[activity] = new Interval(start, activity.StartUtc);
+        }
+
+        return result;
+    }
+}
