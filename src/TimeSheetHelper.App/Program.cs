@@ -8,7 +8,10 @@ using var singleInstance = new Mutex(initiallyOwned: true, @"Local\TimeSheetHelp
 if (!isFirstInstance)
     return;
 
-var builder = WebApplication.CreateBuilder(args);
+// Content root = exe folder, so appsettings and wwwroot are found whatever the working directory (startup shortcut, installer).
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
+// Per-machine settings written by the installer (Microsoft 365 app registration, Azure DevOps organizations, ...).
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

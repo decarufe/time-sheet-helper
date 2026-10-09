@@ -488,3 +488,4 @@ out/
 *.vsix
 artifacts/
 .claude/worktrees/
+appsettings.Local.json
