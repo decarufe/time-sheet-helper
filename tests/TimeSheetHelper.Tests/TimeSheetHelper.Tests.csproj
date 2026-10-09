@@ -22,6 +22,11 @@
     <ProjectReference Include="..\..\src\TimeSheetHelper.Core\TimeSheetHelper.Core.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" />
+    <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

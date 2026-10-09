@@ -1,0 +1,19 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "id": "r1",
+      "name": "timesheet-api",
+      "project": { "id": "p1", "name": "Timesheets" },
+      "defaultBranch": "refs/heads/main",
+      "remoteUrl": "https://contoso@dev.azure.com/contoso/Timesheets/_git/timesheet-api",
+      "isDisabled": false
+    },
+    {
+      "id": "r2",
+      "name": "archived",
+      "project": { "id": "p1", "name": "Timesheets" },
+      "isDisabled": true
+    }
+  ]
+}

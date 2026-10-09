@@ -1,0 +1,14 @@
+{
+  "count": 1,
+  "value": [
+    {
+      "id": "p1",
+      "name": "Timesheets",
+      "url": "https://dev.azure.com/contoso/_apis/projects/p1",
+      "state": "wellFormed",
+      "revision": 12,
+      "visibility": "private",
+      "lastUpdateTime": "2026-09-01T00:00:00Z"
+    }
+  ]
+}

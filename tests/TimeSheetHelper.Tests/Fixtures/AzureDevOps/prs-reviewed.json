@@ -1,0 +1,32 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "repository": {
+        "id": "r1",
+        "name": "timesheet-api",
+        "project": { "id": "p1", "name": "Timesheets" }
+      },
+      "pullRequestId": 480,
+      "status": "completed",
+      "createdBy": { "displayName": "Colleague", "id": "22222222-aaaa-bbbb-cccc-000000000002" },
+      "creationDate": "2026-09-28T13:00:00Z",
+      "closedDate": "2026-10-07T11:00:00Z",
+      "title": "Rounding rules",
+      "reviewers": [ { "id": "11111111-aaaa-bbbb-cccc-000000000001", "vote": 10 } ]
+    },
+    {
+      "repository": {
+        "id": "r1",
+        "name": "timesheet-api",
+        "project": { "id": "p1", "name": "Timesheets" }
+      },
+      "pullRequestId": 300,
+      "status": "completed",
+      "createdBy": { "displayName": "Colleague", "id": "22222222-aaaa-bbbb-cccc-000000000002" },
+      "creationDate": "2026-08-20T13:00:00Z",
+      "closedDate": "2026-09-01T11:00:00Z",
+      "title": "Ancient PR"
+    }
+  ]
+}

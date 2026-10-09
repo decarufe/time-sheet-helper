@@ -1,0 +1,20 @@
+{
+  "authenticatedUser": {
+    "id": "11111111-aaaa-bbbb-cccc-000000000001",
+    "descriptor": "Microsoft.IdentityModel.Claims.ClaimsIdentity;contoso\\eric@contoso.com",
+    "subjectDescriptor": "aad.MTExMTExMTEtYWFhYS1iYmJiLWNjY2MtMDAwMDAwMDAwMDAx",
+    "providerDisplayName": "Eric De Carufel",
+    "isActive": true,
+    "properties": {
+      "Account": { "$type": "System.String", "$value": "eric@contoso.com" }
+    },
+    "resourceVersion": 2,
+    "metaTypeId": 0
+  },
+  "authorizedUser": {
+    "id": "11111111-aaaa-bbbb-cccc-000000000001",
+    "providerDisplayName": "Eric De Carufel"
+  },
+  "instanceId": "8a3f2c1e-0000-0000-0000-000000000000",
+  "locationServiceData": { "serviceOwner": "00025394-6065-48ca-87d9-7f5672854ef7" }
+}

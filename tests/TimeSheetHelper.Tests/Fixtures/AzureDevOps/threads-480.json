@@ -1,0 +1,44 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "id": 10,
+      "publishedDate": "2026-10-07T10:00:00Z",
+      "comments": [
+        {
+          "id": 1,
+          "author": { "displayName": "Eric De Carufel", "id": "11111111-aaaa-bbbb-cccc-000000000001" },
+          "content": "Eric De Carufel voted 10",
+          "publishedDate": "2026-10-07T10:00:00Z",
+          "commentType": "system"
+        }
+      ],
+      "properties": {
+        "CodeReviewThreadType": { "$type": "System.String", "$value": "VoteUpdate" },
+        "CodeReviewVoteResult": { "$type": "System.String", "$value": "10" }
+      }
+    },
+    {
+      "id": 11,
+      "publishedDate": "2026-10-07T10:05:00Z",
+      "comments": [
+        {
+          "id": 1,
+          "author": { "displayName": "Eric De Carufel", "id": "11111111-aaaa-bbbb-cccc-000000000001" },
+          "content": "Nice work",
+          "publishedDate": "2026-10-07T10:05:00Z",
+          "commentType": "text"
+        },
+        {
+          "id": 2,
+          "author": { "displayName": "Eric De Carufel", "id": "11111111-aaaa-bbbb-cccc-000000000001" },
+          "content": "",
+          "publishedDate": "2026-10-07T10:06:00Z",
+          "commentType": "text",
+          "isDeleted": true
+        }
+      ],
+      "properties": {}
+    }
+  ]
+}

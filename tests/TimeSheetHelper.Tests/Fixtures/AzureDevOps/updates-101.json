@@ -1,0 +1,54 @@
+{
+  "count": 4,
+  "value": [
+    {
+      "id": 1,
+      "workItemId": 101,
+      "rev": 1,
+      "revisedBy": { "id": "11111111-aaaa-bbbb-cccc-000000000001", "displayName": "Eric De Carufel", "uniqueName": "eric@contoso.com" },
+      "revisedDate": "2026-10-06T13:20:00.000Z",
+      "fields": {
+        "System.Rev": { "newValue": 1 },
+        "System.ChangedDate": { "newValue": "2026-10-01T12:00:00.000Z" },
+        "System.TeamProject": { "newValue": "Timesheets" },
+        "System.Title": { "newValue": "Export timesheet to Forecast" }
+      }
+    },
+    {
+      "id": 2,
+      "workItemId": 101,
+      "rev": 2,
+      "revisedBy": { "id": "11111111-aaaa-bbbb-cccc-000000000001", "displayName": "Eric De Carufel", "uniqueName": "eric@contoso.com" },
+      "revisedDate": "2026-10-07T09:00:00.000Z",
+      "fields": {
+        "System.Rev": { "oldValue": 1, "newValue": 2 },
+        "System.ChangedDate": { "oldValue": "2026-10-01T12:00:00.000Z", "newValue": "2026-10-06T13:20:00.000Z" },
+        "System.State": { "oldValue": "New", "newValue": "Active" },
+        "System.History": { "newValue": "Comment text that must not be kept" }
+      }
+    },
+    {
+      "id": 3,
+      "workItemId": 101,
+      "rev": 3,
+      "revisedBy": { "id": "22222222-aaaa-bbbb-cccc-000000000002", "displayName": "Colleague", "uniqueName": "colleague@contoso.com" },
+      "revisedDate": "2026-10-08T19:00:00.000Z",
+      "fields": {
+        "System.Rev": { "oldValue": 2, "newValue": 3 },
+        "System.ChangedDate": { "oldValue": "2026-10-06T13:20:00.000Z", "newValue": "2026-10-07T09:00:00.000Z" }
+      }
+    },
+    {
+      "id": 4,
+      "workItemId": 101,
+      "rev": 4,
+      "revisedBy": { "id": "11111111-aaaa-bbbb-cccc-000000000001", "displayName": "Eric De Carufel", "uniqueName": "eric@contoso.com" },
+      "revisedDate": "9999-01-01T00:00:00Z",
+      "fields": {
+        "System.Rev": { "oldValue": 3, "newValue": 4 },
+        "System.ChangedDate": { "oldValue": "2026-10-07T09:00:00.000Z", "newValue": "2026-10-08T19:00:00.000Z" },
+        "System.State": { "oldValue": "Active", "newValue": "Resolved" }
+      }
+    }
+  ]
+}

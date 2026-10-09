@@ -1,0 +1,25 @@
+{
+  "count": 1,
+  "value": [
+    {
+      "repository": {
+        "id": "r1",
+        "name": "timesheet-api",
+        "url": "https://dev.azure.com/contoso/p1/_apis/git/repositories/r1",
+        "project": { "id": "p1", "name": "Timesheets", "state": "unchanged" }
+      },
+      "pullRequestId": 501,
+      "codeReviewId": 501,
+      "status": "active",
+      "createdBy": { "displayName": "Eric De Carufel", "id": "11111111-aaaa-bbbb-cccc-000000000001", "uniqueName": "eric@contoso.com" },
+      "creationDate": "2026-10-06T15:30:00.0000000Z",
+      "closedDate": "0001-01-01T00:00:00",
+      "title": "Forecast export",
+      "description": "Description that must not be kept",
+      "sourceRefName": "refs/heads/feature/export",
+      "targetRefName": "refs/heads/main",
+      "mergeStatus": "succeeded",
+      "url": "https://dev.azure.com/contoso/p1/_apis/git/repositories/r1/pullRequests/501"
+    }
+  ]
+}
