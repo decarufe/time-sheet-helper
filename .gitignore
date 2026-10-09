@@ -487,3 +487,4 @@ node_modules/
 out/
 *.vsix
 artifacts/
+.claude/worktrees/
