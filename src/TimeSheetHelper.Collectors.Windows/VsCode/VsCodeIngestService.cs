@@ -12,9 +12,13 @@ public sealed class VsCodeIngestService(IActivitySink sink, TimeProvider time, I
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly VsCodeSessionAggregator _aggregator = new();
 
+    /// <summary>When the last heartbeat was received (null since startup when none); shown on the Sources page.</summary>
+    public DateTime? LastHeartbeatUtc { get; private set; }
+
     public async Task IngestAsync(VsCodeHeartbeat heartbeat, CancellationToken cancellationToken = default)
     {
         var now = time.GetUtcNow().UtcDateTime;
+        LastHeartbeatUtc = now;
         var at = heartbeat.TimestampUtc switch
         {
             { Ticks: 0 } => now,

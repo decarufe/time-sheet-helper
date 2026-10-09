@@ -1,7 +1,410 @@
 @page "/soumettre"
+@rendermode InteractiveServer
+@using System.Globalization
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.App.Services
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Core.Timesheets
+@using TimeSheetHelper.Engine
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Storage
+@inject WeekService Weeks
+@inject ForecastTimesheetWriter Writer
+@inject ForecastRunner ForecastOps
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject NavigationManager Navigation
 
 <PageTitle>Soumettre — Time Sheet Helper</PageTitle>
 
-<h1>Soumettre</h1>
+<div class="page">
+    <header class="page-header">
+        <h1>Soumettre à Forecast</h1>
+        <div class="week-picker">
+            <button class="icon" aria-label="Semaine précédente" @onclick="() => GoToWeek(monday.AddDays(-7))">‹</button>
+            <label class="visually-hidden" for="week-day">Semaine</label>
+            <input id="week-day" type="date" value="@monday.ToString("yyyy-MM-dd")" @onchange="OnDatePicked" />
+            <button class="icon" aria-label="Semaine suivante" @onclick="() => GoToWeek(monday.AddDays(7))">›</button>
+            <button @onclick="() => GoToWeek(UiLabels.MondayOf(DateOnly.FromDateTime(DateTime.Today)))">Cette semaine</button>
+            <span class="week-title">@UiLabels.WeekTitle(monday)</span>
+        </div>
+    </header>
 
-<p class="muted">À venir.</p>
+    <aside class="notice" role="note">
+        <strong>Ce que fait cette page.</strong>
+        La simulation ouvre Forecast dans Edge, repère les lignes et les cellules et prend des captures, sans rien saisir.
+        La saisie tape ensuite les heures dans votre feuille de temps Forecast (chaque cellule est enregistrée par Forecast),
+        puis relit la grille pour vérifier.
+        <strong>L'envoi pour approbation n'est pas automatisé :</strong> une fois les heures vérifiées, ouvrez Forecast
+        et soumettez la semaine vous-même.
+    </aside>
+
+    @if (loading)
+    {
+        <p class="muted" role="status">Calcul du brouillon de la semaine…</p>
+    }
+    else if (loadError is not null)
+    {
+        <p class="alert error" role="alert">@loadError</p>
+        <button @onclick="LoadAsync">Réessayer</button>
+    }
+    else if (draft is not null)
+    {
+        <section>
+            <div class="section-head">
+                <h2>Brouillon — @UiLabels.Hours(grandTotal)</h2>
+                <div class="head-actions">
+                    @if (draft.SubmittedUtc is null)
+                    {
+                        <button disabled="@AnyBusy" @onclick="LoadAsync">Recalculer</button>
+                    }
+                    <a href="@($"./?semaine={monday:yyyy-MM-dd}")">Corriger dans la vue Semaine</a>
+                </div>
+            </div>
+
+            @if (draft.SubmittedUtc is { } submittedUtc)
+            {
+                <p class="alert success">
+                    Semaine saisie dans Forecast le @UiLabels.LocalDateTime(submittedUtc) : le brouillon n'est plus recalculé.
+                    <button @onclick="ReopenAsync" disabled="@AnyBusy">Rouvrir le brouillon</button>
+                </p>
+            }
+
+            @if (rows.Count == 0)
+            {
+                <p class="muted empty">Aucune heure classée dans ce brouillon. Attribuez les activités à des tâches dans la vue Semaine.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="grid">
+                        <thead>
+                            <tr>
+                                <th>Tâche</th>
+                                @foreach (var day in days)
+                                {
+                                    <th class="num">@UiLabels.Day(day)</th>
+                                }
+                                <th class="num">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in rows)
+                            {
+                                <tr>
+                                    <td>@row.Name</td>
+                                    @foreach (var day in days)
+                                    {
+                                        var hours = row.Hours.GetValueOrDefault(day);
+                                        <td class="num @(hours == 0 ? "zero" : "")">@(hours == 0 ? "·" : hours.ToString("0.##", UiLabels.French))</td>
+                                    }
+                                    <td class="num total">@row.Total.ToString("0.##", UiLabels.French)</td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th>Total</th>
+                                @foreach (var day in days)
+                                {
+                                    <th class="num">@dayTotals.GetValueOrDefault(day).ToString("0.##", UiLabels.French)</th>
+                                }
+                                <th class="num">@grandTotal.ToString("0.##", UiLabels.French)</th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+        </section>
+
+        @if (draft.SubmittedUtc is null && rows.Count > 0)
+        {
+            <section class="steps">
+                <div class="step">
+                    <h3><span class="step-number">1</span> Simulation</h3>
+                    <p class="muted">Vérifie que chaque tâche et chaque jour sont trouvés dans Forecast. Aucune saisie.</p>
+                    <button class="primary" disabled="@AnyBusy" @onclick="SimulateAsync">Simulation (aucune saisie)</button>
+                    <OpStatus State="@simulationOp" />
+                </div>
+                <div class="step">
+                    <h3><span class="step-number">2</span> Saisie</h3>
+                    <p class="muted">
+                        @if (CanFill)
+                        {
+                            <span>Simulation réussie pour ce brouillon : vous pouvez saisir les heures.</span>
+                        }
+                        else if (simulation is not null && simulationFingerprint != Fingerprint(draft))
+                        {
+                            <span>Le brouillon a changé depuis la simulation : relancez-la.</span>
+                        }
+                        else if (simulation is not null)
+                        {
+                            <span>La simulation a signalé des problèmes : corrigez-les puis relancez-la.</span>
+                        }
+                        else
+                        {
+                            <span>Disponible après une simulation réussie de ce brouillon.</span>
+                        }
+                    </p>
+                    <button class="danger" disabled="@(!CanFill || AnyBusy)" @onclick="() => confirmFill = true">Saisir dans Forecast…</button>
+                    <OpStatus State="@fillOp" />
+                </div>
+            </section>
+        }
+
+        @if (fill is not null)
+        {
+            <ReportView Report="fill" Title="Résultat de la saisie (relecture de la grille)" OnOpenFolder="OpenFolder" />
+        }
+        @if (simulation is not null)
+        {
+            <ReportView Report="simulation" Title="Résultat de la simulation" OnOpenFolder="OpenFolder" />
+        }
+    }
+</div>
+
+@if (confirmFill && draft is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+            <h2 id="confirm-title">Saisir les heures dans Forecast ?</h2>
+            <div id="confirm-text">
+                <p>
+                    Time Sheet Helper va ouvrir Edge et <strong>taper @UiLabels.Hours(grandTotal)</strong> réparties sur
+                    @simulation?.Cells.Count cellule(s) dans votre <strong>vraie feuille de temps Forecast</strong>,
+                    @UiLabels.WeekTitle(monday).ToLower(UiLabels.French).
+                </p>
+                <p>Les valeurs déjà présentes dans ces cellules seront remplacées. Ne touchez pas à la fenêtre Edge pendant la saisie.</p>
+                <p>La semaine ne sera <strong>pas</strong> envoyée pour approbation : vous le ferez vous-même dans Forecast.</p>
+            </div>
+            <div class="modal-buttons">
+                <button @onclick="() => confirmFill = false">Annuler</button>
+                <button class="danger" @onclick="FillAsync">Oui, saisir les heures</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "semaine")]
+    public string? Semaine { get; set; }
+
+    private sealed record TaskRow(int TaskId, string Name, Dictionary<DateOnly, decimal> Hours, decimal Total);
+
+    private DateOnly monday = UiLabels.MondayOf(DateOnly.FromDateTime(DateTime.Today));
+    private DateOnly? loadedWeek;
+    private bool loading = true;
+    private string? loadError;
+    private TimesheetDraft? draft;
+    private Dictionary<int, ForecastTask> tasks = [];
+    private List<DateOnly> days = [];
+    private List<TaskRow> rows = [];
+    private Dictionary<DateOnly, decimal> dayTotals = [];
+    private decimal grandTotal;
+
+    private ForecastFillReport? simulation;
+    private string? simulationFingerprint;
+    private ForecastFillReport? fill;
+    private OpState simulationOp = OpState.Idle;
+    private OpState fillOp = OpState.Idle;
+    private bool confirmFill;
+
+    private bool AnyBusy => simulationOp.Busy || fillOp.Busy;
+
+    private bool CanFill =>
+        draft is { SubmittedUtc: null }
+        && simulation is { Success: true }
+        && simulationFingerprint == Fingerprint(draft);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (DateOnly.TryParseExact(Semaine, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+            monday = UiLabels.MondayOf(day);
+
+        // Rebuilding the draft may call the classifier: only once, in the interactive render (not the prerender).
+        if (!RendererInfo.IsInteractive || loadedWeek == monday)
+            return;
+        await LoadAsync();
+    }
+
+    private void GoToWeek(DateOnly day) =>
+        Navigation.NavigateTo($"soumettre?semaine={UiLabels.MondayOf(day):yyyy-MM-dd}", replace: true);
+
+    private void OnDatePicked(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
+            GoToWeek(day);
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        loadError = null;
+        if (loadedWeek != monday)
+        {
+            simulation = fill = null;
+            simulationFingerprint = null;
+            simulationOp = fillOp = OpState.Idle;
+        }
+        loadedWeek = monday;
+        StateHasChanged();
+        try
+        {
+            var week = monday;
+            var saved = await Weeks.RebuildDraftAsync(week);
+            if (week != monday)
+                return; // The user moved to another week meanwhile.
+            await SetDraftAsync(saved.Draft);
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Impossible de calculer le brouillon : {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task SetDraftAsync(TimesheetDraft value)
+    {
+        draft = value;
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            tasks = await db.ForecastTasks.AsNoTracking().ToDictionaryAsync(t => t.Id);
+
+        var weekDays = Enumerable.Range(0, 7).Select(i => monday.AddDays(i)).ToList();
+        var byCell = value.Entries
+            .GroupBy(e => (e.ForecastTaskId, e.Date))
+            .ToDictionary(g => g.Key, g => g.Sum(e => e.Hours));
+
+        rows = byCell.Keys.Select(k => k.ForecastTaskId).Distinct()
+            .Select(id =>
+            {
+                var hours = weekDays.ToDictionary(d => d, d => byCell.GetValueOrDefault((id, d)));
+                var name = tasks.TryGetValue(id, out var task) ? task.DisplayName : $"Tâche #{id} inconnue";
+                return new TaskRow(id, name, hours, hours.Values.Sum());
+            })
+            .Where(r => r.Total > 0)
+            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Weekend columns only when they hold hours.
+        days = weekDays.Where(d => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) || rows.Any(r => r.Hours[d] > 0)).ToList();
+        dayTotals = weekDays.ToDictionary(d => d, d => rows.Sum(r => r.Hours[d]));
+        grandTotal = rows.Sum(r => r.Total);
+    }
+
+    /// <summary>Identity of the hours to type: a simulation only validates the exact same draft.</summary>
+    private static string Fingerprint(TimesheetDraft value) =>
+        $"{value.WeekStart:yyyy-MM-dd}|" + string.Join(";", value.Entries
+            .GroupBy(e => (e.ForecastTaskId, e.Date))
+            .Select(g => (g.Key.ForecastTaskId, g.Key.Date, Hours: g.Sum(e => e.Hours)))
+            .Where(c => c.Hours != 0)
+            .OrderBy(c => c.ForecastTaskId).ThenBy(c => c.Date)
+            .Select(c => $"{c.ForecastTaskId}@{c.Date:yyyyMMdd}={c.Hours.ToString(CultureInfo.InvariantCulture)}"));
+
+    private async Task<TimesheetDraft?> ReadDraftAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        return await db.TimesheetDrafts.AsNoTracking().Include(d => d.Entries).FirstOrDefaultAsync(d => d.WeekStart == monday);
+    }
+
+    private async Task SimulateAsync()
+    {
+        if (draft is null)
+            return;
+        fill = null;
+        fillOp = OpState.Idle;
+        simulationOp = new OpState(true, "Simulation en cours dans Edge… connectez-vous à Forecast si la fenêtre le demande.", null);
+        try
+        {
+            var current = await ReadDraftAsync() ?? draft;
+            var fingerprint = Fingerprint(current);
+            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, ct));
+            simulation = report;
+            simulationFingerprint = fingerprint;
+            await SetDraftAsync(current);
+            simulationOp = report.Success
+                ? new OpState(false, report.Summary, null)
+                : new OpState(false, null, report.Summary);
+        }
+        catch (Exception ex)
+        {
+            simulationOp = new OpState(false, null, $"Simulation impossible : {ex.Message}");
+        }
+    }
+
+    private async Task FillAsync()
+    {
+        confirmFill = false;
+        if (draft is null || !CanFill)
+            return;
+
+        fillOp = new OpState(true, "Saisie en cours dans Forecast… ne touchez pas à la fenêtre Edge.", null);
+        StateHasChanged();
+        try
+        {
+            var current = await ReadDraftAsync();
+            if (current is null || current.SubmittedUtc is not null || Fingerprint(current) != simulationFingerprint)
+            {
+                fillOp = new OpState(false, null, "Le brouillon a changé depuis la simulation : relancez la simulation avant de saisir.");
+                if (current is not null)
+                    await SetDraftAsync(current);
+                return;
+            }
+
+            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, ct));
+            fill = report;
+
+            var expectedCells = ForecastFillPlanner.Plan(current, tasks).Count;
+            var allOk = report.Cells.Count == expectedCells && report.Cells.Count > 0
+                        && report.Cells.All(c => c.Status == ForecastCellStatus.Ok);
+            if (allOk)
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var stored = await db.TimesheetDrafts.FirstAsync(d => d.Id == current.Id);
+                stored.SubmittedUtc = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+                current.SubmittedUtc = stored.SubmittedUtc;
+                await SetDraftAsync(current);
+                fillOp = new OpState(false, $"{report.Summary}. Toutes les cellules sont vérifiées : la semaine est marquée comme saisie. "
+                                            + "Pensez à la soumettre pour approbation dans Forecast.", null);
+            }
+            else
+            {
+                fillOp = new OpState(false, null, $"{report.Summary}. Certaines cellules ne correspondent pas : vérifiez le rapport et la grille Forecast. "
+                                                  + "La semaine n'est pas marquée comme saisie.");
+            }
+        }
+        catch (Exception ex)
+        {
+            fillOp = new OpState(false, null, $"Saisie interrompue : {ex.Message}. Vérifiez la grille dans Forecast.");
+        }
+    }
+
+    private async Task ReopenAsync()
+    {
+        if (draft is null)
+            return;
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            await db.TimesheetDrafts.Where(d => d.Id == draft.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.SubmittedUtc, (DateTime?)null));
+        }
+        fill = simulation = null;
+        simulationFingerprint = null;
+        fillOp = simulationOp = OpState.Idle;
+        await LoadAsync();
+    }
+
+    private void OpenFolder(string path)
+    {
+        try
+        {
+            LocalFolders.OpenInExplorer(path);
+        }
+        catch (Exception ex)
+        {
+            simulationOp = new OpState(false, null, ex.Message);
+        }
+    }
+}
