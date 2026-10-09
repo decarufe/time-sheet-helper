@@ -1,0 +1,102 @@
+@page "/"
+@rendermode InteractiveServer
+@using TimeSheetHelper.Collectors.Windows
+@using TimeSheetHelper.Core.Activities
+@using TimeSheetHelper.Storage
+@inject ActivityStore Store
+@inject FocusTracker Tracker
+
+<PageTitle>Time Sheet Helper</PageTitle>
+
+<header class="toolbar">
+    <h1>Activité du jour</h1>
+    <button @onclick="() => ChangeDay(-1)" aria-label="Jour précédent">‹</button>
+    <input type="date" @bind="day" @bind:after="LoadAsync" />
+    <button @onclick="() => ChangeDay(1)" aria-label="Jour suivant">›</button>
+    <button @onclick="LoadAsync">Rafraîchir</button>
+    <button @onclick="TogglePause">@(Tracker.IsPaused ? "Reprendre" : "Pause")</button>
+</header>
+
+<section class="status">
+    @if (Tracker.IsPaused)
+    {
+        <span class="badge paused">Surveillance en pause</span>
+    }
+    else if (Tracker.Current is { } current)
+    {
+        <span class="badge live">En cours</span>
+        <span>@current.ProcessName — @current.Title</span>
+        @if ((current.FilePath ?? current.Folder) is { } where)
+        {
+            <code>@where</code>
+        }
+        <span class="muted">depuis @Tracker.CurrentSinceUtc?.ToLocalTime().ToString("HH:mm:ss")</span>
+    }
+</section>
+
+<section>
+    <h2>Totaux (@Format(totalActive) actif)</h2>
+    <table>
+        <thead><tr><th>Application</th><th>Dossier</th><th class="num">Durée</th></tr></thead>
+        <tbody>
+            @foreach (var g in totals)
+            {
+                <tr><td>@g.Process</td><td><code>@g.Folder</code></td><td class="num">@Format(g.Duration)</td></tr>
+            }
+        </tbody>
+    </table>
+</section>
+
+<section>
+    <h2>Segments</h2>
+    <table>
+        <thead><tr><th>Début</th><th>Fin</th><th class="num">Durée</th><th>Source</th><th>Application</th><th>Titre</th><th>Fichier / dossier</th></tr></thead>
+        <tbody>
+            @foreach (var a in activities)
+            {
+                <tr class="@a.Source.ToString().ToLowerInvariant()">
+                    <td>@a.StartUtc.ToLocalTime().ToString("HH:mm:ss")</td>
+                    <td>@a.EndUtc?.ToLocalTime().ToString("HH:mm:ss")</td>
+                    <td class="num">@Format(a.Duration)</td>
+                    <td>@a.Source</td>
+                    <td>@a.ProcessName</td>
+                    <td class="title">@a.Title</td>
+                    <td><code>@(a.FilePath ?? a.Folder)</code></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private DateOnly day = DateOnly.FromDateTime(DateTime.Today);
+    private IReadOnlyList<ActivityEvent> activities = [];
+    private List<(string Process, string? Folder, TimeSpan Duration)> totals = [];
+    private TimeSpan totalActive;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local).ToUniversalTime();
+        activities = await Store.GetRangeAsync(from, from.AddDays(1));
+
+        var focus = activities.Where(a => a.Source == ActivitySource.Focus).ToList();
+        totalActive = TimeSpan.FromTicks(focus.Sum(a => a.Duration.Ticks));
+        totals = focus
+            .GroupBy(a => (Process: a.ProcessName ?? "?", a.Folder))
+            .Select(g => (g.Key.Process, g.Key.Folder, TimeSpan.FromTicks(g.Sum(a => a.Duration.Ticks))))
+            .OrderByDescending(g => g.Item3)
+            .ToList();
+    }
+
+    private Task ChangeDay(int delta)
+    {
+        day = day.AddDays(delta);
+        return LoadAsync();
+    }
+
+    private void TogglePause() => Tracker.SetPaused(!Tracker.IsPaused);
+
+    private static string Format(TimeSpan d) => d.TotalHours >= 1 ? $"{(int)d.TotalHours} h {d.Minutes:00}" : $"{d.Minutes} min {d.Seconds:00}";
+}

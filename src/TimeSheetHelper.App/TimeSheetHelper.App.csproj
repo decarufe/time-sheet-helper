@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\TimeSheetHelper.Core\TimeSheetHelper.Core.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <AssemblyName>TimeSheetHelper</AssemblyName>
+    <RootNamespace>TimeSheetHelper.App</RootNamespace>
+  </PropertyGroup>
+
+</Project>
