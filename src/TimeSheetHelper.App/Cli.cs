@@ -34,6 +34,9 @@ public static class Cli
         AppServices.AddConfiguration(builder.Configuration);
         builder.Services.AddTimeSheetHelper(builder.Configuration);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        // Collectors report their progress at Information level: long syncs should not look frozen.
+        builder.Logging.AddFilter("TimeSheetHelper", LogLevel.Information);
+        builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
         using var host = builder.Build();
         await AppServices.MigrateDatabaseAsync(host.Services);
 

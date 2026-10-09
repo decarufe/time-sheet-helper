@@ -35,8 +35,9 @@ public static class ServiceCollectionExtensions
             http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
             http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         });
-        services.AddHttpClient<AzureDevOpsApiClient>(http =>
+        services.AddHttpClient<AzureDevOpsApiClient>((sp, http) =>
         {
+            http.Timeout = sp.GetRequiredService<IOptions<AzureDevOpsOptions>>().Value.RequestTimeout;
             http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("TimeSheetHelper", "1.0"));
             http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         });

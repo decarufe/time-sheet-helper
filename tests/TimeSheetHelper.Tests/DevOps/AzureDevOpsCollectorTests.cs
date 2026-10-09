@@ -16,6 +16,7 @@ public class AzureDevOpsCollectorTests
 
     private readonly FakeHttpMessageHandler _http = new();
     private readonly RecordingSink _sink = new();
+    private FakeActivityHistory _history = new();
 
     private static FakeHttpMessageHandler Recorded(FakeHttpMessageHandler http) => http
         .OnFixture("/contoso/_apis/connectionData", "AzureDevOps/connection-data.json")
@@ -40,6 +41,7 @@ public class AzureDevOpsCollectorTests
             new AzureDevOpsApiClient(new HttpClient(_http)),
             secrets,
             _sink,
+            _history,
             Options.Create(options ?? new AzureDevOpsOptions { Organizations = ["contoso"] }),
             NullLogger<AzureDevOpsCollector>.Instance);
     }
@@ -145,6 +147,82 @@ public class AzureDevOpsCollectorTests
         Assert.False(noOrg.IsConfigured);
         Assert.Contains("organisation", noOrg.Message);
         Assert.True(ok.IsConfigured);
+    }
+
+    private const string TwoProjects = """
+        {"value":[
+          {"id":"p1","name":"Timesheets","lastUpdateTime":"2026-09-01T00:00:00Z"},
+          {"id":"p9","name":"Unrelated","lastUpdateTime":"2026-10-01T00:00:00Z"}
+        ]}
+        """;
+
+    [Fact]
+    public async Task Only_projects_with_my_activity_are_scanned()
+    {
+        _http.On("/contoso/_apis/projects", TwoProjects);
+        Recorded(_http);
+
+        var result = await CreateCollector().SyncAsync(From, To);
+
+        Assert.Empty(result.Warnings);
+        Assert.Equal(8, result.EventCount);
+        Assert.DoesNotContain(_http.Requests, r => r.RequestUri!.AbsolutePath.Contains("/p9/"));
+    }
+
+    [Fact]
+    public async Task Without_any_trace_only_most_recent_projects_are_scanned_with_warning()
+    {
+        _http.On("/contoso/_apis/wit/wiql", """{"workItems":[]}""")
+            .On("/contoso/_apis/projects", TwoProjects)
+            .On("/contoso/p9/_apis/git/pullrequests", """{"value":[]}""")
+            .On("/contoso/p9/_apis/build/builds", """{"value":[]}""")
+            .On("/contoso/p9/_apis/git/repositories", """{"value":[]}""");
+        Recorded(_http);
+
+        var result = await CreateCollector(new AzureDevOpsOptions { Organizations = ["contoso"], MaxProjects = 1 }).SyncAsync(From, To);
+
+        Assert.Contains("AzureDevOps:Projects", Assert.Single(result.Warnings));
+        Assert.Contains(_http.Requests, r => r.RequestUri!.AbsolutePath.Contains("/p9/"));
+        Assert.DoesNotContain(_http.Requests, r => r.RequestUri!.AbsolutePath.Contains("/p1/"));
+    }
+
+    [Fact]
+    public async Task Projects_of_local_clones_are_scanned()
+    {
+        _history = new FakeActivityHistory(new ActivityEvent
+        {
+            Source = ActivitySource.LocalGit, StartUtc = From.AddDays(-3), Repo = "unrelated-api", Project = "contoso/Unrelated",
+        });
+        _http.On("/contoso/_apis/wit/wiql", """{"workItems":[]}""")
+            .On("/contoso/_apis/projects", TwoProjects)
+            .On("/contoso/p9/_apis/git/pullrequests", """{"value":[]}""")
+            .On("/contoso/p9/_apis/build/builds", """{"value":[]}""")
+            .On("/contoso/p9/_apis/git/repositories", """{"value":[]}""");
+        Recorded(_http);
+
+        var result = await CreateCollector().SyncAsync(From, To);
+
+        Assert.Empty(result.Warnings);
+        Assert.Contains(_http.Requests, r => r.RequestUri!.AbsolutePath.Contains("/p9/"));
+        Assert.DoesNotContain(_http.Requests, r => r.RequestUri!.AbsolutePath.Contains("/p1/"));
+    }
+
+    [Fact]
+    public async Task Organization_level_pull_request_search_replaces_per_project_queries()
+    {
+        _http.On("/contoso/_apis/git/pullrequests", """
+            {"value":[{"pullRequestId":777,"title":"Org-wide","creationDate":"2026-10-07T15:00:00Z","status":"active",
+              "createdBy":{"id":"11111111-aaaa-bbbb-cccc-000000000001"},
+              "repository":{"id":"r1","name":"timesheet-api","project":{"id":"p1","name":"Timesheets"}}}]}
+            """)
+            .On("/contoso/p1/_apis/git/repositories/r1/pullRequests/777/threads", """{"value":[]}""");
+        Recorded(_http);
+
+        var result = await CreateCollector().SyncAsync(From, To);
+
+        Assert.Contains(_sink.Events, e => e.ExternalId == "pr:contoso/777");
+        Assert.DoesNotContain(_http.Requests, r => r.RequestUri!.AbsolutePath.EndsWith("/p1/_apis/git/pullrequests"));
+        Assert.Empty(result.Warnings);
     }
 
     [Fact]

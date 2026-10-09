@@ -18,6 +18,7 @@ public sealed class AzureDevOpsCollector(
     AzureDevOpsApiClient api,
     ISecretStore secrets,
     IActivitySink sink,
+    IActivityHistory history,
     IOptions<AzureDevOpsOptions> options,
     ILogger<AzureDevOpsCollector> logger) : ICollector
 {
@@ -52,7 +53,7 @@ public sealed class AzureDevOpsCollector(
         }
 
         var settings = options.Value;
-        var run = new SyncRun(api, sink, settings, pat, fromUtc, toUtc, cancellationToken);
+        var run = new SyncRun(api, sink, history, settings, pat, fromUtc, toUtc, logger, cancellationToken);
         foreach (var organization in organizations)
         {
             try
@@ -84,9 +85,12 @@ public sealed class AzureDevOpsCollector(
         .ToList();
 
     private sealed class SyncRun(
-        AzureDevOpsApiClient api, IActivitySink sink, AzureDevOpsOptions settings, string pat,
-        DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken)
+        AzureDevOpsApiClient api, IActivitySink sink, IActivityHistory history, AzureDevOpsOptions settings, string pat,
+        DateTime fromUtc, DateTime toUtc, ILogger logger, CancellationToken cancellationToken)
     {
+        /// <summary>How far back local activity (clones, focus) is used to find the projects I work in.</summary>
+        private static readonly TimeSpan HistoryLookback = TimeSpan.FromDays(30);
+
         private readonly HashSet<string> _emitted = new(StringComparer.Ordinal);
         private readonly string _baseUrl = settings.BaseUrl.EndsWith('/') ? settings.BaseUrl : settings.BaseUrl + "/";
 
@@ -100,7 +104,20 @@ public sealed class AzureDevOpsCollector(
             var me = AzureDevOpsMapper.ParseIdentity(connection)
                 ?? throw new HttpRequestException("Identité introuvable (connectionData).", null, HttpStatusCode.Unauthorized);
 
-            await CollectWorkItemsAsync(organization, org, me);
+            // Crawling every project and repository of a large organization takes thousands of requests:
+            // only the projects where I have a trace of activity are scanned.
+            var relevant = new HashSet<string>(settings.Projects.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()), StringComparer.OrdinalIgnoreCase);
+
+            logger.LogInformation("Azure DevOps {Organization}: work items", organization);
+            relevant.UnionWith(await CollectWorkItemsAsync(organization, org, me));
+
+            logger.LogInformation("Azure DevOps {Organization}: pull requests", organization);
+            var pullRequestProjects = await TryCollectPullRequestsAsync(organization, org, me);
+            if (pullRequestProjects is not null)
+            {
+                relevant.UnionWith(pullRequestProjects);
+            }
+            relevant.UnionWith(await ProjectsFromHistoryAsync(organization));
 
             var projects = new List<JsonElement>();
             await foreach (var project in Values($"{org}/_apis/projects?{ApiVersion}", AzureDevOpsPaging.ContinuationToken))
@@ -108,7 +125,22 @@ public sealed class AzureDevOpsCollector(
                 projects.Add(project);
             }
 
-            foreach (var project in projects)
+            var selected = projects
+                .Where(p => relevant.Contains(p.Str("name") ?? "") || relevant.Contains(p.Str("id") ?? ""))
+                .ToList();
+            if (selected.Count == 0)
+            {
+                selected = projects
+                    .OrderByDescending(p => p.Utc("lastUpdateTime") ?? DateTime.MinValue)
+                    .Take(Math.Max(1, settings.MaxProjects))
+                    .ToList();
+                if (projects.Count > selected.Count)
+                {
+                    Warnings.Add($"Azure DevOps ({organization}) : aucune activité ne désigne un projet ; seuls les {selected.Count} projets modifiés le plus récemment sont analysés (sur {projects.Count}). Ajoutez vos projets dans AzureDevOps:Projects.");
+                }
+            }
+
+            foreach (var project in selected)
             {
                 if (project.Str("id") is not { } projectId)
                 {
@@ -116,7 +148,11 @@ public sealed class AzureDevOpsCollector(
                 }
                 var projectName = project.Str("name");
                 var projectUrl = $"{org}/{projectId}";
-                await CollectPullRequestsAsync(organization, projectUrl, me);
+                logger.LogInformation("Azure DevOps {Organization}: project {Project}", organization, projectName);
+                if (pullRequestProjects is null)
+                {
+                    await CollectPullRequestsAsync(organization, projectUrl, me);
+                }
                 await CollectBuildsAsync(organization, projectUrl, me);
                 if (settings.CollectCommits && me.Email is not null)
                 {
@@ -125,8 +161,38 @@ public sealed class AzureDevOpsCollector(
             }
         }
 
-        private async Task CollectWorkItemsAsync(string organization, string org, AzureDevOpsIdentity me)
+        /// <summary>Project names of ADO remotes ("org/project") recorded by the local collectors.</summary>
+        private async Task<IEnumerable<string>> ProjectsFromHistoryAsync(string organization)
         {
+            var prefix = organization + "/";
+            var activities = await history.GetRangeAsync(fromUtc - HistoryLookback, toUtc, cancellationToken);
+            return activities
+                .Where(a => a.Source != ActivitySource.AzureDevOps && a.Project?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true)
+                .Select(a => a.Project![prefix.Length..])
+                .Where(p => p.Length > 0)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Organization-wide pull request search (one query per role instead of one per project).
+        /// Returns the projects of the pull requests found, or null when the organization-level endpoint is unavailable.
+        /// </summary>
+        private async Task<IReadOnlyCollection<string>?> TryCollectPullRequestsAsync(string organization, string org, AzureDevOpsIdentity me)
+        {
+            try
+            {
+                var pullRequests = await CollectPullRequestsAsync(organization, org, me);
+                return pullRequests.Select(pr => pr.Project).OfType<string>().ToList();
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
+            {
+                return null;
+            }
+        }
+
+        private async Task<List<string>> CollectWorkItemsAsync(string organization, string org, AzureDevOpsIdentity me)
+        {
+            var projects = new List<string>();
             // ChangedDate has day precision in WIQL; the day before absorbs time-zone shifts, revisions are filtered precisely below.
             var since = fromUtc.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             JsonElement result;
@@ -147,24 +213,30 @@ public sealed class AzureDevOpsCollector(
                 var details = await api.GetAsync(pat, $"{org}/_apis/wit/workitems?ids={string.Join(',', batch)}&fields={fields}&errorPolicy=omit&{ApiVersion}", cancellationToken);
                 foreach (var workItem in details.Array("value").Select(AzureDevOpsMapper.ParseWorkItem).OfType<AzureDevOpsWorkItem>())
                 {
+                    if (workItem.Project is not null)
+                    {
+                        projects.Add(workItem.Project);
+                    }
                     await foreach (var update in Values($"{org}/_apis/wit/workitems/{workItem.Id}/updates?{ApiVersion}", AzureDevOpsPaging.Skip))
                     {
                         await EmitAsync(AzureDevOpsMapper.MapWorkItemUpdate(update, organization, workItem, me.Id, _baseUrl));
                     }
                 }
             }
+            return projects;
         }
 
         private Task<JsonElement> Wiql(string org, string query)
             => api.PostAsync(pat, $"{org}/_apis/wit/wiql?{ApiVersion}", new { query }, cancellationToken);
 
-        private async Task CollectPullRequestsAsync(string organization, string projectUrl, AzureDevOpsIdentity me)
+        /// <param name="scopeUrl">Organization URL (all projects) or project URL.</param>
+        private async Task<IReadOnlyCollection<AzureDevOpsPullRequest>> CollectPullRequestsAsync(string organization, string scopeUrl, AzureDevOpsIdentity me)
         {
             var pullRequests = new Dictionary<long, AzureDevOpsPullRequest>();
             var closedSince = Uri.EscapeDataString(JsonExtensions.Iso(fromUtc));
             foreach (var role in new[] { "creatorId", "reviewerId" })
             {
-                var criteria = $"{projectUrl}/_apis/git/pullrequests?searchCriteria.{role}={me.Id}";
+                var criteria = $"{scopeUrl}/_apis/git/pullrequests?searchCriteria.{role}={me.Id}";
                 string[] queries =
                 [
                     $"{criteria}&searchCriteria.status=active&{ApiVersion}",
@@ -185,10 +257,11 @@ public sealed class AzureDevOpsCollector(
             foreach (var pr in pullRequests.Values)
             {
                 await EmitAsync(AzureDevOpsMapper.MapPullRequestOpened(pr, me.Id));
-                if (pr.RepoId is null)
+                if (pr.RepoId is null || pr.ProjectId is null)
                 {
                     continue;
                 }
+                var projectUrl = $"{_baseUrl}{Uri.EscapeDataString(organization)}/{pr.ProjectId}";
                 await foreach (var thread in Values($"{projectUrl}/_apis/git/repositories/{pr.RepoId}/pullRequests/{pr.Id}/threads?{ApiVersion}", AzureDevOpsPaging.None))
                 {
                     foreach (var activity in AzureDevOpsMapper.MapThread(thread, pr, me.Id))
@@ -197,6 +270,7 @@ public sealed class AzureDevOpsCollector(
                     }
                 }
             }
+            return pullRequests.Values;
         }
 
         private async Task CollectBuildsAsync(string organization, string projectUrl, AzureDevOpsIdentity me)
