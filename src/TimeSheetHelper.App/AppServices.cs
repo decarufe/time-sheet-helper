@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using TimeSheetHelper.Collectors.DevOps;
 using TimeSheetHelper.Collectors.Microsoft365;
 using TimeSheetHelper.Collectors.Windows;
+using TimeSheetHelper.Engine;
 using TimeSheetHelper.Forecast;
 using TimeSheetHelper.Storage;
 
@@ -21,6 +22,7 @@ public static class AppServices
         services.AddMicrosoft365Collectors(configuration);
         services.AddDevOpsCollectors(configuration);
         services.AddForecast(configuration);
+        services.AddTimesheetEngine(configuration);
         return services;
     }
 
