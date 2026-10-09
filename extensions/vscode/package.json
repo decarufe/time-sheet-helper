@@ -1,0 +1,58 @@
+{
+  "name": "timesheet-helper",
+  "displayName": "Time Sheet Helper",
+  "description": "Envoie l'activité VS Code (espace de travail, fichier, branche, IA) à l'application Time Sheet Helper locale.",
+  "version": "0.1.0",
+  "publisher": "decarufe",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Time Sheet Helper",
+      "properties": {
+        "timesheetHelper.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Envoyer l'activité de VS Code à Time Sheet Helper."
+        },
+        "timesheetHelper.endpoint": {
+          "type": "string",
+          "default": "http://localhost:5178/ingest/vscode",
+          "description": "Adresse du point d'ingestion de l'application Time Sheet Helper."
+        },
+        "timesheetHelper.token": {
+          "type": "string",
+          "default": "",
+          "description": "Jeton d'ingestion. Laisser vide pour lire %LOCALAPPDATA%\\TimeSheetHelper\\ingest-token (créé par l'application)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "npm run typecheck && node esbuild.mjs",
+    "build": "npm run compile",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "vsce package --no-dependencies --skip-license --allow-missing-repository --out timesheet-helper.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
