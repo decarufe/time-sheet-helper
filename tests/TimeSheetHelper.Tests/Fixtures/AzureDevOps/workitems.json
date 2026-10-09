@@ -1,0 +1,17 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "id": 101,
+      "rev": 4,
+      "fields": { "System.Title": "Export timesheet to Forecast", "System.TeamProject": "Timesheets" },
+      "url": "https://dev.azure.com/contoso/_apis/wit/workItems/101"
+    },
+    {
+      "id": 102,
+      "rev": 1,
+      "fields": { "System.Title": "Old bug", "System.TeamProject": "Timesheets" },
+      "url": "https://dev.azure.com/contoso/_apis/wit/workItems/102"
+    }
+  ]
+}

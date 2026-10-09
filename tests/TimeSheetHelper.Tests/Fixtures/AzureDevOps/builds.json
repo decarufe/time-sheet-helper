@@ -1,0 +1,28 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "id": 9001,
+      "buildNumber": "20261006.3",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-10-06T14:58:00Z",
+      "startTime": "2026-10-06T15:00:00Z",
+      "finishTime": "2026-10-06T15:12:00Z",
+      "definition": { "id": 12, "name": "timesheet-api-ci" },
+      "project": { "id": "p1", "name": "Timesheets" },
+      "repository": { "id": "r1", "type": "TfsGit", "name": "timesheet-api" },
+      "requestedFor": { "displayName": "Eric De Carufel", "id": "11111111-aaaa-bbbb-cccc-000000000001", "uniqueName": "eric@contoso.com" },
+      "_links": { "web": { "href": "https://dev.azure.com/contoso/p1/_build/results?buildId=9001" } }
+    },
+    {
+      "id": 9002,
+      "buildNumber": "20261006.4",
+      "queueTime": "2026-10-06T16:00:00Z",
+      "startTime": "2026-10-06T16:01:00Z",
+      "definition": { "id": 12, "name": "timesheet-api-ci" },
+      "project": { "id": "p1", "name": "Timesheets" },
+      "requestedFor": { "displayName": "Colleague", "id": "22222222-aaaa-bbbb-cccc-000000000002" }
+    }
+  ]
+}

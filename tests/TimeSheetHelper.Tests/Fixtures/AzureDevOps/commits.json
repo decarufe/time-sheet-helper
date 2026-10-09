@@ -1,0 +1,19 @@
+{
+  "count": 2,
+  "value": [
+    {
+      "commitId": "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "author": { "name": "Eric De Carufel", "email": "Eric@Contoso.com", "date": "2026-10-06T14:00:00Z" },
+      "committer": { "name": "Eric De Carufel", "email": "eric@contoso.com", "date": "2026-10-06T14:00:00Z" },
+      "comment": "Round to 15 minutes\n\nDetails",
+      "commentTruncated": false,
+      "url": "https://dev.azure.com/contoso/p1/_apis/git/repositories/r1/commits/c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "remoteUrl": "https://dev.azure.com/contoso/Timesheets/_git/timesheet-api/commit/c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00"
+    },
+    {
+      "commitId": "dead0000dead0000dead0000dead0000dead0000",
+      "author": { "name": "Colleague", "email": "colleague@contoso.com", "date": "2026-10-06T15:00:00Z" },
+      "comment": "Someone else"
+    }
+  ]
+}

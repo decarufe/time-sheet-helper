@@ -1,0 +1,25 @@
+[
+  {
+    "id": 9001,
+    "user": { "login": "edecarufel" },
+    "body": "Looks good, a few nits",
+    "state": "APPROVED",
+    "html_url": "https://github.com/acme/web/pull/7#pullrequestreview-9001",
+    "submitted_at": "2026-10-07T14:00:00Z",
+    "commit_id": "abc"
+  },
+  {
+    "id": 9002,
+    "user": { "login": "edecarufel" },
+    "body": "draft",
+    "state": "PENDING",
+    "html_url": "https://github.com/acme/web/pull/7#pullrequestreview-9002"
+  },
+  {
+    "id": 9003,
+    "user": { "login": "colleague" },
+    "state": "COMMENTED",
+    "html_url": "https://github.com/acme/web/pull/7#pullrequestreview-9003",
+    "submitted_at": "2026-10-07T13:00:00Z"
+  }
+]

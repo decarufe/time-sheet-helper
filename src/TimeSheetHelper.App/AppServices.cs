@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TimeSheetHelper.Collectors.DevOps;
 using TimeSheetHelper.Collectors.Microsoft365;
 using TimeSheetHelper.Collectors.Windows;
 using TimeSheetHelper.Forecast;
@@ -18,6 +19,7 @@ public static class AppServices
         services.AddTimeSheetStorage(DataPaths.DatabaseConnectionString);
         services.AddWindowsCollectors(configuration);
         services.AddMicrosoft365Collectors(configuration);
+        services.AddDevOpsCollectors(configuration);
         services.AddForecast(configuration);
         return services;
     }
