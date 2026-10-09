@@ -57,7 +57,7 @@ public class EvidenceWindowTests
     [InlineData(ActivitySource.Email, "sent", 10)]
     [InlineData(ActivitySource.Teams, "chat-message", 5)]
     [InlineData(ActivitySource.GitHub, "pr-review", 20)]
-    [InlineData(ActivitySource.AzureDevOps, "work-item", 10)]
+    [InlineData(ActivitySource.AzureDevOps, "workitem-update", 10)]
     [InlineData(ActivitySource.AzureDevOps, "unknown-kind", 5)]
     public void Default_windows_per_source_and_kind(ActivitySource source, string kind, int minutes)
     {

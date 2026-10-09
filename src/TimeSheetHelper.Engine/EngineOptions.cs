@@ -70,9 +70,14 @@ public sealed class EngineOptions
         ["LocalGit"] = TimeSpan.FromMinutes(15),
         ["GitHub.pr-review"] = TimeSpan.FromMinutes(20),
         ["AzureDevOps.pr-review"] = TimeSpan.FromMinutes(20),
-        ["GitHub.pull-request"] = TimeSpan.FromMinutes(15),
-        ["AzureDevOps.pull-request"] = TimeSpan.FromMinutes(15),
-        ["AzureDevOps.work-item"] = TimeSpan.FromMinutes(10),
+        // Kind names must match what the collectors emit (see Collectors.DevOps).
+        ["GitHub.pr-opened"] = TimeSpan.FromMinutes(15),
+        ["AzureDevOps.pr-opened"] = TimeSpan.FromMinutes(15),
+        ["GitHub.pr-comment"] = TimeSpan.FromMinutes(10),
+        ["AzureDevOps.pr-comment"] = TimeSpan.FromMinutes(10),
+        ["GitHub.pr-review-comment"] = TimeSpan.FromMinutes(10),
+        ["GitHub.issue-comment"] = TimeSpan.FromMinutes(10),
+        ["AzureDevOps.workitem-update"] = TimeSpan.FromMinutes(10),
         ["Email"] = TimeSpan.FromMinutes(10),
         ["Teams"] = TimeSpan.FromMinutes(5),
     };
