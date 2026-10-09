@@ -77,6 +77,223 @@ namespace TimeSheetHelper.Storage.Migrations
 
                     b.ToTable("Activities", (string)null);
                 });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Forecast.ForecastTask", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ClientName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastSeenUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectCode")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaskName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("ForecastTasks");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Rules.Rule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Field")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Operator")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ForecastTaskId");
+
+                    b.ToTable("Rules");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.ClassificationCacheEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Confidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SuggestedRuleJson")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Fingerprint")
+                        .IsUnique();
+
+                    b.ToTable("ClassificationCache");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.SlotOverride", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SlotStartUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SlotStartUtc")
+                        .IsUnique();
+
+                    b.ToTable("SlotOverrides");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetDraft", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SubmittedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("WeekStart")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WeekStart")
+                        .IsUnique();
+
+                    b.ToTable("TimesheetDrafts");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Hours")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TimesheetDraftId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ForecastTaskId");
+
+                    b.HasIndex("TimesheetDraftId");
+
+                    b.ToTable("TimesheetEntries");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Rules.Rule", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
+                        .WithMany()
+                        .HasForeignKey("ForecastTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetEntry", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
+                        .WithMany()
+                        .HasForeignKey("ForecastTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TimeSheetHelper.Core.Timesheets.TimesheetDraft", null)
+                        .WithMany("Entries")
+                        .HasForeignKey("TimesheetDraftId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetDraft", b =>
+                {
+                    b.Navigation("Entries");
+                });
 #pragma warning restore 612, 618
         }
     }
