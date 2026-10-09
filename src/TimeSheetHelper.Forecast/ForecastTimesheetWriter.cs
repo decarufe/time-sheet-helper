@@ -11,11 +11,10 @@ namespace TimeSheetHelper.Forecast;
 /// <summary>
 /// Types a <see cref="TimesheetDraft"/> into the Forecast weekly grid and reads it back.
 ///
-/// Persistence (UNVERIFIED): the Forecast help center describes typing hours directly into the grid cell of a task
-/// and documents no "Save" button, i.e. each cell is saved as a time registration when it loses focus. Therefore
-/// <see cref="ForecastSubmitMode.Fill"/> IS the submission of the hours. The read-back reloads the page so that only
-/// values actually persisted by Forecast are reported as OK. Sending the week for manager approval is a separate,
-/// explicit step (<see cref="SubmitForApprovalAsync"/>), never done here.
+/// Grid structure is VERIFIED (see <see cref="ForecastTimesheetDom"/>): each day cell is a button that opens a popup.
+/// The popup itself is UNVERIFIED (<see cref="ForecastSelectors.HourPopupInput"/>): <see cref="ForecastSubmitMode.Fill"/>
+/// stops with an explicit error if it cannot find the field, and the read-back reloads the page so that only values
+/// actually persisted by Forecast are reported as OK. Sending the week for approval is never done here.
 /// </summary>
 public sealed class ForecastTimesheetWriter(
     ForecastSession session,
@@ -43,6 +42,7 @@ public sealed class ForecastTimesheetWriter(
         }
 
         var page = await session.EnsureLoggedInAsync(cancellationToken);
+        await session.GotoAsync(page, session.Options.TimesheetsPath);
         if (!await NavigateToWeekAsync(page, draft.WeekStart, cancellationToken))
         {
             var shot = await ScreenshotAsync(page, dir, "semaine-introuvable", report);
@@ -73,7 +73,7 @@ public sealed class ForecastTimesheetWriter(
         }
 
         if (mode == ForecastSubmitMode.Fill && pending.Count > 0)
-            await VerifyAsync(page, draft.WeekStart, pending, dir, report, cancellationToken);
+            await VerifyAsync(page, draft.WeekStart, pending, report, cancellationToken);
 
         await ScreenshotAsync(page, dir, "apres", report);
         logger.LogInformation("{Summary}", report.Summary);
@@ -81,9 +81,8 @@ public sealed class ForecastTimesheetWriter(
     }
 
     /// <summary>
-    /// Sends the week for manager approval. TODO: implement once the "Submit" button and its confirmation dialog
-    /// have been verified with "forecast discover" (see <see cref="ForecastSelectors.SubmitForApprovalButton"/>).
-    /// Deliberately not implemented: submitting locks the week and cannot be undone by the user.
+    /// Sends the week for manager approval. Deliberately not implemented: the button was not found in the capture
+    /// and submitting locks the week.
     /// </summary>
     public Task SubmitForApprovalAsync(DateOnly weekStart, CancellationToken cancellationToken = default) =>
         throw new NotImplementedException(
@@ -102,80 +101,61 @@ public sealed class ForecastTimesheetWriter(
         IPage page, ForecastTask task, IReadOnlyList<ForecastPlannedCell> cells, ForecastSubmitMode mode,
         string dir, ForecastFillReport report, List<ForecastPlannedCell> pending)
     {
-        var grid = ForecastSelectors.WeekGrid(page);
-        var row = await FindRowAsync(grid, task);
-
-        if (row is null && mode == ForecastSubmitMode.DryRun)
+        var (row, headers) = await FindRowAsync(page, task);
+        if (row is null)
         {
+            var status = mode == ForecastSubmitMode.DryRun ? ForecastCellStatus.Planned : ForecastCellStatus.RowNotFound;
             foreach (var cell in cells)
-                report.Cells.Add(Result(cell, ForecastCellStatus.Planned, null, null, null,
-                    $"Ligne absente : serait ajoutée, puis « {Format(cell.Hours)} » saisi."));
+                report.Cells.Add(Result(cell, status, null, null, null,
+                    $"« {task.DisplayName} » n'est ni dans l'onglet Timesheets ni dans Find Tasks : ajoutez-la dans Forecast "
+                    + "(Add Timesheet Entry) ou en favori, puis relancez."));
             return;
         }
 
-        if (row is null)
-        {
-            if (await AddTaskRowAsync(page, task))
-                row = await FindRowAsync(ForecastSelectors.WeekGrid(page), task);
-
-            if (row is null)
-            {
-                var shot = await ScreenshotAsync(page, dir, $"ligne-introuvable-{task.Id}", report);
-                foreach (var cell in cells)
-                    report.Cells.Add(Result(cell, ForecastCellStatus.RowNotFound, null, null, shot,
-                        $"Ligne « {task.DisplayName} » introuvable et impossible à ajouter."));
-                return;
-            }
-        }
-
-        var days = ForecastWeekGrid.DayColumns(await ForecastSelectors.ColumnHeaders(grid).AllInnerTextsAsync(), report.WeekStart);
-        var inputs = ForecastSelectors.HourInputs(row);
-        var inputCount = await inputs.CountAsync();
-        if (inputCount != days.Count)
-            report.Warnings.Add($"« {task.DisplayName} » : {inputCount} champ(s) pour {days.Count} jour(s) affiché(s).");
-
-        var rowShot = Path.Combine(dir, $"ligne-{task.Id}.png");
+        var days = ForecastTimesheetDom.HeaderDates(headers, report.WeekStart);
         foreach (var cell in cells)
         {
             var index = days.ToList().IndexOf(cell.Date);
-            if (index < 0 || index >= inputCount)
+            if (index < 0 || index >= row.Hours.Count)
             {
                 report.Cells.Add(Result(cell, ForecastCellStatus.CellNotFound, null, null, null,
-                    $"Pas de cellule pour le {cell.Date:ddd d MMM} (jour masqué ou en-têtes non reconnus)."));
+                    $"Pas de cellule pour le {cell.Date:ddd d MMM} (en-têtes : {string.Join(", ", headers)})."));
                 continue;
             }
 
-            var input = inputs.Nth(index);
-            var current = await ReadCellAsync(input);
+            var current = row.Hours[index];
             if (mode == ForecastSubmitMode.DryRun)
             {
-                report.Cells.Add(Result(cell, ForecastCellStatus.Planned, Parse(current), current, rowShot,
+                report.Cells.Add(Result(cell, ForecastCellStatus.Planned, Parse(current), current, null,
                     $"Actuel « {current} » → à saisir « {Format(cell.Hours)} »."));
                 continue;
             }
 
-            await input.ClickAsync();
-            await input.PressAsync("Control+A");
-            await input.PressSequentiallyAsync(Format(cell.Hours), new() { Delay = 30 });
-            // Blur commits the cell (autosave).
-            await input.PressAsync("Tab");
+            await ForecastSelectors.DayCells(page, row.Index).Nth(index).ClickAsync();
+            var input = ForecastSelectors.HourPopupInput(page);
+            try
+            {
+                await input.First.WaitForAsync(new() { Timeout = 5000 });
+            }
+            catch (TimeoutException)
+            {
+                var shot = await ScreenshotAsync(page, dir, $"popup-inconnu-{task.Id}", report);
+                await page.Keyboard.PressAsync("Escape");
+                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, shot,
+                    "Le champ de saisie du popup n'a pas été reconnu : relancez « forecast discover » pour l'identifier."));
+                continue;
+            }
+
+            await input.First.FillAsync(Format(cell.Hours));
+            await input.First.PressAsync("Enter");
             await ForecastSession.WaitForIdleAsync(page, 5000);
             pending.Add(cell);
-        }
-
-        try
-        {
-            await row.ScreenshotAsync(new() { Path = rowShot });
-        }
-        catch (PlaywrightException)
-        {
-            // Screenshot is best effort.
         }
     }
 
     /// <summary>Reloads the week and compares every written cell (and the other days of those rows) with the plan.</summary>
     private async Task VerifyAsync(
-        IPage page, DateOnly weekStart, IReadOnlyList<ForecastPlannedCell> written, string dir,
+        IPage page, DateOnly weekStart, IReadOnlyList<ForecastPlannedCell> written,
         ForecastFillReport report, CancellationToken cancellationToken)
     {
         await page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
@@ -188,14 +168,10 @@ public sealed class ForecastTimesheetWriter(
             return;
         }
 
-        var grid = ForecastSelectors.WeekGrid(page);
-        var days = ForecastWeekGrid.DayColumns(await ForecastSelectors.ColumnHeaders(grid).AllInnerTextsAsync(), weekStart);
-
         foreach (var taskCells in written.GroupBy(c => c.Task.Id))
         {
             var task = taskCells.First().Task;
-            var row = await FindRowAsync(grid, task);
-            var shot = Path.Combine(dir, $"relecture-{task.Id}.png");
+            var (row, headers) = await FindRowAsync(page, task);
             if (row is null)
             {
                 foreach (var cell in taskCells)
@@ -203,21 +179,13 @@ public sealed class ForecastTimesheetWriter(
                 continue;
             }
 
-            try
-            {
-                await row.ScreenshotAsync(new() { Path = shot });
-            }
-            catch (PlaywrightException)
-            {
-                shot = null;
-            }
-
-            var inputs = ForecastSelectors.HourInputs(row);
+            var days = ForecastTimesheetDom.HeaderDates(headers, weekStart);
             var expectedByDate = taskCells.ToDictionary(c => c.Date, c => c.Hours);
-            for (var i = 0; i < days.Count; i++)
+            for (var i = 0; i < Math.Min(days.Count, row.Hours.Count); i++)
             {
-                var date = days[i];
-                var text = await ReadCellAsync(inputs.Nth(i));
+                if (days[i] is not { } date)
+                    continue;
+                var text = row.Hours[i];
                 var expected = expectedByDate.GetValueOrDefault(date);
                 var cell = new ForecastPlannedCell(task, date, expected);
                 var (status, actual, message) = ForecastFillPlanner.Compare(expected, text);
@@ -227,104 +195,56 @@ public sealed class ForecastTimesheetWriter(
                 if (expected == 0)
                     message = $"Valeur déjà présente dans Forecast et absente du brouillon (non effacée) : « {text} ».";
 
-                report.Cells.Add(Result(cell, status, actual, text, shot, message));
+                report.Cells.Add(Result(cell, status, actual, text, null, message));
             }
         }
     }
 
-    /// <summary>
-    /// Shows the week starting at <paramref name="weekStart"/>: "Today", then previous/next week clicks,
-    /// verified with the column headers (day of month).
-    /// </summary>
-    private async Task<bool> NavigateToWeekAsync(IPage page, DateOnly weekStart, CancellationToken cancellationToken)
+    /// <summary>The task row, looked up in the "Timesheets" tab first, then in "Find Tasks".</summary>
+    private static async Task<(ForecastGridRow? Row, IReadOnlyList<string> Headers)> FindRowAsync(IPage page, ForecastTask task)
+    {
+        IReadOnlyList<string> headers = [];
+        foreach (var tab in new[] { ForecastSelectors.TimesheetTab(page), ForecastSelectors.FindTasksTab(page) })
+        {
+            if (await ForecastSession.IsVisibleAsync(tab))
+            {
+                await tab.First.ClickAsync();
+                await ForecastSession.WaitForIdleAsync(page, 5000);
+            }
+            var snapshot = await ForecastTimesheetDom.ReadAsync(page);
+            headers = snapshot.DayHeaders;
+            if (ForecastTimesheetDom.FindRow(snapshot.Rows, task) is { } row)
+                return (row, headers);
+        }
+        return (null, headers);
+    }
+
+    /// <summary>Shows the week of <paramref name="weekStart"/> with the arrows, checked against the day headers.</summary>
+    private static async Task<bool> NavigateToWeekAsync(IPage page, DateOnly weekStart, CancellationToken cancellationToken)
     {
         var toggle = ForecastSelectors.WeekViewToggle(page);
         if (await ForecastSession.IsVisibleAsync(toggle))
+        {
             await toggle.First.ClickAsync();
-
-        if (await IsShowingAsync(page, weekStart))
-            return true;
-
-        var today = ForecastSelectors.TodayButton(page);
-        if (await ForecastSession.IsVisibleAsync(today))
-        {
-            await today.First.ClickAsync();
-            await ForecastSession.WaitForIdleAsync(page, 5000);
-        }
-
-        var currentMonday = ForecastDiscovery.MondayOf(DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime));
-        var weeks = (weekStart.DayNumber - currentMonday.DayNumber) / 7;
-        var button = weeks < 0 ? ForecastSelectors.PreviousWeekButton(page) : ForecastSelectors.NextWeekButton(page);
-
-        for (var i = 0; i < Math.Min(Math.Abs(weeks), MaxWeekNavigationClicks); i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await button.First.ClickAsync();
             await ForecastSession.WaitForIdleAsync(page, 3000);
         }
 
-        return await IsShowingAsync(page, weekStart);
-    }
-
-    private static async Task<bool> IsShowingAsync(IPage page, DateOnly weekStart)
-    {
-        var grid = ForecastSelectors.WeekGrid(page);
-        if (!await ForecastSession.IsVisibleAsync(grid))
-            return false;
-        var headers = await ForecastSelectors.ColumnHeaders(grid).AllInnerTextsAsync();
-        return ForecastWeekGrid.IsShowingWeek(headers, weekStart);
-    }
-
-    private static async Task<ILocator?> FindRowAsync(ILocator grid, ForecastTask task)
-    {
-        var rows = ForecastSelectors.Rows(grid);
-        var index = ForecastWeekGrid.FindRow(await rows.AllInnerTextsAsync(), task);
-        return index is null ? null : rows.Nth(index.Value);
-    }
-
-    /// <summary>Adds the task to the week through the task search (UNVERIFIED flow: "Add task" then pick the option).</summary>
-    private async Task<bool> AddTaskRowAsync(IPage page, ForecastTask task)
-    {
-        var addRow = ForecastSelectors.AddRowButton(page);
-        if (await ForecastSession.IsVisibleAsync(addRow))
-            await addRow.First.ClickAsync();
-
-        var search = ForecastSelectors.TaskSearchInput(page);
-        if (!await ForecastSession.IsVisibleAsync(search))
-            return false;
-
-        await search.First.FillAsync(task.TaskName);
-        await ForecastSession.WaitForIdleAsync(page, 5000);
-
-        var options = ForecastSelectors.SearchOptions(page);
-        var index = ForecastWeekGrid.FindRow(await options.AllInnerTextsAsync(), task);
-        if (index is null)
+        for (var i = 0; i <= MaxWeekNavigationClicks; i++)
         {
-            logger.LogWarning("Aucune option de recherche ne correspond à {Task}.", task.DisplayName);
-            await page.Keyboard.PressAsync("Escape");
-            return false;
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            var headers = (await ForecastTimesheetDom.ReadAsync(page)).DayHeaders;
+            if (ForecastTimesheetDom.IsShowingWeek(headers, weekStart))
+                return true;
 
-        await options.Nth(index.Value).ClickAsync();
-        await ForecastSession.WaitForIdleAsync(page, 5000);
-        return true;
-    }
+            var shown = ForecastTimesheetDom.HeaderDates(headers, weekStart).OfType<DateOnly>().ToList();
+            if (shown.Count == 0)
+                return false;
 
-    /// <summary>Text of an hour cell (input value or editable text), null when unreadable.</summary>
-    internal static async Task<string?> ReadCellAsync(ILocator cell)
-    {
-        try
-        {
-            var isInput = await cell.EvaluateAsync<bool>("e => e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement",
-                null, new() { Timeout = 2000 });
-            return isInput
-                ? await cell.InputValueAsync(new() { Timeout = 2000 })
-                : await cell.InnerTextAsync(new() { Timeout = 2000 });
+            var button = shown[0] > weekStart ? ForecastSelectors.PreviousWeekButton(page) : ForecastSelectors.NextWeekButton(page);
+            await button.First.ClickAsync();
+            await ForecastSession.WaitForIdleAsync(page, 3000);
         }
-        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
-        {
-            return null;
-        }
+        return false;
     }
 
     private string Format(decimal hours) => ForecastHours.Format(hours, session.Options.HourFormat);

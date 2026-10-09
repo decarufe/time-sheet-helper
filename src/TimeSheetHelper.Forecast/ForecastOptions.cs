@@ -38,9 +38,6 @@ public sealed class ForecastOptions
     /// <summary>Relative path of the timesheets page.</summary>
     public string TimesheetsPath { get; set; } = "/timesheets";
 
-    /// <summary>Relative path of the "My work" page (tasks assigned to the user).</summary>
-    public string MyWorkPath { get; set; } = "/my-work";
-
     internal string ResolvedUserDataDir => UserDataDir ?? Path.Combine(DataPaths.Root, "browser");
 
     internal string Url(string path) => BaseUrl.TrimEnd('/') + "/" + path.TrimStart('/');

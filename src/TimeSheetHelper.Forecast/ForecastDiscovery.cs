@@ -9,9 +9,9 @@ namespace TimeSheetHelper.Forecast;
 
 /// <summary>
 /// Diagnostic run used to fix <see cref="ForecastSelectors"/>: captures ARIA snapshots, HTML and screenshots of the
-/// timesheet page, the week grid, the "add time entry" dialog, the task search, the previous week and "My Work",
-/// plus how many elements each selector matches and the URLs of the network calls (no bodies).
-/// It never saves anything in Forecast: dialogs are closed with Cancel/Escape, the search box is only typed into.
+/// timesheet page and its tabs, the popup of a day cell, the "Add Timesheet Entry" form and its task search, and the
+/// previous week, plus how many elements each selector matches and the URLs of the network calls (no bodies).
+/// It never types nor saves anything in Forecast: popups and forms are only opened, then closed with Escape.
 /// </summary>
 public sealed class ForecastDiscovery(ForecastSession session, TimeProvider timeProvider, ILogger<ForecastDiscovery> logger)
 {
@@ -47,117 +47,89 @@ public sealed class ForecastDiscovery(ForecastSession session, TimeProvider time
             await Task.Delay(1500, cancellationToken);
             await CapturePageAsync(page, dir, "01-timesheets");
             await WriteProbesAsync(page, Path.Combine(dir, "01-timesheets.probes.txt"));
+            await WriteSnapshotAsync(page, dir, "01-timesheets", weekStart, cancellationToken);
         });
 
-        await StepAsync("02-week-grid", Note, async () =>
+        await StepAsync("02-tab-timesheets", Note, async () =>
         {
-            var grid = ForecastSelectors.WeekGrid(page);
-            if (!await ForecastSession.IsVisibleAsync(grid))
-            {
-                Note("Grille de la semaine introuvable avec ForecastSelectors.WeekGrid.");
-                return;
-            }
-
-            await CaptureElementAsync(grid, dir, "02-week-grid");
-            var headers = await ForecastSelectors.ColumnHeaders(grid).AllInnerTextsAsync();
-            var rows = await ForecastSelectors.Rows(grid).AllInnerTextsAsync();
-            var inputs = ForecastSelectors.HourInputs(grid);
-            var inputValues = new List<string>();
-            for (var i = 0; i < Math.Min(await inputs.CountAsync(), 100); i++)
-                inputValues.Add(await ForecastTimesheetWriter.ReadCellAsync(inputs.Nth(i)) ?? "<non lisible>");
-
-            await File.WriteAllTextAsync(Path.Combine(dir, "02-week-grid.json"), JsonSerializer.Serialize(new
-            {
-                weekStartAssumed = weekStart.ToString("yyyy-MM-dd"),
-                headers,
-                headerDates = ForecastWeekGrid.MapHeaders(headers, weekStart).Select(d => d?.ToString("yyyy-MM-dd")),
-                isShowingCurrentWeek = ForecastWeekGrid.IsShowingWeek(headers, weekStart),
-                rows,
-                inputCount = inputValues.Count,
-                inputValues,
-            }, Json), cancellationToken);
+            await ClickIfVisibleAsync(page, ForecastSelectors.TimesheetTab(page));
+            await CapturePageAsync(page, dir, "02-tab-timesheets");
+            await WriteSnapshotAsync(page, dir, "02-tab-timesheets", weekStart, cancellationToken);
         });
 
-        await StepAsync("03-add-time-entry-dialog", Note, async () =>
+        await StepAsync("03-tab-find-tasks", Note, async () =>
         {
-            var button = ForecastSelectors.AddTimeEntryButton(page);
-            if (!await ForecastSession.IsVisibleAsync(button))
-            {
-                Note("Bouton « Add Time Entry » introuvable.");
-                return;
-            }
-
-            await button.First.ClickAsync();
-            await Task.Delay(1000, cancellationToken);
-            await CapturePageAsync(page, dir, "03-add-time-entry-dialog");
-            var dialog = ForecastSelectors.Dialog(page);
-            if (await ForecastSession.IsVisibleAsync(dialog))
-                await CaptureElementAsync(dialog.First, dir, "03-add-time-entry-dialog.dialog");
-            await WriteProbesAsync(page, Path.Combine(dir, "03-add-time-entry-dialog.probes.txt"));
-            await CloseDialogAsync(page);
+            await ClickIfVisibleAsync(page, ForecastSelectors.FindTasksTab(page));
+            await CapturePageAsync(page, dir, "03-tab-find-tasks");
+            await WriteSnapshotAsync(page, dir, "03-tab-find-tasks", weekStart, cancellationToken);
         });
 
-        await StepAsync("04-add-task-search", Note, async () =>
+        await StepAsync("04-hour-popup", Note, async () =>
         {
-            var addRow = ForecastSelectors.AddRowButton(page);
-            if (await ForecastSession.IsVisibleAsync(addRow))
-                await addRow.First.ClickAsync();
-
-            var search = ForecastSelectors.TaskSearchInput(page);
-            if (!await ForecastSession.IsVisibleAsync(search))
+            // Opens the popup of one day cell to learn its structure, then Escape: nothing is typed.
+            var snapshot = await ForecastTimesheetDom.ReadAsync(page);
+            if (snapshot.Rows.Count == 0)
             {
-                Note("Champ de recherche de tâche introuvable.");
-                await CapturePageAsync(page, dir, "04-add-task-search");
+                Note("Aucune ligne dans l'onglet courant : popup non capturé.");
                 return;
             }
 
-            // Safety: never type into something that lives inside the hours grid.
-            if (await search.First.EvaluateAsync<bool>("e => !!e.closest('[role=grid], [role=table], table')"))
-            {
-                Note("Le champ de recherche trouvé est dans la grille : saisie annulée par sécurité.");
-                await CapturePageAsync(page, dir, "04-add-task-search");
-                return;
-            }
+            var row = snapshot.Rows[0];
+            var dates = ForecastTimesheetDom.HeaderDates(snapshot.DayHeaders, weekStart);
+            var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
+            var day = Math.Max(0, dates.ToList().IndexOf(today));
+            var before = row.Hours.ElementAtOrDefault(day);
 
-            await search.First.ClickAsync();
+            await ForecastSelectors.DayCells(page, row.Index).Nth(day).ClickAsync();
+            await Task.Delay(1200, cancellationToken);
+            await CapturePageAsync(page, dir, "04-hour-popup");
+            await WriteProbesAsync(page, Path.Combine(dir, "04-hour-popup.probes.txt"));
+            await File.WriteAllTextAsync(Path.Combine(dir, "04-hour-popup.focus.html"),
+                await page.EvaluateAsync<string>(FocusAndLayersScript), cancellationToken);
+
+            await page.Keyboard.PressAsync("Escape");
             await Task.Delay(800, cancellationToken);
-            await CapturePageAsync(page, dir, "04-add-task-search.focused");
-            // Typing into a search box does not create anything; it shows what the dropdown looks like.
-            await search.First.PressSequentiallyAsync("a", new() { Delay = 100 });
-            await Task.Delay(1500, cancellationToken);
-            await CapturePageAsync(page, dir, "04-add-task-search.typed");
-            await WriteProbesAsync(page, Path.Combine(dir, "04-add-task-search.probes.txt"));
-            await search.First.FillAsync("");
-            await CloseDialogAsync(page);
+            var after = (await ForecastTimesheetDom.ReadAsync(page)).Rows.FirstOrDefault(r => r.Index == row.Index)?.Hours.ElementAtOrDefault(day);
+            Note($"Popup : ligne « {row.TaskName} », colonne {day}, valeur avant « {before} », après Échap « {after} »"
+                + (before == after ? " (inchangée)." : " — ATTENTION : la valeur a changé, vérifiez dans Forecast."));
         });
 
-        await StepAsync("05-previous-week", Note, async () =>
+        await StepAsync("05-add-time-entry-dialog", Note, async () =>
         {
-            await session.GotoAsync(page, session.Options.TimesheetsPath);
-            var previous = ForecastSelectors.PreviousWeekButton(page);
-            if (!await ForecastSession.IsVisibleAsync(previous))
+            if (!await ClickIfVisibleAsync(page, ForecastSelectors.AddTimeEntryButton(page)))
+            {
+                Note("Bouton « Add Timesheet Entry » introuvable.");
+                return;
+            }
+
+            await CapturePageAsync(page, dir, "05-add-time-entry-dialog");
+            // The task search only lists options: opening it creates nothing.
+            if (await ClickIfVisibleAsync(page, ForecastSelectors.TimeEntrySearchButton(page)))
+            {
+                await CapturePageAsync(page, dir, "05-add-time-entry-search");
+                await WriteProbesAsync(page, Path.Combine(dir, "05-add-time-entry-search.probes.txt"));
+                await File.WriteAllTextAsync(Path.Combine(dir, "05-add-time-entry-search.focus.html"),
+                    await page.EvaluateAsync<string>(FocusAndLayersScript), cancellationToken);
+                await page.Keyboard.PressAsync("Escape");
+                await Task.Delay(500, cancellationToken);
+            }
+
+            await page.Keyboard.PressAsync("Escape");
+            await Task.Delay(800, cancellationToken);
+            if (await ForecastSession.IsVisibleAsync(ForecastSelectors.TimeEntryForm(page)))
+                Note("Le formulaire est toujours ouvert après Échap : fermez-le sans enregistrer.");
+        });
+
+        await StepAsync("06-previous-week", Note, async () =>
+        {
+            if (!await ClickIfVisibleAsync(page, ForecastSelectors.PreviousWeekButton(page)))
             {
                 Note("Bouton « semaine précédente » introuvable.");
                 return;
             }
 
-            await previous.First.ClickAsync();
-            await ForecastSession.WaitForIdleAsync(page, 5000);
-            await CapturePageAsync(page, dir, "05-previous-week");
-            var headers = await ForecastSelectors.ColumnHeaders(ForecastSelectors.WeekGrid(page)).AllInnerTextsAsync();
-            await File.WriteAllTextAsync(Path.Combine(dir, "05-previous-week.json"), JsonSerializer.Serialize(new
-            {
-                url = page.Url,
-                headers,
-                isShowingPreviousWeek = ForecastWeekGrid.IsShowingWeek(headers, weekStart.AddDays(-7)),
-            }, Json), cancellationToken);
-        });
-
-        await StepAsync("06-my-work", Note, async () =>
-        {
-            await session.GotoAsync(page, session.Options.MyWorkPath);
-            await Task.Delay(1500, cancellationToken);
-            await CapturePageAsync(page, dir, "06-my-work");
+            await WriteSnapshotAsync(page, dir, "06-previous-week", weekStart.AddDays(-7), cancellationToken);
+            await ClickIfVisibleAsync(page, ForecastSelectors.NextWeekButton(page));
         });
 
         await File.WriteAllLinesAsync(Path.Combine(dir, "network.txt"), network, cancellationToken);
@@ -190,13 +162,6 @@ public sealed class ForecastDiscovery(ForecastSession session, TimeProvider time
         await page.ScreenshotAsync(new() { Path = Path.Combine(dir, $"{name}.png"), FullPage = true });
     }
 
-    private static async Task CaptureElementAsync(ILocator element, string dir, string name)
-    {
-        await File.WriteAllTextAsync(Path.Combine(dir, $"{name}.aria.yml"), await element.AriaSnapshotAsync());
-        await File.WriteAllTextAsync(Path.Combine(dir, $"{name}.html"), await element.EvaluateAsync<string>("e => e.outerHTML"));
-        await element.ScreenshotAsync(new() { Path = Path.Combine(dir, $"{name}.png") });
-    }
-
     /// <summary>For every selector: match count, visibility and a short excerpt of the first matches.</summary>
     private static async Task WriteProbesAsync(IPage page, string path)
     {
@@ -226,18 +191,36 @@ public sealed class ForecastDiscovery(ForecastSession session, TimeProvider time
         await File.WriteAllTextAsync(path, sb.ToString());
     }
 
-    private static async Task CloseDialogAsync(IPage page)
-    {
-        var dialog = ForecastSelectors.Dialog(page);
-        if (await ForecastSession.IsVisibleAsync(dialog))
-        {
-            var cancel = ForecastSelectors.DialogCancelButton(dialog.First);
-            if (await ForecastSession.IsVisibleAsync(cancel))
-                await cancel.First.ClickAsync();
+    /// <summary>Focused element and popover layers (where Forecast renders popups), with their full HTML.</summary>
+    private const string FocusAndLayersScript = """
+        () => {
+          const active = document.activeElement;
+          const layers = [...document.querySelectorAll('[data-radix-popper-content-wrapper], [role=dialog], [role=listbox], [role=menu]')];
+          return '<!-- activeElement -->\n' + (active ? active.outerHTML : '(aucun)')
+            + '\n\n<!-- ancestors of activeElement -->\n' + (() => { const a = []; let e = active; for (let i = 0; e && i < 6; i++, e = e.parentElement) a.push(e.tagName + (e.id ? '#' + e.id : '') + (e.dataset?.cy ? '[data-cy=' + e.dataset.cy + ']' : '')); return a.join(' < '); })()
+            + '\n\n<!-- layers -->\n' + layers.map(l => l.outerHTML).join('\n\n');
         }
+        """;
 
-        await page.Keyboard.PressAsync("Escape");
-        await Task.Delay(500);
+    private static async Task<bool> ClickIfVisibleAsync(IPage page, ILocator locator)
+    {
+        if (!await ForecastSession.IsVisibleAsync(locator))
+            return false;
+        await locator.First.ClickAsync();
+        await ForecastSession.WaitForIdleAsync(page, 5000);
+        await Task.Delay(800);
+        return true;
+    }
+
+    private static async Task WriteSnapshotAsync(IPage page, string dir, string name, DateOnly near, CancellationToken cancellationToken)
+    {
+        var snapshot = await ForecastTimesheetDom.ReadAsync(page);
+        await File.WriteAllTextAsync(Path.Combine(dir, $"{name}.grid.json"), JsonSerializer.Serialize(new
+        {
+            snapshot.DayHeaders,
+            headerDates = ForecastTimesheetDom.HeaderDates(snapshot.DayHeaders, near).Select(d => d?.ToString("yyyy-MM-dd")),
+            snapshot.Rows,
+        }, Json), cancellationToken);
     }
 
     private static string Truncate(string text, int max)
@@ -257,14 +240,15 @@ public sealed class ForecastDiscovery(ForecastSession session, TimeProvider time
         Rien n'a été enregistré dans Forecast pendant cette capture.
 
         Fichiers par étape :
-          *.aria.yml    arbre d'accessibilité (rôles, noms) : la source principale pour écrire des GetByRole/GetByText
-          *.html        HTML complet (page) ou outerHTML (élément)
+          *.aria.yml    arbre d'accessibilité (rôles, noms)
+          *.html        HTML complet de la page
           *.png         capture d'écran
           *.url.txt     URL et titre de la page
           *.probes.txt  nombre d'éléments trouvés par chaque sélecteur actuel + extrait HTML
-          02-week-grid.json      en-têtes, lignes et valeurs des cellules de la grille, dates déduites
-          05-previous-week.json  en-têtes après « semaine précédente » (vérifie la navigation)
-          network.txt   URL des appels réseau (sans contenu) : utile si l'API GraphQL de Forecast est exploitable
+          *.grid.json   lignes de la grille telles que lues par l'outil (tâches, codes, heures par jour)
+          04-hour-popup.*        popup ouvert en cliquant une cellule d'heures (fermé par Échap, rien saisi)
+          *.focus.html  élément actif et couches de popup (structure du champ de saisie)
+        network.txt   URL des appels réseau (sans contenu) : utile si l'API GraphQL de Forecast est exploitable
 
         Attention : ces fichiers contiennent vos données Forecast (projets, heures). Ne les partagez qu'en connaissance de cause.
 
