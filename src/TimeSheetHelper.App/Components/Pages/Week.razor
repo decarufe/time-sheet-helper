@@ -1,7 +1,580 @@
 @page "/"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Engine
+@using TimeSheetHelper.Engine.Allocation
+@using TimeSheetHelper.Engine.Learning
+@using TimeSheetHelper.Engine.Proposals
+@using TimeSheetHelper.Storage
+@inject WeekService Weeks
+@inject SlotAllocator Allocator
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject NavigationManager Nav
+@inject ILogger<Week> Logger
 
 <PageTitle>Semaine — Time Sheet Helper</PageTitle>
 
-<h1>Semaine</h1>
+<div class="week">
+    <header class="toolbar">
+        <h1>@WeekTitle(monday)</h1>
+        <nav class="week-nav" aria-label="Navigation par semaine">
+            <button type="button" @onclick="() => GoToWeek(monday.AddDays(-7))" aria-label="Semaine précédente">‹</button>
+            <button type="button" @onclick="() => GoToWeek(Today)" disabled="@(monday == TimesheetUi.WeekStartOf(Today))">Cette semaine</button>
+            <button type="button" @onclick="() => GoToWeek(monday.AddDays(7))" aria-label="Semaine suivante">›</button>
+        </nav>
+        <span class="spacer"></span>
+        @if (!IsSubmitted)
+        {
+            <button type="button" @onclick="RebuildAsync" disabled="@busy" title="Recalcule la semaine et met à jour le brouillon à soumettre">Recalculer</button>
+        }
+        <a class="button primary" href="soumettre">Soumettre…</a>
+    </header>
 
-<p class="muted">À venir.</p>
+    @if (message is not null)
+    {
+        <p class="notice @(messageIsError ? "error" : "info")" role="status">
+            @message
+            <button type="button" class="link" @onclick="() => message = null" aria-label="Masquer le message">✕</button>
+        </p>
+    }
+
+    @if (proposal is null)
+    {
+        <p class="muted">@(loadError ?? "Chargement de la semaine…")</p>
+    }
+    else
+    {
+        @if (IsSubmitted)
+        {
+            <p class="notice submitted">
+                Feuille de temps soumise le @submittedUtc!.Value.ToLocalTime().ToString("d MMMM yyyy 'à' HH:mm", TimesheetUi.French) — affichage en lecture seule.
+            </p>
+        }
+
+        @if (proposal.Tasks.Count == 0)
+        {
+            <div class="empty">
+                <strong>Aucune tâche Forecast : synchronisez-les depuis la page <a href="sources">Sources</a>.</strong>
+                <p class="muted">Les heures ne peuvent être attribuées qu'à des tâches Forecast connues.</p>
+            </div>
+        }
+
+        <div class="grid-wrap">
+            <table class="grid">
+                <thead>
+                    <tr>
+                        <th scope="col" class="task-col">Tâche</th>
+                        @foreach (var day in days)
+                        {
+                            <th scope="col" class="num @(IsToday(day) ? "today" : null)">
+                                <a href="@DayHref(day)" title="Voir la journée du @day.ToString("dddd d MMMM", TimesheetUi.French)">
+                                    <span class="dow">@day.ToString("ddd", TimesheetUi.French)</span>
+                                    <span class="dom">@day.Day</span>
+                                </a>
+                            </th>
+                        }
+                        <th scope="col" class="num total-col">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (rows.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="9" class="empty-row">
+                                @if (IsSubmitted)
+                                {
+                                    <span>Aucune heure dans la feuille soumise.</span>
+                                }
+                                else if (!HasActivity)
+                                {
+                                    <span>Aucune activité enregistrée pour cette semaine.</span>
+                                }
+                                else
+                                {
+                                    <span>Aucune heure classée pour l'instant : associez l'activité non classée ci-dessous à des tâches.</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @foreach (var row in rows)
+                    {
+                        <tr style="@TimesheetUi.TaskStyle(row.TaskId)">
+                            <th scope="row" class="task-col">
+                                <span class="task-label">
+                                    <span class="swatch" aria-hidden="true"></span>
+                                    <span class="task-name">@row.Name</span>
+                                </span>
+                            </th>
+                            @foreach (var day in days)
+                            {
+                                var cell = row.Cells.GetValueOrDefault(day);
+                                <td class="num cell @CellClass(cell) @(IsToday(day) ? "today" : null)">
+                                    @if (cell is { Hours: > 0 })
+                                    {
+                                        <a href="@DayHref(day)" title="@CellTitle(row, day, cell)">
+                                            @TimesheetUi.Hours(cell.Hours)
+                                            @if (cell.Confidence is < TimesheetUi.LowConfidence)
+                                            {
+                                                <span class="flag-icon" aria-hidden="true">!</span>
+                                            }
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="zero" aria-label="0">·</span>
+                                    }
+                                </td>
+                            }
+                            <td class="num total-col">@TimesheetUi.Hours(row.Total)</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    @if (!IsSubmitted && proposal.UnclassifiedHours > 0)
+                    {
+                        <tr class="unclassified-row">
+                            <th scope="row" class="task-col">Non classé</th>
+                            @foreach (var day in days)
+                            {
+                                var hours = DayOf(day)?.UnclassifiedHours ?? 0;
+                                <td class="num @(IsToday(day) ? "today" : null)">
+                                    @if (hours > 0)
+                                    {
+                                        <a href="@DayHref(day)" title="Activité sans tâche : à classer">@TimesheetUi.Hours(hours)</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="zero">·</span>
+                                    }
+                                </td>
+                            }
+                            <td class="num total-col">@TimesheetUi.Hours(proposal.UnclassifiedHours)</td>
+                        </tr>
+                    }
+                    <tr class="totals-row">
+                        <th scope="row" class="task-col">Total</th>
+                        @foreach (var day in days)
+                        {
+                            var (total, target, flag) = DayTotals(day);
+                            <td class="num day-total @FlagClass(flag) @(IsToday(day) ? "today" : null)" title="@FlagTitle(total, target, flag)">
+                                <span>@TimesheetUi.Hours(total)</span>
+                                @if (flag != DayFlag.Ok)
+                                {
+                                    <span class="flag-icon" aria-hidden="true">@(flag == DayFlag.UnderTarget ? "▼" : "▲")</span>
+                                    <span class="visually-hidden">@FlagTitle(total, target, flag)</span>
+                                }
+                            </td>
+                        }
+                        <td class="num total-col @FlagClass(WeekFlag)">@TimesheetUi.Hours(WeekTotal)</td>
+                    </tr>
+                    <tr class="target-row">
+                        <th scope="row" class="task-col">Objectif</th>
+                        @foreach (var day in days)
+                        {
+                            <td class="num @(IsToday(day) ? "today" : null)">@TimesheetUi.Hours(DayTotals(day).Target)</td>
+                        }
+                        <td class="num total-col">@TimesheetUi.Hours(WeekTarget)</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <ul class="legend" aria-label="Légende">
+            <li><span class="key conf-mid"></span>Confiance moyenne (moins de @TimesheetUi.Percent(TimesheetUi.MediumConfidence))</li>
+            <li><span class="key conf-low"></span>Confiance faible (moins de @TimesheetUi.Percent(TimesheetUi.LowConfidence)) : à vérifier</li>
+            <li><span class="key under">▼</span>Sous l'objectif</li>
+            <li><span class="key over">▲</span>Au-dessus de l'objectif</li>
+        </ul>
+
+        @if (!IsSubmitted)
+        {
+            <section class="unclassified" aria-labelledby="unclassified-title">
+                <h2 id="unclassified-title">
+                    Activité non classée
+                    @if (proposal.UnclassifiedGroups.Count > 0)
+                    {
+                        <span class="muted">— @TimesheetUi.Hours(proposal.UnclassifiedHours) h à attribuer</span>
+                    }
+                </h2>
+
+                @if (proposal.UnclassifiedGroups.Count == 0)
+                {
+                    <p class="muted">@(HasActivity ? "Toute l'activité de la semaine est classée." : "Aucune activité à classer.")</p>
+                }
+
+                @foreach (var group in proposal.UnclassifiedGroups)
+                {
+                    var suggestedTask = group.Suggestion?.TaskId is { } sid ? proposal.Tasks.GetValueOrDefault(sid) : null;
+                    <article class="group">
+                        <div class="group-head">
+                            <span class="kind">@TimesheetUi.GroupKindLabel(group.Kind)</span>
+                            <strong class="group-value">@TimesheetUi.GroupValue(group.Key)</strong>
+                            <span class="hours">@TimesheetUi.Hours(group.Hours) h</span>
+                        </div>
+
+                        <dl class="meta">
+                            @if (group.Metadata.Sources.Count > 0)
+                            {
+                                <dt>Sources</dt>
+                                <dd>@string.Join(", ", group.Metadata.Sources.Select(TimesheetUi.SourceLabel))</dd>
+                            }
+                            @if (group.Metadata.SampleTitles.Count > 0)
+                            {
+                                <dt>Titres</dt>
+                                <dd>@Samples(group.Metadata.SampleTitles)</dd>
+                            }
+                            @if (group.Metadata.SamplePaths.Count > 0)
+                            {
+                                <dt>Chemins</dt>
+                                <dd><code>@Samples(group.Metadata.SamplePaths)</code></dd>
+                            }
+                            @if (group.Metadata.SampleSubjects.Count > 0)
+                            {
+                                <dt>Sujets</dt>
+                                <dd>@Samples(group.Metadata.SampleSubjects)</dd>
+                            }
+                        </dl>
+
+                        <div class="suggestion">
+                            @if (suggestedTask is not null)
+                            {
+                                <span class="label">Suggestion de Claude :</span>
+                                <span class="task-chip" style="@TimesheetUi.TaskStyle(suggestedTask.Id)">
+                                    <span class="swatch" aria-hidden="true"></span>@suggestedTask.DisplayName
+                                </span>
+                                <span class="confidence @TimesheetUi.ConfidenceClass(group.Suggestion!.Confidence)">@TimesheetUi.Percent(group.Suggestion.Confidence)</span>
+                                @if (!string.IsNullOrWhiteSpace(group.Suggestion.Reason))
+                                {
+                                    <p class="reason">@group.Suggestion.Reason</p>
+                                }
+                            }
+                            else if (group.Suggestion is not null)
+                            {
+                                <span class="muted">Claude n'a trouvé aucune tâche correspondante.</span>
+                                @if (!string.IsNullOrWhiteSpace(group.Suggestion.Reason))
+                                {
+                                    <p class="reason">@group.Suggestion.Reason</p>
+                                }
+                            }
+                            else
+                            {
+                                <span class="muted">Aucune suggestion.</span>
+                            }
+                        </div>
+
+                        @if (pendingRule is { } pending && pending.GroupKey == group.Key)
+                        {
+                            <div class="confirm" role="alertdialog" aria-label="Confirmer la règle">
+                                <p>
+                                    Toujours associer <strong>« @pending.Proposal.Name »</strong> à
+                                    <strong>@TaskName(pending.TaskId)</strong> ?
+                                </p>
+                                <div class="actions">
+                                    <button type="button" class="primary" @onclick="ConfirmRuleAsync" disabled="@busy">Confirmer</button>
+                                    <button type="button" @onclick="() => pendingRule = null" disabled="@busy">Annuler</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="actions">
+                                @if (suggestedTask is not null)
+                                {
+                                    <button type="button" class="primary" @onclick="() => AcceptAsync(group)" disabled="@busy">Accepter</button>
+                                }
+                                <button type="button" @onclick="() => pickerGroupKey = group.Key" disabled="@busy">Choisir une tâche…</button>
+                            </div>
+                        }
+                    </article>
+                }
+            </section>
+        }
+    }
+</div>
+
+@if (pickerGroupKey is not null)
+{
+    <TaskPicker Title="Associer à une tâche"
+                Subtitle="@TimesheetUi.GroupLabel(pickerGroupKey)"
+                SelectedTaskId="@SuggestedTaskId(pickerGroupKey)"
+                OnSelected="OnGroupTaskPickedAsync"
+                OnCancel="() => pickerGroupKey = null" />
+}
+
+@code {
+    private sealed record Cell(decimal Hours, double? Confidence);
+
+    private sealed record Row(int TaskId, string Name, IReadOnlyDictionary<DateOnly, Cell> Cells, decimal Total);
+
+    private sealed record PendingRule(string GroupKey, int TaskId, RuleProposal Proposal);
+
+    [SupplyParameterFromQuery(Name = "semaine")]
+    public string? WeekParameter { get; set; }
+
+    private DateOnly monday = TimesheetUi.WeekStartOf(DateOnly.FromDateTime(DateTime.Today));
+    private List<DateOnly> days = [];
+    private WeekProposal? proposal;
+    private DateTime? submittedUtc;
+    private Dictionary<DateOnly, decimal> submittedTotals = [];
+    private List<Row> rows = [];
+    private string? loadError;
+    private string? message;
+    private bool messageIsError;
+    private bool busy;
+    private string? pickerGroupKey;
+    private PendingRule? pendingRule;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private bool IsSubmitted => submittedUtc is not null;
+
+    private bool HasActivity => proposal is not null && (proposal.TotalHours > 0 || proposal.UnclassifiedHours > 0);
+
+    private decimal WeekTotal => days.Sum(d => DayTotals(d).Total);
+
+    private decimal WeekTarget => days.Sum(d => DayTotals(d).Target);
+
+    private DayFlag WeekFlag => WeekTotal < WeekTarget ? DayFlag.UnderTarget : WeekTotal > WeekTarget ? DayFlag.OverTarget : DayFlag.Ok;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var requested = TimesheetUi.TryParseIsoDate(WeekParameter, out var day) ? day : Today;
+        var week = TimesheetUi.WeekStartOf(requested);
+        if (proposal is not null && week == monday)
+            return;
+
+        monday = week;
+        pickerGroupKey = null;
+        pendingRule = null;
+        message = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        days = Enumerable.Range(0, 7).Select(monday.AddDays).ToList();
+        try
+        {
+            loadError = null;
+            var week = await Weeks.GetWeekAsync(monday);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var draft = await db.TimesheetDrafts.AsNoTracking()
+                .Include(d => d.Entries)
+                .FirstOrDefaultAsync(d => d.WeekStart == monday);
+
+            submittedUtc = draft?.SubmittedUtc;
+            rows = submittedUtc is not null ? RowsFromDraft(draft!, week) : RowsFromProposal(week);
+            submittedTotals = submittedUtc is not null
+                ? draft!.Entries.GroupBy(e => e.Date).ToDictionary(g => g.Key, g => g.Sum(e => e.Hours))
+                : [];
+            proposal = week;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading week {Monday} failed", monday);
+            proposal = null;
+            loadError = $"Impossible de charger la semaine : {ex.Message}";
+        }
+    }
+
+    private List<Row> RowsFromProposal(WeekProposal week)
+    {
+        var hours = week.Days
+            .SelectMany(d => d.Tasks.Select(t => (d.Date, t.ForecastTaskId, t.Hours)))
+            .Where(x => x.Hours > 0)
+            .ToList();
+
+        return hours
+            .GroupBy(x => x.ForecastTaskId)
+            .Select(g =>
+            {
+                var cells = g.ToDictionary(x => x.Date, x => new Cell(x.Hours, AverageConfidence(week, x.Date, g.Key)));
+                return new Row(g.Key, TaskName(week, g.Key), cells, g.Sum(x => x.Hours));
+            })
+            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private static List<Row> RowsFromDraft(Core.Timesheets.TimesheetDraft draft, WeekProposal week) =>
+        draft.Entries
+            .Where(e => e.Hours > 0)
+            .GroupBy(e => e.ForecastTaskId)
+            .Select(g => new Row(
+                g.Key,
+                TaskName(week, g.Key),
+                g.GroupBy(e => e.Date).ToDictionary(d => d.Key, d => new Cell(d.Sum(e => e.Hours), null)),
+                g.Sum(e => e.Hours)))
+            .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    private static double? AverageConfidence(WeekProposal week, DateOnly day, int taskId)
+    {
+        if (!week.Slots.TryGetValue(day, out var slots))
+            return null;
+        var mine = slots.Where(s => s.IsClassified && s.TaskId == taskId).ToList();
+        return mine.Count == 0 ? null : mine.Average(s => s.Confidence);
+    }
+
+    private static string TaskName(WeekProposal week, int taskId) =>
+        week.Tasks.TryGetValue(taskId, out var task) ? task.DisplayName : $"Tâche #{taskId}";
+
+    private string TaskName(int taskId) => proposal is null ? $"Tâche #{taskId}" : TaskName(proposal, taskId);
+
+    private DayProposal? DayOf(DateOnly day) => proposal?.Days.FirstOrDefault(d => d.Date == day);
+
+    private (decimal Total, decimal Target, DayFlag Flag) DayTotals(DateOnly day)
+    {
+        var proposed = DayOf(day);
+        var target = proposed?.TargetHours ?? 0;
+        if (!IsSubmitted)
+            return (proposed?.TotalHours ?? 0, target, proposed?.Flag ?? DayFlag.Ok);
+
+        var total = submittedTotals.GetValueOrDefault(day);
+        return (total, target, total < target ? DayFlag.UnderTarget : total > target ? DayFlag.OverTarget : DayFlag.Ok);
+    }
+
+    private int? SuggestedTaskId(string groupKey) =>
+        proposal?.UnclassifiedGroups.FirstOrDefault(g => g.Key == groupKey)?.Suggestion?.TaskId;
+
+    private SlotRange WeekRange() =>
+        new(Allocator.DayBounds(monday).StartUtc, Allocator.DayBounds(monday.AddDays(6)).EndUtc);
+
+    private void GoToWeek(DateOnly day) =>
+        Nav.NavigateTo(TimesheetUi.WeekStartOf(day) == TimesheetUi.WeekStartOf(Today)
+            ? Nav.GetUriWithQueryParameter("semaine", (string?)null)
+            : Nav.GetUriWithQueryParameter("semaine", TimesheetUi.IsoDate(TimesheetUi.WeekStartOf(day))));
+
+    private async Task RebuildAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var result = await Weeks.RebuildDraftAsync(monday);
+            await LoadAsync();
+            Inform(result.AlreadySubmitted
+                ? "Cette semaine a déjà été soumise : le brouillon n'a pas été modifié."
+                : $"Brouillon mis à jour : {TimesheetUi.Hours(result.Draft.Entries.Sum(e => e.Hours))} h réparties sur {result.Draft.Entries.Count} entrées.");
+        });
+    }
+
+    private async Task AcceptAsync(GroupProposal group)
+    {
+        await RunAsync(async () =>
+        {
+            var rule = await Weeks.AcceptSuggestionAsync(group.Key, monday);
+            if (rule is null)
+            {
+                Fail("Cette suggestion n'est plus disponible. Choisissez une tâche manuellement.");
+                return;
+            }
+            await LoadAsync();
+            Inform($"Règle créée : « {rule.Name} » → {TaskName(rule.ForecastTaskId)}.");
+        });
+    }
+
+    private async Task OnGroupTaskPickedAsync(int taskId)
+    {
+        var groupKey = pickerGroupKey;
+        pickerGroupKey = null;
+        if (groupKey is null)
+            return;
+
+        await RunAsync(async () =>
+        {
+            var preview = await Weeks.ProposeRuleFromCorrectionAsync(new CorrectionTarget(WeekRange(), groupKey), taskId);
+            if (preview is null)
+            {
+                Fail("Aucune règle stable n'a pu être déduite de ce groupe. Assignez les créneaux depuis la vue Jour.");
+                return;
+            }
+            pendingRule = new PendingRule(groupKey, taskId, preview);
+        });
+    }
+
+    private async Task ConfirmRuleAsync()
+    {
+        if (pendingRule is not { } pending)
+            return;
+
+        await RunAsync(async () =>
+        {
+            var rule = await Weeks.CreateRuleFromCorrectionAsync(new CorrectionTarget(WeekRange(), pending.GroupKey), pending.TaskId);
+            pendingRule = null;
+            if (rule is null)
+            {
+                Fail("La règle n'a pas pu être créée : aucune valeur stable trouvée.");
+                return;
+            }
+            await LoadAsync();
+            Inform($"Règle créée : « {rule.Name} » → {TaskName(rule.ForecastTaskId)}.");
+        });
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (busy)
+            return;
+        busy = true;
+        message = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Week action failed");
+            Fail($"L'opération a échoué : {ex.Message}");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Inform(string text) => (message, messageIsError) = (text, false);
+
+    private void Fail(string text) => (message, messageIsError) = (text, true);
+
+    private static string DayHref(DateOnly day) => $"jour/{TimesheetUi.IsoDate(day)}";
+
+    private static bool IsToday(DateOnly day) => day == Today;
+
+    private string CellClass(Cell? cell) =>
+        IsSubmitted || cell?.Confidence is not { } confidence ? "" : TimesheetUi.ConfidenceClass(confidence);
+
+    private string CellTitle(Row row, DateOnly day, Cell cell)
+    {
+        var text = $"{row.Name} — {day.ToString("dddd d MMMM", TimesheetUi.French)} : {TimesheetUi.Hours(cell.Hours)} h";
+        return cell.Confidence is { } c && !IsSubmitted ? $"{text} (confiance {TimesheetUi.Percent(c)})" : text;
+    }
+
+    private static string FlagClass(DayFlag flag) => flag switch
+    {
+        DayFlag.UnderTarget => "under",
+        DayFlag.OverTarget => "over",
+        _ => "ok",
+    };
+
+    private static string FlagTitle(decimal total, decimal target, DayFlag flag) => flag switch
+    {
+        DayFlag.UnderTarget => $"Il manque {TimesheetUi.Hours(target - total)} h pour atteindre l'objectif de {TimesheetUi.Hours(target)} h",
+        DayFlag.OverTarget => $"{TimesheetUi.Hours(total - target)} h au-dessus de l'objectif de {TimesheetUi.Hours(target)} h",
+        _ => $"Objectif de {TimesheetUi.Hours(target)} h atteint",
+    };
+
+    private static string Samples(IReadOnlyList<string> values) =>
+        values.Count <= 3 ? string.Join(" · ", values) : $"{string.Join(" · ", values.Take(3))} · +{values.Count - 3}";
+
+    private static string WeekTitle(DateOnly monday)
+    {
+        var sunday = monday.AddDays(6);
+        var f = TimesheetUi.French;
+        if (monday.Year != sunday.Year)
+            return $"Semaine du {monday.ToString("d MMMM yyyy", f)} au {sunday.ToString("d MMMM yyyy", f)}";
+        if (monday.Month != sunday.Month)
+            return $"Semaine du {monday.ToString("d MMMM", f)} au {sunday.ToString("d MMMM yyyy", f)}";
+        return $"Semaine du {monday.Day} au {sunday.ToString("d MMMM yyyy", f)}";
+    }
+}

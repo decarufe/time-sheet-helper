@@ -1,0 +1,141 @@
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Storage
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+
+<div class="picker-backdrop" @onclick="CancelAsync"></div>
+<div class="picker" role="dialog" aria-modal="true" aria-labelledby="@titleId" @onkeydown="OnKeyDownAsync">
+    <header>
+        <h2 id="@titleId">@Title</h2>
+        <button type="button" class="close" @onclick="CancelAsync" aria-label="Fermer">✕</button>
+    </header>
+    @if (!string.IsNullOrEmpty(Subtitle))
+    {
+        <p class="subtitle">@Subtitle</p>
+    }
+
+    <input @ref="searchInput" type="search" class="search" placeholder="Rechercher une tâche, un projet ou un client…"
+           aria-label="Rechercher une tâche" @onkeydown="OnSearchKeyDownAsync" @bind="query" @bind:event="oninput" @bind:after="StateHasChanged" />
+
+    <div class="list">
+        @if (tasks is null)
+        {
+            <p class="muted">Chargement…</p>
+        }
+        else if (tasks.Count == 0)
+        {
+            <p class="muted">Aucune tâche Forecast active. Synchronisez-les depuis la page <a href="sources">Sources</a>.</p>
+        }
+        else
+        {
+            var groups = Filtered()
+                .GroupBy(t => (Client: t.ClientName ?? t.ProjectName, t.ProjectName))
+                .OrderBy(g => g.Key.Client, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(g => g.Key.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            if (groups.Count == 0)
+            {
+                <p class="muted">Aucune tâche ne correspond à « @query ».</p>
+            }
+            @foreach (var group in groups)
+            {
+                <section>
+                    <h3>
+                        @group.Key.Client
+                        @if (!string.Equals(group.Key.Client, group.Key.ProjectName, StringComparison.Ordinal))
+                        {
+                            <span class="project">· @group.Key.ProjectName</span>
+                        }
+                    </h3>
+                    <ul>
+                        @foreach (var task in group.OrderBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase))
+                        {
+                            <li>
+                                <button type="button" class="@(task.Id == SelectedTaskId ? "task current" : "task")"
+                                        style="@TimesheetUi.TaskStyle(task.Id)" @onclick="() => SelectAsync(task.Id)">
+                                    <span class="swatch" aria-hidden="true"></span>
+                                    <span class="name">@task.TaskName</span>
+                                    @if (!string.IsNullOrEmpty(task.ProjectCode))
+                                    {
+                                        <span class="code">@task.ProjectCode</span>
+                                    }
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string titleId = $"picker-{Guid.NewGuid():N}";
+    private List<ForecastTask>? tasks;
+    private string query = "";
+    private ElementReference searchInput;
+
+    [Parameter] public string Title { get; set; } = "Choisir une tâche";
+
+    /// <summary>Optional context line under the title (what is being assigned).</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Task highlighted as the current choice, if any.</summary>
+    [Parameter] public int? SelectedTaskId { get; set; }
+
+    [Parameter] public EventCallback<int> OnSelected { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tasks = await db.ForecastTasks.AsNoTracking().Where(t => t.IsActive).ToListAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try { await searchInput.FocusAsync(); }
+            catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+        }
+    }
+
+    private IEnumerable<ForecastTask> Filtered()
+    {
+        if (tasks is null)
+            return [];
+        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return tasks.Where(t => terms.All(term =>
+            Contains(t.TaskName, term) || Contains(t.ProjectName, term) || Contains(t.ClientName, term) || Contains(t.ProjectCode, term)));
+    }
+
+    private static bool Contains(string? value, string term) =>
+        value is not null && TimesheetUi.French.CompareInfo.IndexOf(value, term, System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace) >= 0;
+
+    private Task SelectAsync(int taskId) => OnSelected.InvokeAsync(taskId);
+
+    private Task CancelAsync() => OnCancel.InvokeAsync();
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+            await CancelAsync();
+    }
+
+    private async Task OnSearchKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && query.Length > 0)
+        {
+            // Enter in the search box picks the single (or first) match.
+            var first = Filtered()
+                .OrderBy(t => t.ClientName ?? t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase)
+                .FirstOrDefault();
+            if (first is not null)
+                await SelectAsync(first.Id);
+        }
+    }
+}

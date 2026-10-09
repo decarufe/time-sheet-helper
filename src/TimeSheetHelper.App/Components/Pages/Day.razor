@@ -1,7 +1,638 @@
 @page "/jour"
+@page "/jour/{Date}"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Options
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.Core.Activities
+@using TimeSheetHelper.Engine
+@using TimeSheetHelper.Engine.Allocation
+@using TimeSheetHelper.Engine.Learning
+@using TimeSheetHelper.Engine.Proposals
+@using TimeSheetHelper.Storage
+@inject WeekService Weeks
+@inject SlotAllocator Allocator
+@inject IOptions<EngineOptions> EngineOptionsAccessor
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject NavigationManager Nav
+@inject ILogger<Day> Logger
 
 <PageTitle>Jour — Time Sheet Helper</PageTitle>
 
-<h1>Jour</h1>
+<div class="day @(selection is null ? null : "has-selection")">
+    <header class="toolbar">
+        <h1>@TimesheetUi.Capitalize(day.ToString("dddd d MMMM yyyy", TimesheetUi.French))</h1>
+        <nav class="day-nav" aria-label="Navigation par jour">
+            <button type="button" @onclick="() => GoTo(day.AddDays(-1))" aria-label="Jour précédent">‹</button>
+            <button type="button" @onclick="() => GoTo(Today)" disabled="@(day == Today)">Aujourd'hui</button>
+            <button type="button" @onclick="() => GoTo(day.AddDays(1))" aria-label="Jour suivant">›</button>
+        </nav>
+        <span class="spacer"></span>
+        <a class="button" href="@WeekHref">Voir la semaine</a>
+    </header>
 
-<p class="muted">À venir.</p>
+    @if (message is not null)
+    {
+        <div class="notice @(messageIsError ? "error" : "info")" role="status">
+            <span>@message</span>
+            @if (lastCorrection is { } correction && !messageIsError && !IsSubmitted)
+            {
+                <button type="button" class="link-action" @onclick="() => PreviewRuleAsync(correction.Target, correction.TaskId)" disabled="@busy">
+                    Créer une règle à partir de cette correction
+                </button>
+            }
+            <button type="button" class="dismiss" @onclick="ClearMessage" aria-label="Masquer le message">✕</button>
+        </div>
+    }
+
+    @if (timeline is null)
+    {
+        <p class="muted">@(loadError ?? "Chargement de la journée…")</p>
+    }
+    else
+    {
+        @if (IsSubmitted)
+        {
+            <p class="notice submitted">La feuille de temps de cette semaine a été soumise : la journée est affichée en lecture seule.</p>
+        }
+
+        <section class="summary" aria-label="Résumé de la journée">
+            <div class="totals @FlagClass">
+                <span class="big">@TimesheetUi.Hours(TotalHours) h</span>
+                <span class="muted">sur @TimesheetUi.Hours(TargetHours) h visées</span>
+                @if (TotalHours < TargetHours)
+                {
+                    <span class="gap">il manque @TimesheetUi.Hours(TargetHours - TotalHours) h</span>
+                }
+                else if (TotalHours > TargetHours)
+                {
+                    <span class="gap">@TimesheetUi.Hours(TotalHours - TargetHours) h de plus que l'objectif</span>
+                }
+            </div>
+            <ul class="task-hours">
+                @foreach (var (taskId, hours) in taskHours)
+                {
+                    <li style="@TimesheetUi.TaskStyle(taskId)">
+                        <span class="swatch" aria-hidden="true"></span>
+                        <span class="name">@TaskName(taskId)</span>
+                        <span class="hours">@TimesheetUi.Hours(hours) h</span>
+                    </li>
+                }
+                @if (unclassifiedHours > 0)
+                {
+                    <li class="unclassified">
+                        <span class="swatch" aria-hidden="true"></span>
+                        <span class="name">Non classé</span>
+                        <span class="hours">@TimesheetUi.Hours(unclassifiedHours) h</span>
+                    </li>
+                }
+                @if (taskHours.Count == 0 && unclassifiedHours == 0)
+                {
+                    <li class="muted">Aucune activité de travail détectée ce jour-là.</li>
+                }
+            </ul>
+            @if (timeline.Tasks.Count == 0)
+            {
+                <p class="muted">Aucune tâche Forecast : synchronisez-les depuis la page <a href="sources">Sources</a>.</p>
+            }
+        </section>
+
+        <div class="timeline-head">
+            <h2>Créneaux de 15 minutes</h2>
+            <label class="toggle">
+                <input type="checkbox" @bind="showWholeDay" @bind:after="ComputeVisible" />
+                Toute la journée
+            </label>
+        </div>
+        @if (!IsSubmitted)
+        {
+            <p class="hint muted">Cliquez sur un créneau pour le sélectionner, Maj+clic pour étendre la sélection (Maj+↑/↓ au clavier, Échap pour annuler).</p>
+        }
+
+        <ol class="timeline" aria-label="Créneaux de la journée">
+            @for (var i = 0; i < visible.Count; i++)
+            {
+                var index = i;
+                var row = visible[i];
+                var slot = row.Slot;
+                var selected = IsSelected(index);
+                var expandedRow = expanded.Contains(slot.SlotStartUtc);
+                <li class="slot @KindClass(slot) @(row.Local.Minute == 0 ? "hour-start" : null) @(selected ? "selected" : null)"
+                    style="@(slot.TaskId is { } tid ? TimesheetUi.TaskStyle(tid) : null)">
+                    <div class="slot-line">
+                        <button type="button" class="slot-main" aria-pressed="@(selected ? "true" : "false")"
+                                title="@SlotTitle(row)" disabled="@IsSubmitted"
+                                @onclick="e => OnSlotClick(index, e)" @onkeydown="e => OnSlotKeyDown(index, e)">
+                            <span class="time">@row.Local.ToString("HH:mm")</span>
+                            <span class="band" aria-hidden="true"></span>
+                            <span class="label">@SlotLabel(slot)</span>
+                            @if (slot.Kind != SlotKind.Empty)
+                            {
+                                <span class="kind-badge">@TimesheetUi.SlotKindLabel(slot.Kind)</span>
+                            }
+                            @if (slot.IsWork && slot.Kind != SlotKind.Override)
+                            {
+                                <span class="conf @TimesheetUi.ConfidenceClass(slot.Confidence)">@TimesheetUi.Percent(slot.Confidence)</span>
+                            }
+                        </button>
+                        @if (slot.Evidence.Count > 0)
+                        {
+                            <button type="button" class="expand" aria-expanded="@(expandedRow ? "true" : "false")"
+                                    aria-label="@(expandedRow ? "Masquer" : "Afficher") les preuves de @row.Local.ToString("HH:mm")"
+                                    @onclick="() => ToggleExpanded(slot.SlotStartUtc)">
+                                <span aria-hidden="true">@(expandedRow ? "▾" : "▸")</span> @slot.Evidence.Count
+                            </button>
+                        }
+                    </div>
+                    @if (expandedRow)
+                    {
+                        <div class="evidence">
+                            @if (slot.Alternatives.Count > 0)
+                            {
+                                <p class="alternatives">
+                                    Autres candidats :
+                                    @string.Join(" · ", slot.Alternatives.Select(a => $"{CandidateLabel(a)} ({TimesheetUi.Percent(a.Share)})"))
+                                </p>
+                            }
+                            <ul>
+                                @foreach (var activity in Evidence(slot))
+                                {
+                                    <li>
+                                        <span class="ev-time">@ActivityTime(activity)</span>
+                                        <span class="ev-source">@TimesheetUi.SourceLabel(activity.Source)@(activity.Kind is { Length: > 0 } k ? $" · {k}" : "")</span>
+                                        <span class="ev-body">
+                                            @if (!string.IsNullOrWhiteSpace(activity.ProcessName))
+                                            {
+                                                <span class="ev-app">@activity.ProcessName</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(activity.Title))
+                                            {
+                                                <span class="ev-title">@activity.Title</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(activity.Subject) && activity.Subject != activity.Title)
+                                            {
+                                                <span class="ev-title">« @activity.Subject »</span>
+                                            }
+                                            @if ((activity.FilePath ?? activity.Folder) is { Length: > 0 } where)
+                                            {
+                                                <code>@where</code>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(activity.Repo))
+                                            {
+                                                <span class="ev-repo">dépôt @activity.Repo</span>
+                                            }
+                                        </span>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </li>
+            }
+        </ol>
+    }
+
+    @if (pendingRule is { } pending)
+    {
+        <div class="action-bar confirm" role="alertdialog" aria-label="Confirmer la règle">
+            <span>Toujours associer <strong>« @pending.Proposal.Name »</strong> à <strong>@TaskName(pending.TaskId)</strong> ?</span>
+            <span class="spacer"></span>
+            <button type="button" class="primary" @onclick="ConfirmRuleAsync" disabled="@busy">Confirmer</button>
+            <button type="button" @onclick="() => pendingRule = null" disabled="@busy">Annuler</button>
+        </div>
+    }
+    else if (selection is { } sel && !IsSubmitted && timeline is not null)
+    {
+        <div class="action-bar" role="toolbar" aria-label="Actions sur la sélection">
+            <span class="selection-info">
+                <strong>@visible[sel.Start].Local.ToString("HH:mm") – @visible[sel.End].Local.AddMinutes(15).ToString("HH:mm")</strong>
+                <span class="muted">@(sel.End - sel.Start + 1) @(sel.End > sel.Start ? "créneaux" : "créneau") · @TimesheetUi.Hours((sel.End - sel.Start + 1) * 0.25m) h</span>
+            </span>
+            <span class="spacer"></span>
+            <button type="button" class="primary" @onclick="() => picker = PickerMode.Assign" disabled="@busy">Assigner à…</button>
+            <button type="button" @onclick="() => AssignAsync(null)" disabled="@busy">Pas du travail</button>
+            <button type="button" @onclick="ClearOverridesAsync" disabled="@(busy || !SelectionHasOverride)">Annuler l'assignation manuelle</button>
+            <button type="button" @onclick="() => picker = PickerMode.Rule" disabled="@busy">Créer une règle à partir de cette correction</button>
+            <button type="button" class="ghost" @onclick="ClearSelection" aria-label="Désélectionner">✕</button>
+        </div>
+    }
+</div>
+
+@if (picker != PickerMode.None && selection is not null)
+{
+    <TaskPicker Title="@(picker == PickerMode.Assign ? "Assigner les créneaux à…" : "Créer une règle vers…")"
+                Subtitle="@SelectionDescription()"
+                SelectedTaskId="@SelectionTaskId()"
+                OnSelected="OnTaskPickedAsync"
+                OnCancel="() => picker = PickerMode.None" />
+}
+
+@code {
+    private enum PickerMode { None, Assign, Rule }
+
+    private sealed record VisibleSlot(SlotAssignment Slot, DateTime Local);
+
+    private sealed record Selection(int Anchor, int Start, int End);
+
+    private sealed record PendingRule(CorrectionTarget Target, int TaskId, RuleProposal Proposal);
+
+    private sealed record Correction(CorrectionTarget Target, int TaskId);
+
+    [Parameter] public string? Date { get; set; }
+
+    private DateOnly day = DateOnly.FromDateTime(DateTime.Today);
+    private DayTimeline? timeline;
+    private List<VisibleSlot> visible = [];
+    private List<(int TaskId, decimal Hours)> taskHours = [];
+    private decimal unclassifiedHours;
+    private readonly HashSet<DateTime> expanded = [];
+    private bool showWholeDay;
+    private bool submitted;
+    private string? loadError;
+    private string? message;
+    private bool messageIsError;
+    private bool busy;
+    private Selection? selection;
+    private PickerMode picker;
+    private PendingRule? pendingRule;
+    private Correction? lastCorrection;
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private bool IsSubmitted => submitted;
+
+    private string WeekHref => TimesheetUi.WeekStartOf(day) == TimesheetUi.WeekStartOf(Today)
+        ? "./"
+        : $"./?semaine={TimesheetUi.IsoDate(TimesheetUi.WeekStartOf(day))}";
+
+    private decimal TotalHours => taskHours.Sum(t => t.Hours);
+
+    private decimal TargetHours => day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 0m : EngineOptionsAccessor.Value.TargetHoursPerDay;
+
+    private string FlagClass => TotalHours < TargetHours ? "under" : TotalHours > TargetHours ? "over" : "ok";
+
+    private bool SelectionHasOverride => SelectedSlots().Any(s => s.Kind is SlotKind.Override or SlotKind.ExcludedByOverride);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var requested = TimesheetUi.TryParseIsoDate(Date, out var parsed) ? parsed : Today;
+        if (timeline is not null && requested == day)
+            return;
+
+        day = requested;
+        selection = null;
+        picker = PickerMode.None;
+        pendingRule = null;
+        lastCorrection = null;
+        message = null;
+        expanded.Clear();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            loadError = null;
+            var loaded = await Weeks.GetDayTimelineAsync(day);
+
+            var weekStart = TimesheetUi.WeekStartOf(day);
+            await using (var db = await DbFactory.CreateDbContextAsync())
+            {
+                submitted = await db.TimesheetDrafts.AsNoTracking()
+                    .AnyAsync(d => d.WeekStart == weekStart && d.SubmittedUtc != null);
+            }
+
+            taskHours = loaded.Slots
+                .Where(s => s.IsClassified)
+                .GroupBy(s => s.TaskId!.Value)
+                .Select(g => (g.Key, g.Count() * 0.25m))
+                .OrderByDescending(t => t.Item2)
+                .ToList();
+            unclassifiedHours = loaded.Slots.Count(s => s.IsWork && s.TaskId is null) * 0.25m;
+            timeline = loaded;
+            ComputeVisible();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading day {Day} failed", day);
+            timeline = null;
+            visible = [];
+            loadError = $"Impossible de charger la journée : {ex.Message}";
+        }
+    }
+
+    /// <summary>Slots from the first to the last activity, one hour of margin, at least 8:00 to 17:00.</summary>
+    private void ComputeVisible()
+    {
+        if (timeline is null)
+            return;
+
+        var tz = Allocator.TimeZone;
+        var all = timeline.Slots
+            .Select(s => new VisibleSlot(s, TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(s.SlotStartUtc, DateTimeKind.Utc), tz)))
+            .ToList();
+
+        // Keep the selection on the same slots when the visible span changes.
+        var selectedStarts = selection is { } sel && sel.End < visible.Count
+            ? (visible[sel.Start].Slot.SlotStartUtc, visible[sel.End].Slot.SlotStartUtc, visible[sel.Anchor].Slot.SlotStartUtc)
+            : default((DateTime, DateTime, DateTime)?);
+
+        if (showWholeDay)
+        {
+            visible = all;
+        }
+        else
+        {
+            var midnight = day.ToDateTime(TimeOnly.MinValue);
+            var from = midnight.AddHours(8);
+            var to = midnight.AddHours(17);
+            var active = all.Where(v => v.Slot.Kind != SlotKind.Empty || v.Slot.Evidence.Count > 0).ToList();
+            if (active.Count > 0)
+            {
+                var first = active[0].Local.AddHours(-1);
+                var last = active[^1].Local.AddMinutes(15).AddHours(1);
+                from = Min(from, new DateTime(first.Year, first.Month, first.Day, first.Hour, 0, 0));
+                var lastHour = new DateTime(last.Year, last.Month, last.Day, last.Hour, 0, 0);
+                to = Max(to, last == lastHour ? last : lastHour.AddHours(1));
+            }
+            visible = all.Where(v => v.Local >= from && v.Local < to).ToList();
+        }
+
+        selection = null;
+        if (selectedStarts is { } keep)
+        {
+            var start = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item1);
+            var end = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item2);
+            var anchor = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item3);
+            if (start >= 0 && end >= 0 && anchor >= 0)
+                selection = new Selection(anchor, start, end);
+        }
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+
+    private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
+
+    private void GoTo(DateOnly target) => Nav.NavigateTo($"jour/{TimesheetUi.IsoDate(target)}");
+
+    // Selection
+
+    private bool IsSelected(int index) => selection is { } s && index >= s.Start && index <= s.End;
+
+    private void OnSlotClick(int index, MouseEventArgs e)
+    {
+        pendingRule = null;
+        if (e.ShiftKey && selection is { } current)
+        {
+            selection = new Selection(current.Anchor, Math.Min(current.Anchor, index), Math.Max(current.Anchor, index));
+        }
+        else if (selection is { } single && single.Start == index && single.End == index)
+        {
+            selection = null;
+        }
+        else
+        {
+            selection = new Selection(index, index, index);
+        }
+    }
+
+    private void OnSlotKeyDown(int index, KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            ClearSelection();
+            return;
+        }
+        if (!e.ShiftKey || e.Key is not ("ArrowDown" or "ArrowUp"))
+            return;
+
+        var current = selection ?? new Selection(index, index, index);
+        // Move the end opposite to the anchor.
+        var edge = current.Anchor == current.Start ? current.End : current.Start;
+        edge = Math.Clamp(edge + (e.Key == "ArrowDown" ? 1 : -1), 0, visible.Count - 1);
+        selection = new Selection(current.Anchor, Math.Min(current.Anchor, edge), Math.Max(current.Anchor, edge));
+    }
+
+    private void ClearSelection()
+    {
+        selection = null;
+        picker = PickerMode.None;
+    }
+
+    private IEnumerable<SlotAssignment> SelectedSlots() =>
+        selection is { } s ? visible.Skip(s.Start).Take(s.End - s.Start + 1).Select(v => v.Slot) : [];
+
+    private SlotRange? SelectedRange() =>
+        selection is { } s ? new SlotRange(visible[s.Start].Slot.SlotStartUtc, visible[s.End].Slot.SlotEndUtc) : null;
+
+    /// <summary>The group key shared by every work slot of the selection, if any: the correction then targets that group only.</summary>
+    private string? SelectionGroupKey()
+    {
+        var work = SelectedSlots().Where(s => s.IsWork).ToList();
+        if (work.Count == 0 || work.Any(s => s.GroupKey is null))
+            return null;
+        var keys = work.Select(s => s.GroupKey).Distinct().ToList();
+        return keys.Count == 1 ? keys[0] : null;
+    }
+
+    private int? SelectionTaskId()
+    {
+        var ids = SelectedSlots().Where(s => s.TaskId is not null).Select(s => s.TaskId).Distinct().ToList();
+        return ids.Count == 1 ? ids[0] : null;
+    }
+
+    private string SelectionDescription()
+    {
+        if (selection is not { } s)
+            return "";
+        var text = $"{visible[s.Start].Local:HH:mm} – {visible[s.End].Local.AddMinutes(15):HH:mm} ({TimesheetUi.Hours((s.End - s.Start + 1) * 0.25m)} h)";
+        return SelectionGroupKey() is { } key ? $"{text} · {TimesheetUi.GroupLabel(key)}" : text;
+    }
+
+    // Actions
+
+    private async Task OnTaskPickedAsync(int taskId)
+    {
+        var mode = picker;
+        picker = PickerMode.None;
+        if (mode == PickerMode.Assign)
+            await AssignAsync(taskId);
+        else if (mode == PickerMode.Rule && SelectedRange() is { } range)
+            await PreviewRuleAsync(new CorrectionTarget(range, SelectionGroupKey()), taskId);
+    }
+
+    private async Task AssignAsync(int? taskId)
+    {
+        if (SelectedRange() is not { } range)
+            return;
+        var target = new CorrectionTarget(range, SelectionGroupKey());
+
+        await RunAsync(async () =>
+        {
+            await Weeks.AssignSlotsAsync(range, taskId);
+            selection = null;
+            await LoadAsync();
+            if (taskId is { } id)
+            {
+                lastCorrection = new Correction(target, id);
+                Inform($"Créneaux assignés à {TaskName(id)}.");
+            }
+            else
+            {
+                Inform("Créneaux marqués comme hors travail.");
+            }
+        });
+    }
+
+    private async Task ClearOverridesAsync()
+    {
+        if (SelectedRange() is not { } range)
+            return;
+
+        await RunAsync(async () =>
+        {
+            await Weeks.ClearSlotsAsync(range);
+            selection = null;
+            await LoadAsync();
+            Inform("Assignation manuelle annulée : le moteur décide à nouveau pour ces créneaux.");
+        });
+    }
+
+    private async Task PreviewRuleAsync(CorrectionTarget target, int taskId)
+    {
+        await RunAsync(async () =>
+        {
+            var preview = await Weeks.ProposeRuleFromCorrectionAsync(target, taskId);
+            if (preview is null)
+            {
+                Fail("Aucune règle stable n'a pu être déduite de l'activité de ces créneaux.");
+                return;
+            }
+            pendingRule = new PendingRule(target, taskId, preview);
+        });
+    }
+
+    private async Task ConfirmRuleAsync()
+    {
+        if (pendingRule is not { } pending)
+            return;
+
+        await RunAsync(async () =>
+        {
+            var rule = await Weeks.CreateRuleFromCorrectionAsync(pending.Target, pending.TaskId);
+            pendingRule = null;
+            if (rule is null)
+            {
+                Fail("La règle n'a pas pu être créée : aucune valeur stable trouvée.");
+                return;
+            }
+            selection = null;
+            await LoadAsync();
+            Inform($"Règle créée : « {rule.Name} » → {TaskName(rule.ForecastTaskId)}.");
+        });
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (busy)
+            return;
+        busy = true;
+        message = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Day action failed");
+            Fail($"L'opération a échoué : {ex.Message}");
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Inform(string text) => (message, messageIsError) = (text, false);
+
+    private void Fail(string text)
+    {
+        (message, messageIsError) = (text, true);
+        lastCorrection = null;
+    }
+
+    private void ClearMessage()
+    {
+        message = null;
+        lastCorrection = null;
+    }
+
+    private void ToggleExpanded(DateTime slotStart)
+    {
+        if (!expanded.Remove(slotStart))
+            expanded.Add(slotStart);
+    }
+
+    // Labels
+
+    private string TaskName(int taskId) =>
+        timeline?.Tasks.TryGetValue(taskId, out var task) == true ? task.DisplayName : $"Tâche #{taskId}";
+
+    private string SlotLabel(SlotAssignment slot) => slot switch
+    {
+        { Kind: SlotKind.ExcludedByOverride } => "Pas du travail",
+        { IsWork: true, TaskId: { } id } => TaskName(id),
+        { IsWork: true, GroupKey: { } key } => $"Non classé · {TimesheetUi.GroupLabel(key)}",
+        { IsWork: true } => "Non classé",
+        _ => "",
+    };
+
+    private string CandidateLabel(SlotCandidate candidate) =>
+        candidate.TaskId is { } id ? TaskName(id)
+        : candidate.GroupKey is { } key ? TimesheetUi.GroupLabel(key)
+        : "?";
+
+    private static string KindClass(SlotAssignment slot) => slot.Kind switch
+    {
+        SlotKind.Activity => slot.TaskId is null ? "kind-activity unclassified" : "kind-activity",
+        SlotKind.Meeting => slot.TaskId is null ? "kind-meeting unclassified" : "kind-meeting",
+        SlotKind.Override => "kind-override",
+        SlotKind.ExcludedByOverride => "kind-excluded",
+        _ => "kind-empty",
+    };
+
+    private IEnumerable<ActivityEvent> Evidence(SlotAssignment slot) =>
+        slot.Evidence
+            .Select(id => timeline!.Activities.GetValueOrDefault(id))
+            .OfType<ActivityEvent>()
+            .OrderBy(a => a.StartUtc);
+
+    private string SlotTitle(VisibleSlot row)
+    {
+        var label = SlotLabel(row.Slot);
+        var head = $"{row.Local:HH:mm} – {row.Local.AddMinutes(15):HH:mm} · {TimesheetUi.SlotKindLabel(row.Slot.Kind)}";
+        var titles = Evidence(row.Slot)
+            .Select(a => a.Title ?? a.Subject ?? a.ProcessName)
+            .OfType<string>()
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct()
+            .Take(3)
+            .ToList();
+        var parts = new List<string> { head };
+        if (label.Length > 0)
+            parts.Add(label);
+        parts.AddRange(titles);
+        return string.Join("\n", parts);
+    }
+
+    private string ActivityTime(ActivityEvent activity)
+    {
+        var tz = Allocator.TimeZone;
+        var start = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(activity.StartUtc, DateTimeKind.Utc), tz);
+        if (activity.EndUtc is not { } endUtc)
+            return start.ToString("HH:mm");
+        var end = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(endUtc, DateTimeKind.Utc), tz);
+        return $"{start:HH:mm}–{end:HH:mm}";
+    }
+}
