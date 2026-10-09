@@ -94,6 +94,33 @@ public sealed class ForecastDiscovery(ForecastSession session, TimeProvider time
                 + (before == after ? " (inchangée)." : " — ATTENTION : la valeur a changé, vérifiez dans Forecast."));
         });
 
+        await StepAsync("04b-hour-popup-filled", Note, async () =>
+        {
+            // Same as 04 on a cell that already has hours: shows how existing entries are edited. Nothing is typed.
+            await ClickIfVisibleAsync(page, ForecastSelectors.TimesheetTab(page));
+            var snapshot = await ForecastTimesheetDom.ReadAsync(page);
+            var target = snapshot.Rows
+                .SelectMany(r => r.Hours.Select((h, day) => (Row: r, Day: day, Text: h)))
+                .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c.Text));
+            if (target.Row is null)
+            {
+                Note("Aucune cellule remplie cette semaine : popup d'édition non capturé.");
+                return;
+            }
+
+            await ForecastSelectors.DayCells(page, target.Row.Index).Nth(target.Day).ClickAsync();
+            await Task.Delay(1200, cancellationToken);
+            await CapturePageAsync(page, dir, "04b-hour-popup-filled");
+            await File.WriteAllTextAsync(Path.Combine(dir, "04b-hour-popup-filled.focus.html"),
+                await page.EvaluateAsync<string>(FocusAndLayersScript), cancellationToken);
+
+            await page.Keyboard.PressAsync("Escape");
+            await Task.Delay(800, cancellationToken);
+            var after = (await ForecastTimesheetDom.ReadAsync(page)).Rows.FirstOrDefault(r => r.Index == target.Row.Index)?.Hours.ElementAtOrDefault(target.Day);
+            Note($"Popup (cellule remplie) : « {target.Row.TaskName} », colonne {target.Day}, avant « {target.Text} », après Échap « {after} »"
+                + (target.Text == after ? " (inchangée)." : " — ATTENTION : la valeur a changé, vérifiez dans Forecast."));
+        });
+
         await StepAsync("05-add-time-entry-dialog", Note, async () =>
         {
             if (!await ClickIfVisibleAsync(page, ForecastSelectors.AddTimeEntryButton(page)))

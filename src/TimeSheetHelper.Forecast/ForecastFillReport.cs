@@ -27,6 +27,18 @@ public enum ForecastCellStatus
     Error,
 }
 
+public enum ForecastCellAction
+{
+    /// <summary>Empty cell: the hours are added through the cell popover.</summary>
+    Type,
+
+    /// <summary>The cell already holds the expected hours.</summary>
+    AlreadyDone,
+
+    /// <summary>The cell holds other hours: left untouched.</summary>
+    Conflict,
+}
+
 /// <summary>One (task, day) cell of the week.</summary>
 public sealed record ForecastPlannedCell(ForecastTask Task, DateOnly Date, decimal Hours);
 
@@ -103,6 +115,23 @@ public static class ForecastFillPlanner
             .ThenBy(c => c.Task.TaskName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(c => c.Date)
             .ToList();
+    }
+
+    /// <summary>
+    /// What to do with a cell given its current text. The cell popover only offers "Add", which creates a new time
+    /// entry: typing into a cell that already has hours would add to them instead of replacing them. Such cells are
+    /// left untouched and reported, so the user corrects them in Forecast.
+    /// </summary>
+    public static (ForecastCellAction Action, string Message) Decide(decimal expected, string? currentText, string typed)
+    {
+        if (string.IsNullOrWhiteSpace(currentText) || (ForecastHours.TryParse(currentText, out var zero) && zero == 0))
+            return (ForecastCellAction.Type, $"Cellule vide → « {typed} » sera ajouté.");
+
+        if (ForecastHours.TryParse(currentText, out var current) && Math.Abs(current - expected) <= Tolerance)
+            return (ForecastCellAction.AlreadyDone, $"Déjà « {currentText} » dans Forecast : rien à faire.");
+
+        return (ForecastCellAction.Conflict,
+            $"Forecast contient déjà « {currentText} » (prévu {typed}) : non modifié, car « Add » ajouterait une entrée au lieu de remplacer. Corrigez dans Forecast.");
     }
 
     /// <summary>Compares the expected hours with the text read back from the grid.</summary>

@@ -78,12 +78,16 @@ public static class ForecastSelectors
     public static ILocator AllDayCells(IPage page) => DataCy(page, "hours-input-popup-toggle");
 
     /// <summary>
-    /// UNVERIFIED. Text field of the popup that opens when a day cell is clicked. Restricted to elements that appear in
-    /// a popover/dialog layer so it can never match the person selector or the Nova chat box.
+    /// VERIFIED. Popover opened by a day cell: "Time entry" field, role, note and an "Add" button.
+    /// Observed on an empty cell only: on a cell that already has hours, "Add" is expected to add another entry.
     /// </summary>
-    public static ILocator HourPopupInput(IPage page) =>
-        page.Locator("[data-radix-popper-content-wrapper] input, [role=dialog] input, [data-cy*='hours-input' i] input, input[data-cy*='hours-input' i]")
-            .Filter(new() { Visible = true });
+    public static ILocator HourPopup(IPage page) => DataCy(page, "time-entry-popup-content");
+
+    /// <summary>VERIFIED. Hours field of the cell popover (placeholder "ex. 1h", value "0h" when empty).</summary>
+    public static ILocator HourPopupInput(IPage page) => HourPopup(page).Locator("[data-cy='hours-input']");
+
+    /// <summary>VERIFIED. "Add" button of the cell popover.</summary>
+    public static ILocator HourPopupAddButton(IPage page) => HourPopup(page).Locator("[data-cy='add-new-time-entry-button']");
 
     // ---------------------------------------------------------------- "Add Timesheet Entry" dialog
 
@@ -137,7 +141,9 @@ public static class ForecastSelectors
         (nameof(FindTasksTab), FindTasksTab),
         (nameof(InternalTimeTab), InternalTimeTab),
         (nameof(AllDayCells), AllDayCells),
+        (nameof(HourPopup), HourPopup),
         (nameof(HourPopupInput), HourPopupInput),
+        (nameof(HourPopupAddButton), HourPopupAddButton),
         (nameof(AddTimeEntryButton), AddTimeEntryButton),
         (nameof(TimeEntrySearchButton), TimeEntrySearchButton),
         (nameof(TimeEntryHoursInput), TimeEntryHoursInput),

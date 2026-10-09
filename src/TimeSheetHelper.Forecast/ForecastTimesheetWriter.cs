@@ -11,10 +11,11 @@ namespace TimeSheetHelper.Forecast;
 /// <summary>
 /// Types a <see cref="TimesheetDraft"/> into the Forecast weekly grid and reads it back.
 ///
-/// Grid structure is VERIFIED (see <see cref="ForecastTimesheetDom"/>): each day cell is a button that opens a popup.
-/// The popup itself is UNVERIFIED (<see cref="ForecastSelectors.HourPopupInput"/>): <see cref="ForecastSubmitMode.Fill"/>
-/// stops with an explicit error if it cannot find the field, and the read-back reloads the page so that only values
-/// actually persisted by Forecast are reported as OK. Sending the week for approval is never done here.
+/// Grid and cell popover are VERIFIED (see <see cref="ForecastTimesheetDom"/> and <see cref="ForecastSelectors.HourPopup"/>):
+/// a day cell opens a popover whose "Add" button creates a time entry. Only empty cells are typed into; cells that
+/// already hold other hours are reported, never changed (see <see cref="ForecastFillPlanner.Decide"/>). The read-back
+/// reloads the page so that only values actually persisted by Forecast are reported as OK.
+/// Sending the week for approval is never done here.
 /// </summary>
 public sealed class ForecastTimesheetWriter(
     ForecastSession session,
@@ -124,10 +125,16 @@ public sealed class ForecastTimesheetWriter(
             }
 
             var current = row.Hours[index];
-            if (mode == ForecastSubmitMode.DryRun)
+            var (action, message) = ForecastFillPlanner.Decide(cell.Hours, current, Format(cell.Hours));
+            if (mode == ForecastSubmitMode.DryRun || action != ForecastCellAction.Type)
             {
-                report.Cells.Add(Result(cell, ForecastCellStatus.Planned, Parse(current), current, null,
-                    $"Actuel « {current} » → à saisir « {Format(cell.Hours)} »."));
+                var status = action switch
+                {
+                    ForecastCellAction.AlreadyDone => ForecastCellStatus.Ok,
+                    ForecastCellAction.Conflict => ForecastCellStatus.Mismatch,
+                    _ => ForecastCellStatus.Planned,
+                };
+                report.Cells.Add(Result(cell, status, Parse(current), current, null, message));
                 continue;
             }
 
@@ -135,19 +142,20 @@ public sealed class ForecastTimesheetWriter(
             var input = ForecastSelectors.HourPopupInput(page);
             try
             {
-                await input.First.WaitForAsync(new() { Timeout = 5000 });
+                await input.WaitForAsync(new() { Timeout = 5000 });
             }
             catch (TimeoutException)
             {
-                var shot = await ScreenshotAsync(page, dir, $"popup-inconnu-{task.Id}", report);
+                var shot = await ScreenshotAsync(page, dir, $"popup-introuvable-{task.Id}", report);
                 await page.Keyboard.PressAsync("Escape");
                 report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, shot,
-                    "Le champ de saisie du popup n'a pas été reconnu : relancez « forecast discover » pour l'identifier."));
+                    "Le popup de saisie ne s'est pas ouvert : relancez « forecast discover »."));
                 continue;
             }
 
-            await input.First.FillAsync(Format(cell.Hours));
-            await input.First.PressAsync("Enter");
+            await input.FillAsync(Format(cell.Hours));
+            await ForecastSelectors.HourPopupAddButton(page).ClickAsync();
+            await ForecastSelectors.HourPopup(page).WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
             await ForecastSession.WaitForIdleAsync(page, 5000);
             pending.Add(cell);
         }
@@ -184,6 +192,9 @@ public sealed class ForecastTimesheetWriter(
             for (var i = 0; i < Math.Min(days.Count, row.Hours.Count); i++)
             {
                 if (days[i] is not { } date)
+                    continue;
+                // Cells already settled before typing (already done, conflict) are reported once.
+                if (!expectedByDate.ContainsKey(date) && report.Cells.Any(c => c.ForecastTaskId == task.Id && c.Date == date))
                     continue;
                 var text = row.Hours[i];
                 var expected = expectedByDate.GetValueOrDefault(date);

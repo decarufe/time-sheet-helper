@@ -79,4 +79,13 @@ public class ForecastFillPlannerTests
         Assert.False(report.Success);
         Assert.Contains("1/2", report.Summary);
     }
+
+    [Theory]
+    [InlineData("", ForecastCellAction.Type)]
+    [InlineData("0h", ForecastCellAction.Type)]
+    [InlineData("1h 30m", ForecastCellAction.AlreadyDone)]
+    [InlineData("2h", ForecastCellAction.Conflict)]
+    [InlineData("15m", ForecastCellAction.Conflict)]
+    public void Only_empty_cells_are_typed_into(string current, ForecastCellAction expected) =>
+        Assert.Equal(expected, ForecastFillPlanner.Decide(1.5m, current, "1h 30m").Action);
 }
