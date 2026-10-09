@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.Microsoft365\TimeSheetHelper.Collectors.Microsoft365.csproj" />
+    <ProjectReference Include="..\..\src\TimeSheetHelper.Forecast\TimeSheetHelper.Forecast.csproj" />
   </ItemGroup>
 
   <ItemGroup>

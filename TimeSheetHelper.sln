@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.Tests", "te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.Collectors.Microsoft365", "src\TimeSheetHelper.Collectors.Microsoft365\TimeSheetHelper.Collectors.Microsoft365.csproj", "{B15CB334-B1D3-4A15-B954-70FF9CE16B05}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.Forecast", "src\TimeSheetHelper.Forecast\TimeSheetHelper.Forecast.csproj", "{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -101,6 +103,18 @@ Global
 		{B15CB334-B1D3-4A15-B954-70FF9CE16B05}.Release|x64.Build.0 = Release|Any CPU
 		{B15CB334-B1D3-4A15-B954-70FF9CE16B05}.Release|x86.ActiveCfg = Release|Any CPU
 		{B15CB334-B1D3-4A15-B954-70FF9CE16B05}.Release|x86.Build.0 = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|x64.Build.0 = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Debug|x86.Build.0 = Debug|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|x64.ActiveCfg = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|x64.Build.0 = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|x86.ActiveCfg = Release|Any CPU
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -112,5 +126,6 @@ Global
 		{88744D4B-E9C7-41C6-A24B-D19B29E84EF2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{072B5B8C-51D4-428A-81D7-4841E707CFE4} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{B15CB334-B1D3-4A15-B954-70FF9CE16B05} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{8F3BB431-8587-4582-A4EA-5F8C11BC0CD7} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

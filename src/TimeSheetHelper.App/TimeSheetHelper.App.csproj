@@ -5,6 +5,7 @@
     <ProjectReference Include="..\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.Collectors.Microsoft365\TimeSheetHelper.Collectors.Microsoft365.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.Forecast\TimeSheetHelper.Forecast.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

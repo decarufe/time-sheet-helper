@@ -1,34 +1,27 @@
-using Microsoft.EntityFrameworkCore;
 using TimeSheetHelper.App;
 using TimeSheetHelper.App.Components;
-using TimeSheetHelper.Collectors.Microsoft365;
-using TimeSheetHelper.Collectors.Windows;
-using TimeSheetHelper.Storage;
+
+if (Cli.IsCommand(args))
+    return await Cli.RunAsync(args);
 
 using var singleInstance = new Mutex(initiallyOwned: true, @"Local\TimeSheetHelper", out var isFirstInstance);
 if (!isFirstInstance)
-    return;
+    return 0;
 
 // Content root = exe folder, so appsettings and wwwroot are found whatever the working directory (startup shortcut, installer).
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
-// Per-machine settings written by the installer (Microsoft 365 app registration, Azure DevOps organizations, ...).
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+AppServices.AddConfiguration(builder.Configuration);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddTimeSheetStorage(DataPaths.DatabaseConnectionString);
-builder.Services.AddWindowsCollectors(builder.Configuration);
-builder.Services.AddMicrosoft365Collectors(builder.Configuration);
+builder.Services.AddTimeSheetHelper(builder.Configuration);
 builder.Services.AddSingleton<TrayIcon>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 
 var app = builder.Build();
 
-await using (var db = await app.Services.GetRequiredService<IDbContextFactory<TimeSheetDbContext>>().CreateDbContextAsync())
-{
-    await db.Database.MigrateAsync();
-}
+await AppServices.MigrateDatabaseAsync(app.Services);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -46,4 +39,5 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-app.Run();
+await app.RunAsync();
+return 0;
