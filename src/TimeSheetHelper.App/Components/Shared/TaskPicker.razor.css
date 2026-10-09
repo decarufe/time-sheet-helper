@@ -80,6 +80,7 @@ h3 {
 }
 
 h3 .project {
+    margin-left: 4px;
     font-weight: 400;
     text-transform: none;
 }

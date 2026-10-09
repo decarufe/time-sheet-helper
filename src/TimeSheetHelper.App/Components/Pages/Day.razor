@@ -126,7 +126,7 @@
                             <span class="time">@row.Local.ToString("HH:mm")</span>
                             <span class="band" aria-hidden="true"></span>
                             <span class="label">@SlotLabel(slot)</span>
-                            @if (slot.Kind != SlotKind.Empty)
+                            @if (slot.Kind is not (SlotKind.Empty or SlotKind.ExcludedByOverride))
                             {
                                 <span class="kind-badge">@TimesheetUi.SlotKindLabel(slot.Kind)</span>
                             }
@@ -539,6 +539,7 @@
             return;
         busy = true;
         message = null;
+        lastCorrection = null;
         try
         {
             await action();
