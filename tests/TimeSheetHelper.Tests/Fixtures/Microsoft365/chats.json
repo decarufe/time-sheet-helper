@@ -1,0 +1,58 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats(lastMessagePreview())",
+  "@odata.count": 4,
+  "value": [
+    {
+      "id": "19:a@unq.gbl.spaces",
+      "topic": null,
+      "chatType": "oneOnOne",
+      "webUrl": "https://teams.microsoft.com/l/chat/19%3Aa%40unq.gbl.spaces/0",
+      "lastUpdatedDateTime": "2026-09-01T10:00:00Z",
+      "lastMessagePreview": {
+        "id": "1728300000000",
+        "createdDateTime": "2026-10-08T15:00:00Z",
+        "isDeleted": false,
+        "messageType": "message",
+        "body": { "contentType": "text", "content": "never stored" },
+        "from": { "user": { "id": "alice-1", "displayName": "Alice Martin" } }
+      }
+    },
+    {
+      "id": "19:b@thread.v2",
+      "topic": "Projet Fabrikam",
+      "chatType": "group",
+      "webUrl": "https://teams.microsoft.com/l/chat/19%3Ab%40thread.v2/0",
+      "lastUpdatedDateTime": "2026-09-01T10:00:00Z",
+      "lastMessagePreview": {
+        "id": "1728200000000",
+        "createdDateTime": "2026-10-07T09:00:00Z",
+        "isDeleted": false,
+        "messageType": "message",
+        "body": { "contentType": "text", "content": "never stored" },
+        "from": { "user": { "id": "bob-2", "displayName": "Bob" } }
+      }
+    },
+    {
+      "id": "19:empty@thread.v2",
+      "topic": "Sans message",
+      "chatType": "group",
+      "webUrl": null,
+      "lastMessagePreview": null
+    },
+    {
+      "id": "19:old@thread.v2",
+      "topic": "Ancienne conversation",
+      "chatType": "group",
+      "webUrl": null,
+      "lastMessagePreview": {
+        "id": "1700000000000",
+        "createdDateTime": "2026-09-20T09:00:00Z",
+        "isDeleted": false,
+        "messageType": "message",
+        "body": { "contentType": "text", "content": "never stored" },
+        "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+      }
+    }
+  ],
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/chats?$skiptoken=chats-page2"
+}

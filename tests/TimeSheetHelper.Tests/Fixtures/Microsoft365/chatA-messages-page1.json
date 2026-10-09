@@ -1,0 +1,39 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats('19%3Aa%40unq.gbl.spaces')/messages",
+  "@odata.count": 4,
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/chats/19:a@unq.gbl.spaces/messages?$top=50&$skiptoken=page2",
+  "value": [
+    {
+      "id": "1728400000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-10T08:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "after the range" },
+      "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+    },
+    {
+      "id": "1728300000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-08T15:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "not mine" },
+      "from": { "user": { "id": "alice-1", "displayName": "Alice Martin" } }
+    },
+    {
+      "id": "1728290000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-08T14:55:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "html", "content": "<p>secret</p>" },
+      "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+    },
+    {
+      "id": "1728280000000",
+      "messageType": "systemEventMessage",
+      "createdDateTime": "2026-10-08T14:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "html", "content": "<systemEventMessage/>" },
+      "from": null
+    }
+  ]
+}

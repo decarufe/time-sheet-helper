@@ -1,0 +1,33 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/mailFolders('sentitems')/messages",
+  "value": [
+    {
+      "id": "AAMk-msg-1",
+      "internetMessageId": "<MSG1@contoso.com>",
+      "subject": "RE: Estimation phase 2",
+      "sentDateTime": "2026-10-06T18:42:10Z",
+      "isDraft": false,
+      "webLink": "https://outlook.office365.com/owa/?ItemID=AAMk-msg-1",
+      "toRecipients": [
+        { "emailAddress": { "name": "Alice Martin", "address": "alice@fabrikam.com" } },
+        { "emailAddress": { "name": "Bob", "address": "bob@fabrikam.com" } }
+      ],
+      "ccRecipients": [
+        { "emailAddress": { "name": "Dan", "address": "dan@northwind.com" } },
+        { "emailAddress": { "name": "Carl", "address": "carl@contoso.com" } }
+      ]
+    },
+    {
+      "id": "AAMk-msg-2",
+      "internetMessageId": "<MSG2@contoso.com>",
+      "subject": "Dîner d'équipe",
+      "sentDateTime": "2026-10-07T12:01:00Z",
+      "isDraft": false,
+      "toRecipients": [
+        { "emailAddress": { "name": "Carl", "address": "carl@contoso.com" } },
+        { "emailAddress": { "name": "Filiale", "address": "x@contoso-labs.com" } }
+      ],
+      "ccRecipients": []
+    }
+  ]
+}

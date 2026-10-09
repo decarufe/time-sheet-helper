@@ -1,0 +1,21 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats('19%3Ab%40thread.v2')/messages",
+  "value": [
+    {
+      "id": "1728200000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-07T09:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "from Bob" },
+      "from": { "user": { "id": "bob-2", "displayName": "Bob" } }
+    },
+    {
+      "id": "1728190000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-07T08:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "from an app" },
+      "from": { "application": { "id": "app-1", "displayName": "Bot" }, "user": null }
+    }
+  ]
+}

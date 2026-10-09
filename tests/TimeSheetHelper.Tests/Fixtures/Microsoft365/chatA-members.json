@@ -1,0 +1,22 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats('19%3Aa%40unq.gbl.spaces')/members",
+  "@odata.count": 2,
+  "value": [
+    {
+      "@odata.type": "#microsoft.graph.aadUserConversationMember",
+      "id": "m1",
+      "roles": [ "owner" ],
+      "displayName": "Eric De Carufel",
+      "userId": "me-123",
+      "email": "eric@contoso.com"
+    },
+    {
+      "@odata.type": "#microsoft.graph.aadUserConversationMember",
+      "id": "m2",
+      "roles": [ "owner" ],
+      "displayName": "Alice Martin",
+      "userId": "alice-1",
+      "email": "alice@fabrikam.com"
+    }
+  ]
+}
