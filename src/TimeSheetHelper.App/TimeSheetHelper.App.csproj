@@ -10,6 +10,10 @@
     <ProjectReference Include="..\TimeSheetHelper.Engine\TimeSheetHelper.Engine.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TimeSheetHelper.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -20,5 +24,43 @@
     <AssemblyName>TimeSheetHelper</AssemblyName>
     <RootNamespace>TimeSheetHelper.App</RootNamespace>
   </PropertyGroup>
+
+  <!--
+    Microsoft.AspNetCore.App.Internal.Assets only publishes _framework/blazor.web.js when OutputType is "Exe"
+    (target _AddBlazorFrameworkStaticWebAssets). This app is a WinExe (tray icon, no console), so without this
+    target the script is a 404 and no page is interactive. Same logic, for WinExe only.
+  -->
+  <Target Name="_AddBlazorFrameworkStaticWebAssetsForWinExe"
+          AfterTargets="_AddBlazorFrameworkStaticWebAssets"
+          Condition="'$(OutputType)' == 'WinExe' AND '$(BlazorFrameworkStaticWebAssetRoot)' != ''">
+    <ItemGroup>
+      <_TshFrameworkCandidate Include="$(BlazorFrameworkStaticWebAssetRoot)\blazor.web.js" RelativePath="_framework/blazor.web.js" />
+      <_TshFrameworkCandidate Remove="@(_TshFrameworkCandidate)" Condition="!EXISTS('%(Identity)')" />
+    </ItemGroup>
+    <DefineStaticWebAssets
+      Condition="'@(_TshFrameworkCandidate->Count())' != '0'"
+      CandidateAssets="@(_TshFrameworkCandidate)"
+      ContentRoot="$(BlazorFrameworkStaticWebAssetRoot)"
+      SourceId="$(PackageId)"
+      SourceType="Discovered"
+      AssetKind="All"
+      AssetMode="CurrentProject"
+      AssetRole="Primary"
+      FingerprintCandidates="true"
+      BasePath="$(StaticWebAssetBasePath)">
+      <Output TaskParameter="Assets" ItemName="_TshFrameworkAsset" />
+    </DefineStaticWebAssets>
+    <DefineStaticWebAssetEndpoints
+      Condition="'@(_TshFrameworkAsset)' != ''"
+      CandidateAssets="@(_TshFrameworkAsset)"
+      ExistingEndpoints=""
+      ContentTypeMappings="@(StaticWebAssetContentTypeMapping)">
+      <Output TaskParameter="Endpoints" ItemName="_TshFrameworkEndpoint" />
+    </DefineStaticWebAssetEndpoints>
+    <ItemGroup>
+      <StaticWebAsset Include="@(_TshFrameworkAsset)" />
+      <StaticWebAssetEndpoint Include="@(_TshFrameworkEndpoint)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

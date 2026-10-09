@@ -1,0 +1,31 @@
+.report {
+    --ok: #1a7f37;
+    --danger: #cf222e;
+    --warn: #9a6700;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-top: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .report { --ok: #3fb950; --danger: #f85149; --warn: #d29922; }
+}
+
+.report-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.report-head h2 { margin: 0; font-size: 1.05rem; }
+.summary.ok { color: var(--ok); }
+.summary.bad { color: var(--danger); }
+
+.warnings { color: var(--warn); font-size: 0.9rem; padding-left: 18px; }
+.table-wrap { overflow-x: auto; margin-top: 10px; }
+.nowrap { white-space: nowrap; }
+td.message { max-width: 50ch; font-size: 0.85rem; color: var(--muted); }
+
+.status { font-size: 0.78rem; border-radius: 10px; padding: 1px 8px; border: 1px solid var(--border); white-space: nowrap; }
+.status-ok, .status-planned { color: var(--ok); border-color: var(--ok); }
+.status-mismatch { color: var(--warn); border-color: var(--warn); }
+.status-rownotfound, .status-cellnotfound, .status-error { color: var(--danger); border-color: var(--danger); }
+
+.files { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 12px; font-size: 0.9rem; }
+a { color: var(--accent); }

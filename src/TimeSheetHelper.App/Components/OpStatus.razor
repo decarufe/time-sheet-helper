@@ -1,0 +1,17 @@
+@* Progress / result line of a long operation started from a page. *@
+@if (State.Busy)
+{
+    <p class="op busy" role="status"><span class="spinner" aria-hidden="true"></span>@State.Message</p>
+}
+else if (State.Error is not null)
+{
+    <p class="op error" role="alert">@State.Error</p>
+}
+else if (State.Message is not null)
+{
+    <p class="op ok" role="status">@State.Message</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public OpState State { get; set; } = OpState.Idle;
+}
