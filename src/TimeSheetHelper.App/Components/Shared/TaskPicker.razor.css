@@ -1,0 +1,136 @@
+.picker-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 900;
+}
+
+.picker {
+    --task-l: 48%;
+    position: fixed;
+    z-index: 901;
+    top: 8vh;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(560px, calc(100vw - 32px));
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    padding: 16px;
+    box-sizing: border-box;
+}
+
+@media (prefers-color-scheme: dark) {
+    .picker { --task-l: 62%; }
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+h2 {
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+.close {
+    border: none;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 6px 8px;
+}
+
+.subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+}
+
+.list {
+    overflow-y: auto;
+    min-height: 120px;
+}
+
+section + section {
+    margin-top: 12px;
+}
+
+h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 4px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+h3 .project {
+    margin-left: 4px;
+    font-weight: 400;
+    text-transform: none;
+}
+
+ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
+.task:hover,
+.task:focus-visible {
+    background: var(--row-alt);
+    border-color: var(--accent);
+    outline: none;
+}
+
+.task.current {
+    border-color: var(--border);
+    font-weight: 600;
+}
+
+.swatch {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: hsl(var(--task-h) 65% var(--task-l));
+}
+
+.name {
+    flex: 1;
+}
+
+.code {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.muted {
+    color: var(--muted);
+}
