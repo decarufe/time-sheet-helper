@@ -34,7 +34,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// The "not found" page is for the UI only: re-executing an API error would turn a 401 into an antiforgery 400.
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/ingest"),
+    ui => ui.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 
 app.UseAntiforgery();
 
