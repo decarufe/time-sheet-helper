@@ -5,7 +5,7 @@ l'application **par utilisateur, sans droits administrateur**, avec ses dépenda
 
 ## Construire le paquet
 
-Prérequis sur le poste de build : SDK .NET 10, Git ; Node.js (npm) seulement pour inclure
+Prérequis sur le poste de build : SDK .NET 10, Git ; Node.js et pnpm seulement pour inclure
 l'extension VS Code.
 
 ```powershell
@@ -18,8 +18,8 @@ Le script :
 
 1. publie `src/TimeSheetHelper.App` en mode autonome `win-x64` (dossier, pas fichier unique :
    Playwright a besoin de son dossier `.playwright`, pas de trimming) ;
-2. construit l'extension VS Code (`npm ci` puis `npm run package`) si `extensions/vscode`
-   existe et que npm est disponible, sinon affiche un avertissement et continue ;
+2. construit l'extension VS Code (`pnpm install --frozen-lockfile` puis `pnpm run package`) si `extensions/vscode`
+   existe et que pnpm est disponible, sinon affiche un avertissement et continue ;
 3. assemble l'archive.
 
 Version : `git describe --tags` (préfixe `v` retiré, ex. tag `v1.2.0` → `1.2.0`) ; sans tag,

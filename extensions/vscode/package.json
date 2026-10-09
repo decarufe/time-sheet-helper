@@ -39,13 +39,12 @@
     }
   },
   "scripts": {
-    "compile": "npm run typecheck && node esbuild.mjs",
-    "build": "npm run compile",
+    "compile": "pnpm run typecheck && node esbuild.mjs",
+    "build": "pnpm run compile",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "vscode:prepublish": "node esbuild.mjs --production",
-    "package": "vsce package --no-dependencies --skip-license --allow-missing-repository --out timesheet-helper.vsix"
+    "package": "node esbuild.mjs --production && vsce package --no-dependencies --skip-license --allow-missing-repository --out timesheet-helper.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",

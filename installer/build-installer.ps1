@@ -109,20 +109,20 @@ if ($SkipExtension) {
 elseif (-not (Test-Path (Join-Path $extensionDir 'package.json'))) {
     Write-Warn "Aucune extension VS Code trouvée dans $extensionDir : étape ignorée."
 }
-elseif (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-    Write-Warn 'Node.js/npm introuvable : l''extension VS Code ne sera pas incluse (winget install OpenJS.NodeJS.LTS).'
+elseif (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    Write-Warn 'pnpm introuvable : l''extension VS Code ne sera pas incluse (winget install OpenJS.NodeJS.LTS, puis corepack enable pnpm ou winget install pnpm.pnpm).'
 }
 else {
     Write-Step 'Construction de l''extension VS Code (.vsix)'
     Push-Location $extensionDir
     try {
         $buildStart = Get-Date
-        if (Test-Path 'package-lock.json') { Invoke-Native npm @('ci') } else { Invoke-Native npm @('install') }
-        Invoke-Native npm @('run', 'package')
+        Invoke-Native pnpm @('install', '--frozen-lockfile')
+        Invoke-Native pnpm @('run', 'package')
         $vsix = Get-ChildItem -Path $extensionDir -Filter '*.vsix' -Recurse -File |
             Where-Object { $_.FullName -notmatch '\\node_modules\\' -and $_.LastWriteTime -ge $buildStart.AddSeconds(-5) } |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if (-not $vsix) { throw 'npm run package n''a produit aucun fichier .vsix.' }
+        if (-not $vsix) { throw 'pnpm run package n''a produit aucun fichier .vsix.' }
         New-Item -ItemType Directory -Path $vscodeOut -Force | Out-Null
         Copy-Item $vsix.FullName -Destination $vscodeOut
 

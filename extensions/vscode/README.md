@@ -48,10 +48,10 @@ Si l'application n'est pas démarrée, l'extension reste silencieuse et conserve
 ## Développement
 
 ```
-npm ci
-npm run compile   # vérification de types + bundle esbuild dans dist/
-npm test          # tests vitest de la logique pure
-npm run package   # produit timesheet-helper.vsix
+pnpm install
+pnpm run compile  # vérification de types + bundle esbuild dans dist/
+pnpm test         # tests vitest de la logique pure
+pnpm run package  # produit timesheet-helper.vsix
 ```
 
 F5 depuis ce dossier ouvert dans VS Code lance un hôte d'extension (voir `.vscode/launch.json`).
