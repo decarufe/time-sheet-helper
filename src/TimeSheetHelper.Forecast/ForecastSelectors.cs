@@ -16,7 +16,11 @@ namespace TimeSheetHelper.Forecast;
 /// </summary>
 public static class ForecastSelectors
 {
-    private const RegexOptions Ci = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+    // Playwright translates .NET regexes to JavaScript and only accepts IgnoreCase, Multiline and Singleline;
+    // any other option (e.g. CultureInvariant) fails with "Unsupported RegularExpression flags".
+    public const RegexOptions PlaywrightSupportedOptions = RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline;
+
+    private const RegexOptions Ci = RegexOptions.IgnoreCase;
 
     private static Regex Rx(string pattern) => new(pattern, Ci);
 
@@ -126,9 +130,9 @@ public static class ForecastSelectors
     /// <summary>
     /// UNVERIFIED. Forecast shows company-scoped identifiers such as "T1234" for tasks and "P-12"/"P12" for projects.
     /// </summary>
-    public static readonly Regex TaskCode = new(@"\bT\d{1,7}\b", RegexOptions.CultureInvariant);
+    public static readonly Regex TaskCode = new(@"\bT\d{1,7}\b");
 
-    public static readonly Regex ProjectCode = new(@"\bP-?\d{1,6}\b", RegexOptions.CultureInvariant);
+    public static readonly Regex ProjectCode = new(@"\bP-?\d{1,6}\b");
 
     /// <summary>All locators, by name, so the discovery can report how many elements each one matches.</summary>
     public static IReadOnlyList<(string Name, Func<IPage, ILocator> Locate)> Probes { get; } =
