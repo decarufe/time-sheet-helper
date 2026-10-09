@@ -1,0 +1,30 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#chats('19%3Aa%40unq.gbl.spaces')/messages",
+  "@odata.nextLink": "https://graph.microsoft.com/v1.0/chats/19:a@unq.gbl.spaces/messages?$top=50&$skiptoken=page3",
+  "value": [
+    {
+      "id": "1728100000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-05T09:30:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "in range" },
+      "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+    },
+    {
+      "id": "1728090000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-05T09:00:00Z",
+      "deletedDateTime": "2026-10-05T09:01:00Z",
+      "body": { "contentType": "text", "content": "" },
+      "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+    },
+    {
+      "id": "1727000000000",
+      "messageType": "message",
+      "createdDateTime": "2026-10-04T22:00:00Z",
+      "deletedDateTime": null,
+      "body": { "contentType": "text", "content": "before the range" },
+      "from": { "user": { "id": "me-123", "displayName": "Eric" } }
+    }
+  ]
+}
