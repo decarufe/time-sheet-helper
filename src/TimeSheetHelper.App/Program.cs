@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using TimeSheetHelper.App;
 using TimeSheetHelper.App.Components;
+using TimeSheetHelper.Collectors.Microsoft365;
 using TimeSheetHelper.Collectors.Windows;
 using TimeSheetHelper.Storage;
 
@@ -18,6 +19,7 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddTimeSheetStorage(DataPaths.DatabaseConnectionString);
 builder.Services.AddWindowsCollectors(builder.Configuration);
+builder.Services.AddMicrosoft365Collectors(builder.Configuration);
 builder.Services.AddSingleton<TrayIcon>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 
