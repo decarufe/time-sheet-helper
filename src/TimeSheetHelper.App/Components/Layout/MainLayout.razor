@@ -1,9 +1,21 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
-@Body
+<nav class="app-nav">
+    <span class="brand">Time Sheet Helper</span>
+    <NavLink href="" Match="NavLinkMatch.All">Semaine</NavLink>
+    <NavLink href="jour">Jour</NavLink>
+    <NavLink href="regles">Règles</NavLink>
+    <NavLink href="sources">Sources</NavLink>
+    <NavLink href="soumettre">Soumettre</NavLink>
+    <NavLink href="activite">Activité brute</NavLink>
+</nav>
+
+<main>
+    @Body
+</main>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
+    Une erreur inattendue s'est produite.
+    <a href="." class="reload">Recharger</a>
     <span class="dismiss">🗙</span>
 </div>

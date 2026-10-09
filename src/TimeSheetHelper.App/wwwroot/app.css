@@ -74,3 +74,22 @@ code { font-size: 0.85em; word-break: break-all; }
     z-index: 1000;
 }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 0.75rem; top: 0.5rem; }
+
+.app-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    margin: -16px -24px 16px;
+    padding: 8px 24px;
+}
+.app-nav .brand { font-weight: 600; margin-right: 16px; }
+.app-nav a {
+    color: var(--fg);
+    text-decoration: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+.app-nav a:hover { background: var(--row-alt); }
+.app-nav a.active { background: var(--accent); color: #fff; }
