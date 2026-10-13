@@ -98,6 +98,20 @@ public class ForecastTimesheetDomTests
         Assert.Null(ForecastTimesheetDom.FindRow(rows, Task("Acme/Développement", "Acme", "Développement")));
     }
 
+    [Fact]
+    public void Internal_time_row_without_project_is_found_by_task_name()
+    {
+        ForecastGridRow[] rows =
+        [
+            ForecastTimesheetDom.ParseRow(0, "T3382 - Rencontre", "Rencontre", "P225 - Nexus", "Nexus", "", NoHours),
+            ForecastTimesheetDom.ParseRow(1, "Sport", "Sport", "", "", "", NoHours),
+        ];
+
+        Assert.Equal(ForecastTimesheetDom.NoProject, rows[1].ProjectName);
+        Assert.Equal(1, ForecastTimesheetDom.FindRow(rows, Task("Internal Time/Sport", "Internal Time", "Sport"))?.Index);
+        Assert.Null(ForecastTimesheetDom.FindRow(rows, Task("Internal Time/Bénévolat", "Internal Time", "Bénévolat")));
+    }
+
     private static ForecastTask Task(string externalId, string project, string name) =>
         new() { ExternalId = externalId, ProjectName = project, TaskName = name };
 }

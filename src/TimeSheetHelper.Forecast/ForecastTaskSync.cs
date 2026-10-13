@@ -67,10 +67,12 @@ public static class ForecastTaskSync
     /// <summary>
     /// Upserts the tasks by ExternalId and marks cached tasks that were not seen as inactive (never deleted: rules
     /// and drafts reference them). A cached "project/task" row is re-keyed when the same task now comes with a code.
-    /// When nothing was read, nothing is deactivated (a broken selector must not wipe the cache).
+    /// When nothing was read, nothing is deactivated (a broken selector must not wipe the cache). Scraped pages only
+    /// show a weekly subset of the tasks, so callers pass <paramref name="deactivateMissing"/> = false for them.
     /// </summary>
     public static async Task<ForecastTaskSyncResult> UpsertAsync(
-        TimeSheetDbContext db, IEnumerable<ParsedForecastTask> parsed, DateTime nowUtc, CancellationToken cancellationToken = default)
+        TimeSheetDbContext db, IEnumerable<ParsedForecastTask> parsed, DateTime nowUtc,
+        bool deactivateMissing = true, CancellationToken cancellationToken = default)
     {
         var incoming = parsed
             .GroupBy(p => p.ExternalId, StringComparer.Ordinal)
@@ -96,6 +98,15 @@ public static class ForecastTaskSync
                 if (p.ExternalId != fallbackKey && byExternalId.TryGetValue(fallbackKey, out task))
                 {
                     byExternalId.Remove(fallbackKey);
+                    task.ExternalId = p.ExternalId;
+                    byExternalId[p.ExternalId] = task;
+                    rekeyed = true;
+                }
+                else if (p.ExternalId == fallbackKey
+                    && byExternalId.TryGetValue($"{ForecastTimesheetDom.NoProject}/{p.TaskName}", out task))
+                {
+                    // Internal time is scraped without a project label: adopt that row instead of duplicating it.
+                    byExternalId.Remove($"{ForecastTimesheetDom.NoProject}/{p.TaskName}");
                     task.ExternalId = p.ExternalId;
                     byExternalId[p.ExternalId] = task;
                     rekeyed = true;
@@ -135,10 +146,13 @@ public static class ForecastTaskSync
         }
 
         var deactivated = 0;
-        foreach (var task in existing.Where(t => t.IsActive && !seen.Contains(t.Id)))
+        if (deactivateMissing)
         {
-            task.IsActive = false;
-            deactivated++;
+            foreach (var task in existing.Where(t => t.IsActive && !seen.Contains(t.Id)))
+            {
+                task.IsActive = false;
+                deactivated++;
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);

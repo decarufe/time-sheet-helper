@@ -18,6 +18,9 @@ public static class Cli
           TimeSheetHelper forecast login                    connexion à Forecast dans Edge (session conservée)
           TimeSheetHelper forecast discover                 capture l'interface Forecast pour ajuster les sélecteurs
           TimeSheetHelper forecast sync-tasks               met à jour la liste locale des tâches Forecast
+          TimeSheetHelper forecast import-tasks <fichier> [--desactiver-absentes]
+                                                            importe un tableau projet/tâche (colonnes séparées par une tabulation)
+          TimeSheetHelper forecast export-tasks             affiche la liste locale au même format
           TimeSheetHelper sync [--week AAAA-MM-JJ] [--source nom]
                                                             collecte les sources à la demande pour une semaine
         """;
@@ -46,6 +49,8 @@ public static class Cli
             ["forecast", "login"] => await forecast.LoginAsync(Console.Out, cts.Token),
             ["forecast", "discover"] => await forecast.DiscoverAsync(Console.Out, cts.Token),
             ["forecast", "sync-tasks"] => await forecast.SyncTasksAsync(Console.Out, cts.Token),
+            ["forecast", "import-tasks", var file, .. var importOptions] => await ImportTasksAsync(host.Services, file, importOptions, cts.Token),
+            ["forecast", "export-tasks"] => await ExportTasksAsync(host.Services, cts.Token),
             ["sync", .. var options] => await SyncAsync(host.Services, options, cts.Token),
             _ => PrintUsage(),
         };
@@ -105,6 +110,31 @@ public static class Cli
             }
         }
         return exitCode;
+    }
+
+    private static async Task<int> ImportTasksAsync(IServiceProvider services, string file, string[] options, CancellationToken cancellationToken)
+    {
+        var deactivateMissing = options.Contains("--desactiver-absentes", StringComparer.Ordinal);
+        if (options.Except(["--desactiver-absentes"]).Any())
+            return PrintUsage();
+        if (!File.Exists(file))
+        {
+            Console.Error.WriteLine($"Fichier introuvable : {file}");
+            return 1;
+        }
+
+        var result = await services.GetRequiredService<ForecastTaskImporter>()
+            .ImportAsync(await File.ReadAllTextAsync(file, cancellationToken), deactivateMissing, cancellationToken);
+        foreach (var warning in result.Warnings)
+            Console.WriteLine($"⚠ {warning}");
+        Console.WriteLine(result.Summary);
+        return result.Sync.Warning is null ? 0 : 2;
+    }
+
+    private static async Task<int> ExportTasksAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        Console.WriteLine(await services.GetRequiredService<ForecastTaskImporter>().ExportAsync(cancellationToken));
+        return 0;
     }
 
     private static DateOnly StartOfWeek(DateOnly day) => day.AddDays(-(((int)day.DayOfWeek + 6) % 7));

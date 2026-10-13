@@ -100,6 +100,70 @@ public sealed class ForecastTaskSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task Upsert_without_deactivation_keeps_tasks_missing_from_the_input()
+    {
+        await using (var db = CreateDb())
+        {
+            db.ForecastTasks.Add(new ForecastTask { ExternalId = "T2", ProjectName = "Acme", TaskName = "Other week" });
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = CreateDb())
+        {
+            var result = await ForecastTaskSync.UpsertAsync(db, [Parsed("T1", "Acme", "Dev")], Now, deactivateMissing: false);
+            Assert.Equal((1, 0, 0), (result.Added, result.Updated, result.Deactivated));
+        }
+
+        await using var check = CreateDb();
+        Assert.All(await check.ForecastTasks.ToListAsync(), t => Assert.True(t.IsActive));
+    }
+
+    [Fact]
+    public async Task Upsert_adopts_a_project_less_internal_row_instead_of_duplicating_it()
+    {
+        await using (var db = CreateDb())
+        {
+            db.ForecastTasks.Add(new ForecastTask { ExternalId = "(sans projet)/Sport", ProjectName = "(sans projet)", TaskName = "Sport" });
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = CreateDb())
+            await ForecastTaskSync.UpsertAsync(db, [Parsed("Internal Time/Sport", "Internal Time", "Sport")], Now, deactivateMissing: false);
+
+        await using var check = CreateDb();
+        var single = await check.ForecastTasks.SingleAsync();
+        Assert.Equal("Internal Time/Sport", single.ExternalId);
+        Assert.Equal("Internal Time", single.ProjectName);
+    }
+
+    [Fact]
+    public async Task Importer_applies_a_pasted_table_and_can_deactivate_the_rest()
+    {
+        await using (var db = CreateDb())
+        {
+            db.ForecastTasks.Add(new ForecastTask { ExternalId = "T1", ProjectName = "Old", TaskName = "Old task" });
+            await db.SaveChangesAsync();
+        }
+
+        var importer = new ForecastTaskImporter(new SharedConnectionFactory(CreateDb), new FakeTimeProvider(Now));
+        var result = await importer.ImportAsync("Projet\tTask\nP1-Acme\tT2-Dev\n-Internal Time\t-Sport\n", deactivateMissing: true);
+
+        Assert.Equal((2, 0, 1), (result.Sync.Added, result.Sync.Updated, result.Sync.Deactivated));
+        Assert.Contains("T2-Dev", await importer.ExportAsync());
+        Assert.DoesNotContain("Old task", await importer.ExportAsync());
+    }
+
+    private sealed class SharedConnectionFactory(Func<TimeSheetDbContext> create) : IDbContextFactory<TimeSheetDbContext>
+    {
+        public TimeSheetDbContext CreateDbContext() => create();
+    }
+
+    private sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(utcNow, TimeSpan.Zero);
+    }
+
+    [Fact]
     public void Parse_uses_task_and_project_codes()
     {
         var row = new RawForecastTaskRow(["T123 Intégration API", "P-7 Acme Portail", "2h 30m", "En cours"], ["/project/P-7/task/T123"]);

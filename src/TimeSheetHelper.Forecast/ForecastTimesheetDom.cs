@@ -24,6 +24,9 @@ public sealed record ForecastGridSnapshot(IReadOnlyList<string> DayHeaders, IRea
 /// </summary>
 public static partial class ForecastTimesheetDom
 {
+    /// <summary>Project label of rows that show none (internal time).</summary>
+    public const string NoProject = "(sans projet)";
+
     private const string SnapshotScript = """
         () => {
           const text = e => (e?.innerText ?? '').replace(/\s+/g, ' ').trim();
@@ -78,7 +81,7 @@ public static partial class ForecastTimesheetDom
             taskCode,
             NonEmpty(taskName) ?? taskLabel ?? "(sans nom)",
             projectCode,
-            NonEmpty(projectName) ?? projectLabel ?? projectCode ?? "(sans projet)",
+            NonEmpty(projectName) ?? projectLabel ?? projectCode ?? NoProject,
             NonEmpty(phase),
             hours);
     }
@@ -148,7 +151,17 @@ public static partial class ForecastTimesheetDom
             .Where(r => ForecastWeekGrid.Normalize(r.TaskName) == ForecastWeekGrid.Normalize(task.TaskName))
             .Where(r => ForecastWeekGrid.Normalize(r.ProjectName) == ForecastWeekGrid.Normalize(task.ProjectName))
             .ToList();
-        return byName.Count == 1 ? byName[0] : null;
+        if (byName.Count == 1)
+            return byName[0];
+        if (byName.Count > 1)
+            return null;
+
+        // Internal time shows no project label: fall back on the task name among the rows without a task code.
+        var byNameOnly = rows
+            .Where(r => r.TaskCode is null && r.ProjectName == NoProject)
+            .Where(r => ForecastWeekGrid.Normalize(r.TaskName) == ForecastWeekGrid.Normalize(task.TaskName))
+            .ToList();
+        return byNameOnly.Count == 1 ? byNameOnly[0] : null;
     }
 
     private static bool TryMonth(string text, out int month)

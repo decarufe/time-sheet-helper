@@ -1,0 +1,83 @@
+.page {
+    --ok: #1a7f37;
+    --danger: #cf222e;
+    --warn: #9a6700;
+    --accent-soft: rgba(9, 105, 218, 0.08);
+    max-width: 1200px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .page {
+        --ok: #3fb950;
+        --danger: #f85149;
+        --warn: #d29922;
+    }
+}
+
+.page-header h1 { font-size: 1.4rem; margin: 0 0 4px; }
+.page-header p { margin: 0 0 8px; max-width: 75ch; }
+
+.card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 20px;
+    background: var(--bg);
+}
+.card h2 { margin-top: 0; }
+
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; }
+
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 0.85rem;
+    resize: vertical;
+}
+.mono { font-family: Consolas, "Cascadia Mono", monospace; }
+
+input[type=text] {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font: inherit;
+    box-sizing: border-box;
+}
+.filters { display: flex; gap: 16px; align-items: center; margin: 12px 0 4px; flex-wrap: wrap; }
+.filters input[type=text] { flex: 1 1 280px; max-width: 480px; }
+label.checkbox { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.filters label.checkbox { margin-top: 0; }
+
+.hint { color: var(--muted); font-size: 0.85rem; margin: 4px 0 8px; }
+.warn-text { color: var(--warn); }
+.ok-text { color: var(--ok); }
+.warnings { margin: 4px 0; padding-left: 20px; }
+.preview-stats { margin: 8px 0 4px; }
+
+.buttons { display: flex; gap: 8px; margin-top: 12px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.alert { border-radius: 6px; padding: 8px 12px; margin: 12px 0; }
+.alert.error { border: 1px solid var(--danger); color: var(--danger); }
+.empty { padding: 16px 0; }
+
+.table-wrap { overflow-x: auto; margin-top: 8px; }
+table.tasks td { vertical-align: middle; }
+table.tasks tr.disabled td { opacity: 0.55; }
+table.tasks code { margin-right: 6px; }
+.actions { white-space: nowrap; text-align: right; }
+.actions-col { width: 1%; }
+.nowrap { white-space: nowrap; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

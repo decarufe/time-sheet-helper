@@ -1,0 +1,209 @@
+@page "/taches"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Storage
+@inject ForecastTaskImporter Importer
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+
+<PageTitle>Tâches Forecast — Time Sheet Helper</PageTitle>
+
+<div class="page">
+    <header class="page-header">
+        <h1>Tâches Forecast</h1>
+        <p class="muted">
+            La liste des projets et des tâches proposés pour associer votre temps (sélecteur de tâche, règles, saisie dans Forecast).
+            Modifiez-la ici à la main, ou collez un tableau copié depuis Excel ou Forecast.
+        </p>
+    </header>
+
+    <section class="card">
+        <h2>Modifier la liste</h2>
+        <p class="hint">
+            Une ligne par tâche : <code>projet</code>, une tabulation, puis <code>tâche</code>.
+            Le code est optionnel : <code>P1078-Nom du projet</code> et <code>T35647-Nom de la tâche</code>.
+            Sans code (temps interne), écrivez <code>-Internal Time</code> et <code>-Sport</code>.
+            Une ligne d'en-tête (« Projet / Task ») est ignorée.
+        </p>
+        <label class="visually-hidden" for="task-text">Liste des projets et des tâches</label>
+        <textarea id="task-text" class="mono" rows="14" spellcheck="false" wrap="off"
+                  placeholder="P1078-M365 - Équipe Laurence - Intranet Centre de Marque&#9;T35647-Automatisation - Nethris"
+                  value="@text" @oninput="OnTextInput"></textarea>
+
+        @if (parsed is not null)
+        {
+            <p class="preview-stats">
+                <strong>@parsed.Tasks.Count</strong> tâche(s) reconnue(s) dans @parsed.Tasks.Select(t => t.ProjectName).Distinct(StringComparer.Ordinal).Count() projet(s).
+            </p>
+            @if (parsed.Warnings.Count > 0)
+            {
+                <ul class="warnings">
+                    @foreach (var warning in parsed.Warnings.Take(8))
+                    {
+                        <li class="warn-text">@warning</li>
+                    }
+                    @if (parsed.Warnings.Count > 8)
+                    {
+                        <li class="muted">… et @(parsed.Warnings.Count - 8) autre(s).</li>
+                    }
+                </ul>
+            }
+        }
+
+        <label class="checkbox">
+            <input type="checkbox" @bind="deactivateMissing" />
+            Désactiver les tâches actives qui ne sont plus dans ce texte
+        </label>
+        <p class="hint">Rien n'est supprimé : une tâche désactivée disparaît des sélecteurs, mais les règles et les feuilles de temps qui l'utilisent restent intactes. Vous pouvez la réactiver plus bas.</p>
+
+        <div class="buttons">
+            <button class="primary" disabled="@(busy || parsed is not { Tasks.Count: > 0 })" @onclick="ApplyAsync">
+                @(busy ? "Enregistrement…" : "Enregistrer la liste")
+            </button>
+            <button disabled="@busy" @onclick="ReloadTextAsync">Recharger la liste actuelle</button>
+        </div>
+        @if (error is not null)
+        {
+            <div class="alert error" role="alert">@error</div>
+        }
+        else if (message is not null)
+        {
+            <p class="ok-text" role="status">@message</p>
+        }
+    </section>
+
+    <section class="card">
+        <div class="section-head">
+            <h2>Tâches enregistrées</h2>
+            <span class="muted">@tasks.Count(t => t.IsActive) active(s) sur @tasks.Count</span>
+        </div>
+        <div class="filters">
+            <label class="visually-hidden" for="task-filter">Filtrer</label>
+            <input id="task-filter" type="text" placeholder="Filtrer par projet, tâche ou code…" @bind="filter" @bind:event="oninput" />
+            <label class="checkbox"><input type="checkbox" @bind="showInactive" /> Afficher les tâches désactivées</label>
+        </div>
+
+        @if (!visible.Any())
+        {
+            <p class="empty muted">Aucune tâche à afficher.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="tasks">
+                    <thead>
+                        <tr><th>Projet</th><th>Tâche</th><th>Vue le</th><th class="actions-col"><span class="visually-hidden">Actions</span></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var task in visible)
+                        {
+                            <tr class="@(task.IsActive ? null : "disabled")">
+                                <td>@if (task.ProjectCode is { } pc) { <code>@pc</code> } @task.ProjectName</td>
+                                <td>@if (ForecastSelectors.TaskCode.IsMatch(task.ExternalId)) { <code>@task.ExternalId</code> } @task.TaskName</td>
+                                <td class="nowrap muted">@(task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
+                                <td class="actions">
+                                    <button @onclick="() => ToggleAsync(task)">@(task.IsActive ? "Désactiver" : "Réactiver")</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private string text = "";
+    private ForecastTaskListParseResult? parsed;
+    private bool deactivateMissing = true;
+    private bool busy;
+    private string? message;
+    private string? error;
+    private string filter = "";
+    private bool showInactive;
+    private List<ForecastTask> tasks = [];
+
+    private IEnumerable<ForecastTask> visible =>
+        tasks
+            .Where(t => showInactive || t.IsActive)
+            .Where(t => string.IsNullOrWhiteSpace(filter)
+                || $"{t.ProjectCode} {t.ProjectName} {t.ExternalId} {t.TaskName}".Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTasksAsync();
+        await ReloadTextAsync();
+    }
+
+    private void OnTextInput(ChangeEventArgs e)
+    {
+        text = e.Value?.ToString() ?? "";
+        parsed = ForecastTaskListImport.Parse(text);
+        message = null;
+        error = null;
+    }
+
+    private async Task ReloadTextAsync()
+    {
+        text = await Importer.ExportAsync();
+        parsed = ForecastTaskListImport.Parse(text);
+        message = null;
+        error = null;
+    }
+
+    private async Task LoadTasksAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tasks = await db.ForecastTasks.AsNoTracking().ToListAsync();
+    }
+
+    private async Task ApplyAsync()
+    {
+        busy = true;
+        message = error = null;
+        try
+        {
+            var result = await Importer.ImportAsync(text, deactivateMissing);
+            await LoadTasksAsync();
+            if (result.Sync.Warning is not null)
+                error = result.Sync.Warning;
+            else
+            {
+                message = result.Summary;
+                await ReloadTextAsync();
+                message = result.Summary;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task ToggleAsync(ForecastTask task)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.ForecastTasks.FindAsync(task.Id);
+            if (entity is null)
+                return;
+            entity.IsActive = !entity.IsActive;
+            await db.SaveChangesAsync();
+            await LoadTasksAsync();
+            await ReloadTextAsync();
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+    }
+}

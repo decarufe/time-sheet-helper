@@ -329,6 +329,7 @@
             <button class="primary" disabled="@ForecastOps.IsBusy" @onclick="ForecastLoginAsync">Se connecter à Forecast</button>
             <button disabled="@ForecastOps.IsBusy" @onclick="ForecastSyncTasksAsync">Synchroniser les tâches</button>
             <button disabled="@ForecastOps.IsBusy" @onclick="ForecastDiscoverAsync">Découverte de l'interface</button>
+            <a href="taches">Modifier la liste des tâches</a>
         </div>
         <OpStatus State="@Op("forecast")" />
         @if (discoveryFolder is not null)

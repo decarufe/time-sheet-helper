@@ -37,7 +37,8 @@ public sealed class ForecastTaskReader(
         }
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var result = await ForecastTaskSync.UpsertAsync(db, parsed, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+        var result = await ForecastTaskSync.UpsertAsync(
+            db, parsed, timeProvider.GetUtcNow().UtcDateTime, deactivateMissing: false, cancellationToken: cancellationToken);
         logger.LogInformation("{Summary}", result.Summary);
         return result;
     }
