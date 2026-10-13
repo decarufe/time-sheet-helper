@@ -30,5 +30,6 @@ public static class AppServices
     {
         await using var db = await services.GetRequiredService<IDbContextFactory<TimeSheetDbContext>>().CreateDbContextAsync();
         await db.Database.MigrateAsync();
+        await IgnoredTask.EnsureAsync(db, services.GetRequiredService<TimeProvider>().GetUtcNow().UtcDateTime);
     }
 }

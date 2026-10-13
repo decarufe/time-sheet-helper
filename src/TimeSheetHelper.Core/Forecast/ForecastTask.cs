@@ -15,5 +15,12 @@ public sealed class ForecastTask
     public bool IsActive { get; set; } = true;
     public DateTime LastSeenUtc { get; set; }
 
-    public string DisplayName => $"{ClientName ?? ProjectName} / {TaskName}";
+    /// <summary>ExternalId of the built-in task that removes slots or meetings from the timesheet.</summary>
+    public const string IgnoredExternalId = "ignored";
+
+    public const string IgnoredLabel = "Ignoré";
+
+    public bool IsIgnored => ExternalId == IgnoredExternalId;
+
+    public string DisplayName => IsIgnored ? IgnoredLabel : $"{ClientName ?? ProjectName} / {TaskName}";
 }

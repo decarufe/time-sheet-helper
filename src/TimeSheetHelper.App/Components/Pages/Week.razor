@@ -53,7 +53,7 @@
             </p>
         }
 
-        @if (proposal.Tasks.Count == 0)
+        @if (proposal.Tasks.Values.All(t => t.IsIgnored))
         {
             <div class="empty">
                 <strong>Aucune tâche Forecast : synchronisez-les depuis la page <a href="sources">Sources</a>.</strong>
@@ -304,7 +304,7 @@
 }
 
 @code {
-    private sealed record Cell(decimal Hours, double? Confidence);
+    private sealed record Cell(decimal Hours, double? Confidence, string? Notes = null);
 
     private sealed record Row(int TaskId, string Name, IReadOnlyDictionary<DateOnly, Cell> Cells, decimal Total);
 
@@ -383,7 +383,7 @@
     private List<Row> RowsFromProposal(WeekProposal week)
     {
         var hours = week.Days
-            .SelectMany(d => d.Tasks.Select(t => (d.Date, t.ForecastTaskId, t.Hours)))
+            .SelectMany(d => d.Tasks.Select(t => (d.Date, t.ForecastTaskId, t.Hours, t.Notes)))
             .Where(x => x.Hours > 0)
             .ToList();
 
@@ -391,7 +391,7 @@
             .GroupBy(x => x.ForecastTaskId)
             .Select(g =>
             {
-                var cells = g.ToDictionary(x => x.Date, x => new Cell(x.Hours, AverageConfidence(week, x.Date, g.Key)));
+                var cells = g.ToDictionary(x => x.Date, x => new Cell(x.Hours, AverageConfidence(week, x.Date, g.Key), x.Notes));
                 return new Row(g.Key, TaskName(week, g.Key), cells, g.Sum(x => x.Hours));
             })
             .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
@@ -405,7 +405,7 @@
             .Select(g => new Row(
                 g.Key,
                 TaskName(week, g.Key),
-                g.GroupBy(e => e.Date).ToDictionary(d => d.Key, d => new Cell(d.Sum(e => e.Hours), null)),
+                g.GroupBy(e => e.Date).ToDictionary(d => d.Key, d => new Cell(d.Sum(e => e.Hours), null, d.Select(e => e.Notes).FirstOrDefault(n => !string.IsNullOrEmpty(n)))),
                 g.Sum(e => e.Hours)))
             .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -547,6 +547,8 @@
     private string CellTitle(Row row, DateOnly day, Cell cell)
     {
         var text = $"{row.Name} — {day.ToString("dddd d MMMM", TimesheetUi.French)} : {TimesheetUi.Hours(cell.Hours)} h";
+        if (!string.IsNullOrEmpty(cell.Notes))
+            text += $" — {cell.Notes}";
         return cell.Confidence is { } c && !IsSubmitted ? $"{text} (confiance {TimesheetUi.Percent(c)})" : text;
     }
 

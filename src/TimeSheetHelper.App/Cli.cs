@@ -7,7 +7,7 @@ namespace TimeSheetHelper.App;
 
 /// <summary>
 /// Command-line entry points. Running without arguments starts the tray app instead.
-///   TimeSheetHelper forecast login | discover | sync-tasks
+///   TimeSheetHelper forecast login | logout | tools | call | sync-tasks
 ///   TimeSheetHelper sync [--week yyyy-MM-dd] [--source name]
 /// </summary>
 public static class Cli
@@ -15,8 +15,10 @@ public static class Cli
     private const string Usage = """
         Utilisation :
           TimeSheetHelper                                   démarre l'application (icône de notification + UI)
-          TimeSheetHelper forecast login                    connexion à Forecast dans Edge (session conservée)
-          TimeSheetHelper forecast discover                 capture l'interface Forecast pour ajuster les sélecteurs
+          TimeSheetHelper forecast login                    connexion au serveur MCP de Forecast (navigateur, session conservée)
+          TimeSheetHelper forecast logout                   oublie la connexion à Forecast
+          TimeSheetHelper forecast tools                    liste les outils du serveur MCP et ceux retenus par l'application
+          TimeSheetHelper forecast call <outil> [json]      appelle un outil du serveur MCP (diagnostic)
           TimeSheetHelper forecast sync-tasks               met à jour la liste locale des tâches Forecast
           TimeSheetHelper forecast import-tasks <fichier> [--desactiver-absentes]
                                                             importe un tableau projet/tâche (colonnes séparées par une tabulation)
@@ -47,7 +49,10 @@ public static class Cli
         return args switch
         {
             ["forecast", "login"] => await forecast.LoginAsync(Console.Out, cts.Token),
-            ["forecast", "discover"] => await forecast.DiscoverAsync(Console.Out, cts.Token),
+            ["forecast", "logout"] => await forecast.LogoutAsync(Console.Out, cts.Token),
+            ["forecast", "tools"] => await forecast.ToolsAsync(Console.Out, cts.Token),
+            ["forecast", "call", var tool] => await forecast.CallAsync(tool, null, Console.Out, cts.Token),
+            ["forecast", "call", var tool, var json] => await forecast.CallAsync(tool, json, Console.Out, cts.Token),
             ["forecast", "sync-tasks"] => await forecast.SyncTasksAsync(Console.Out, cts.Token),
             ["forecast", "import-tasks", var file, .. var importOptions] => await ImportTasksAsync(host.Services, file, importOptions, cts.Token),
             ["forecast", "export-tasks"] => await ExportTasksAsync(host.Services, cts.Token),

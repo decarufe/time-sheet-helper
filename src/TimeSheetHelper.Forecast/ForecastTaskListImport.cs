@@ -41,8 +41,8 @@ public static partial class ForecastTaskListImport
             if (IsHeader(cells[0], ["column 1", "colonne 1"]) && IsHeader(cells[1], ["column 2", "colonne 2"]))
                 continue;
 
-            var (projectCode, projectName) = Split(cells[0], ForecastSelectors.ProjectCode);
-            var (taskCode, taskName) = Split(cells[1], ForecastSelectors.TaskCode);
+            var (projectCode, projectName) = Split(cells[0], ForecastCodes.ProjectCode);
+            var (taskCode, taskName) = Split(cells[1], ForecastCodes.TaskCode);
             if (projectName.Length == 0 || taskName.Length == 0)
             {
                 warnings.Add($"Ligne {lineNumber} ignorée : nom de projet ou de tâche vide.");
@@ -74,20 +74,20 @@ public static partial class ForecastTaskListImport
     /// <summary>The cache as editable text, in the format <see cref="Parse"/> reads back (active tasks only).</summary>
     public static string Format(IEnumerable<Core.Forecast.ForecastTask> tasks) =>
         string.Join(Environment.NewLine, tasks
-            .Where(t => t.IsActive)
+            .Where(t => t.IsActive && !t.IsIgnored)
             .OrderBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase)
             .Select(t =>
             {
                 var project = $"{t.ProjectCode}-{t.ProjectName}";
-                var task = ForecastSelectors.TaskCode.IsMatch(t.ExternalId) ? $"{t.ExternalId}-{t.TaskName}" : $"-{t.TaskName}";
+                var task = ForecastCodes.TaskCode.IsMatch(t.ExternalId) ? $"{t.ExternalId}-{t.TaskName}" : $"-{t.TaskName}";
                 return $"{project}\t{task}";
             }));
 
-    private static string CollapseSpaces(string text) => Whitespace().Replace(text, " ").Trim();
+    internal static string CollapseSpaces(string text) => Whitespace().Replace(text, " ").Trim();
 
     private static bool IsHeader(string cell, string[] words) =>
-        words.Contains(ForecastWeekGrid.Normalize(cell), StringComparer.Ordinal);
+        words.Contains(ForecastCodes.Normalize(cell), StringComparer.Ordinal);
 
     private static string Short(string text) => text.Length <= 60 ? text.Trim() : text.Trim()[..60] + "…";
 
@@ -125,6 +125,61 @@ public sealed class ForecastTaskImporter(IDbContextFactory<TimeSheetDbContext> d
             db, parsed.Tasks, timeProvider.GetUtcNow().UtcDateTime, deactivateMissing, cancellationToken);
         return new ForecastTaskImportResult(parsed.Warnings, sync);
     }
+
+    /// <summary>
+    /// Adds one task (or reactivates it when it already exists) so it can be assigned right away. A project name that
+    /// is already cached reuses its code and client. Codes are optional ("P1078", "T35647").
+    /// </summary>
+    public async Task<ForecastTaskAddResult> AddAsync(
+        string? projectName, string? taskName, string? projectCode = null, string? taskCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        projectName = ForecastTaskListImport.CollapseSpaces(projectName ?? "");
+        taskName = ForecastTaskListImport.CollapseSpaces(taskName ?? "");
+        if (projectName.Length == 0)
+            return ForecastTaskAddResult.Fail("Indiquez le projet.");
+        if (taskName.Length == 0)
+            return ForecastTaskAddResult.Fail("Indiquez le nom de la tâche.");
+
+        var normalizedProjectCode = NormalizeCode(projectCode, ForecastCodes.ProjectCode);
+        var normalizedTaskCode = NormalizeCode(taskCode, ForecastCodes.TaskCode);
+        if (normalizedProjectCode == InvalidCode)
+            return ForecastTaskAddResult.Fail("Code de projet invalide : attendu « P1078 » (ou laissez vide).");
+        if (normalizedTaskCode == InvalidCode)
+            return ForecastTaskAddResult.Fail("Code de tâche invalide : attendu « T35647 » (ou laissez vide).");
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var sameProject = await db.ForecastTasks
+            .Where(t => t.ProjectName == projectName)
+            .OrderByDescending(t => t.IsActive)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var parsed = new ParsedForecastTask(
+            normalizedTaskCode ?? $"{projectName}/{taskName}",
+            sameProject?.ProjectName ?? projectName,
+            normalizedProjectCode ?? sameProject?.ProjectCode,
+            sameProject?.ClientName,
+            taskName);
+        await ForecastTaskSync.UpsertAsync(db, [parsed], timeProvider.GetUtcNow().UtcDateTime, deactivateMissing: false, cancellationToken);
+
+        var id = await db.ForecastTasks.Where(t => t.ExternalId == parsed.ExternalId).Select(t => t.Id).FirstAsync(cancellationToken);
+        return new ForecastTaskAddResult(id, null);
+    }
+
+    private const string InvalidCode = "\0invalid";
+
+    private static string? NormalizeCode(string? code, System.Text.RegularExpressions.Regex pattern)
+    {
+        code = code?.Trim().ToUpperInvariant();
+        if (string.IsNullOrEmpty(code))
+            return null;
+        return pattern.Match(code) is { Success: true } m && m.Value == code ? code : InvalidCode;
+    }
+}
+
+public sealed record ForecastTaskAddResult(int? TaskId, string? Error)
+{
+    public static ForecastTaskAddResult Fail(string error) => new(null, error);
 }
 
 public sealed record ForecastTaskImportResult(IReadOnlyList<string> Warnings, ForecastTaskSyncResult Sync)

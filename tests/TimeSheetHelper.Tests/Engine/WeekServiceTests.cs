@@ -152,6 +152,73 @@ public class WeekServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Assignment_comment_reaches_the_week_and_the_draft()
+    {
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(9), Fx.Mon(9, 30)), _support.Id, "  Revue de code  ");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(10), Fx.Mon(10, 15)), _support.Id, "revue de code");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(11), Fx.Mon(11, 15)), _support.Id, "Réunion d'équipe");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(12), Fx.Mon(12, 15)), _support.Id);
+
+        var timeline = await _sut.GetDayTimelineAsync(Fx.Monday);
+        Assert.Equal("Revue de code", timeline.Slots.Single(s => s.SlotStartUtc == Fx.Mon(9)).Notes);
+
+        var hours = (await _sut.GetWeekAsync(Fx.Monday)).Days[0].Tasks.Single(t => t.ForecastTaskId == _support.Id);
+        Assert.Equal(1.25m, hours.Hours);
+        Assert.Equal("Revue de code ; Réunion d'équipe", hours.Notes);
+
+        var result = await _sut.RebuildDraftAsync(Fx.Monday);
+        Assert.Equal("Revue de code ; Réunion d'équipe", result.Draft.Entries.Single().Notes);
+
+        // Re-assigning without a comment drops it, and "not work" never keeps one.
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(9), Fx.Mon(9, 30)), _support.Id);
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(11), Fx.Mon(11, 15)), null, "ignoré");
+        await using var db = _host.Db();
+        var overrides = await db.SlotOverrides.ToListAsync();
+        Assert.Null(overrides.Single(o => o.SlotStartUtc == Fx.Mon(9)).Notes);
+        Assert.Null(overrides.Single(o => o.SlotStartUtc == Fx.Mon(11)).Notes);
+        Assert.Equal("revue de code", overrides.Single(o => o.SlotStartUtc == Fx.Mon(10)).Notes);
+    }
+
+    [Fact]
+    public async Task Recent_comments_are_distinct_most_recent_first_and_specific_to_the_task()
+    {
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(9), Fx.Mon(9, 15)), _support.Id, "Premier");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(10), Fx.Mon(10, 15)), _support.Id, "Deuxième");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(11), Fx.Mon(11, 30)), _support.Id, "deuxième");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(13), Fx.Mon(13, 15)), _support.Id, "Troisième");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(14), Fx.Mon(14, 15)), _dev.Id, "Autre tâche");
+        await _sut.AssignSlotsAsync(new SlotRange(Fx.Mon(15), Fx.Mon(15, 15)), _support.Id);
+
+        Assert.Equal(["Troisième", "deuxième", "Premier"], await _sut.GetRecentCommentsAsync(_support.Id));
+        Assert.Equal(["Troisième", "deuxième"], await _sut.GetRecentCommentsAsync(_support.Id, max: 2));
+        Assert.Equal(["Autre tâche"], await _sut.GetRecentCommentsAsync(_dev.Id));
+        Assert.Empty(await _sut.GetRecentCommentsAsync(_dev.Id + 100));
+    }
+
+    [Fact]
+    public async Task Non_contiguous_slots_get_the_same_task_and_comment_and_can_be_cleared_together()
+    {
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9), Fx.Mon(9, 45), Fx.Mon(14), Fx.Mon(9)], _support.Id, " Support client ");
+
+        await using (var db = _host.Db())
+        {
+            var overrides = await db.SlotOverrides.OrderBy(o => o.SlotStartUtc).ToListAsync();
+            Assert.Equal([Fx.Mon(9), Fx.Mon(9, 45), Fx.Mon(14)], overrides.Select(o => o.SlotStartUtc));
+            Assert.All(overrides, o => Assert.Equal((_support.Id, "Support client"), (o.ForecastTaskId, o.Notes)));
+        }
+
+        var monday = (await _sut.GetWeekAsync(Fx.Monday)).Days[0];
+        Assert.Equal(0.75m, monday.Tasks.Single(t => t.ForecastTaskId == _support.Id).Hours);
+
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9, 45)], _dev.Id, "Dev");
+        await _sut.ClearSlotStartsAsync([Fx.Mon(9), Fx.Mon(14)]);
+
+        await using var db2 = _host.Db();
+        var left = await db2.SlotOverrides.SingleAsync();
+        Assert.Equal((Fx.Mon(9, 45), _dev.Id, "Dev"), (left.SlotStartUtc, left.ForecastTaskId, left.Notes));
+    }
+
+    [Fact]
     public async Task Correction_on_a_group_learns_a_rule()
     {
         await _host.AddActivitiesAsync(
@@ -270,6 +337,16 @@ public class WeekServiceTests : IAsyncLifetime
 
 public class EngineConfigurationTests
 {
+    [Fact]
+    public async Task Working_day_is_8_hours_by_default_and_configurable()
+    {
+        await using (var host = new EngineTestHost(new()))
+            Assert.Equal(8m, host.Get<Microsoft.Extensions.Options.IOptions<EngineOptions>>().Value.TargetHoursPerDay);
+
+        await using (var host = new EngineTestHost(new() { ["Engine:TargetHoursPerDay"] = "7.5" }))
+            Assert.Equal(7.5m, host.Get<Microsoft.Extensions.Options.IOptions<EngineOptions>>().Value.TargetHoursPerDay);
+    }
+
     [Fact]
     public async Task Settings_override_defaults()
     {

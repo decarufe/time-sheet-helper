@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TimeSheetHelper.Storage;
 
 namespace TimeSheetHelper.Forecast;
@@ -6,39 +7,101 @@ public sealed class ForecastOptions
 {
     public const string SectionName = "Forecast";
 
-    public string BaseUrl { get; set; } = "https://app.forecast.it";
+    /// <summary>MCP server of Forecast (Streamable HTTP). Overridden by the server found in <see cref="McpConfigFile"/>.</summary>
+    public string McpUrl { get; set; } = "https://mcp.forecast.it/mcp";
 
     /// <summary>
-    /// Run the browser without a window. Must stay false for the first login (SSO needs a visible window);
-    /// when true and the session is expired, the session reopens a headed window anyway.
+    /// A ".mcp.json" file ({"mcpServers": {"Forecast MCP": {"url": ..., "type": "http"}}}) used as the base of the connection.
+    /// Null looks for ".mcp.json" in the application folder and the current directory and its parents; no file means <see cref="McpUrl"/>.
     /// </summary>
-    public bool Headless { get; set; }
+    public string? McpConfigFile { get; set; }
 
-    /// <summary>Delay in milliseconds between Playwright actions (useful to watch what the automation does).</summary>
-    public float SlowMo { get; set; }
+    /// <summary>Name of the server entry read in <see cref="McpConfigFile"/>.</summary>
+    public string McpServerName { get; set; } = "Forecast MCP";
 
-    /// <summary>Browser channel; Edge is always installed on the target machines, so no browser download is needed.</summary>
-    public string Channel { get; set; } = "msedge";
+    /// <summary>Fixed loopback port of the OAuth redirect (http://localhost:port/callback), registered once with the server.</summary>
+    public int OAuthRedirectPort { get; set; } = 17653;
 
-    /// <summary>Persistent browser profile (cookies, SSO session). Defaults to %LOCALAPPDATA%\TimeSheetHelper\browser.</summary>
-    public string? UserDataDir { get; set; }
+    /// <summary>Name shown on the Forecast consent page.</summary>
+    public string ClientName { get; set; } = "Time Sheet Helper";
 
-    /// <summary>How long to wait for the user to complete the login in the headed window.</summary>
+    /// <summary>OAuth scopes to request. Empty uses the ones the server advertises.</summary>
+    public List<string> Scopes { get; set; } = [];
+
+    /// <summary>How long to wait for the user to finish the sign-in in the browser.</summary>
     public TimeSpan LoginTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Default Playwright timeout for a single action/locator wait.</summary>
-    public TimeSpan ActionTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    /// <summary>Timeout of one MCP request.</summary>
+    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
-    /// <summary>
-    /// How hours are typed into the timesheet cells. UNVERIFIED: "1h 30m" is locale-independent and is the
-    /// format Forecast displays durations in; switch to Decimal/DecimalComma if the discovery shows otherwise.
-    /// </summary>
-    public ForecastHourFormat HourFormat { get; set; } = ForecastHourFormat.HoursMinutes;
+    /// <summary>Your Forecast person id, only needed when the server cannot tell who you are.</summary>
+    public string? PersonId { get; set; }
 
-    /// <summary>Relative path of the timesheets page.</summary>
-    public string TimesheetsPath { get; set; } = "/timesheets";
+    /// <summary>Tool names to use instead of the ones guessed from the server's catalogue (see "forecast tools").</summary>
+    public ForecastToolNames Tools { get; set; } = new();
 
-    internal string ResolvedUserDataDir => UserDataDir ?? Path.Combine(DataPaths.Root, "browser");
+    /// <summary>File that stores the registered client and the tokens, protected with DPAPI.</summary>
+    public string? AuthFile { get; set; }
 
-    internal string Url(string path) => BaseUrl.TrimEnd('/') + "/" + path.TrimStart('/');
+    internal string ResolvedAuthFile => AuthFile ?? Path.Combine(DataPaths.Root, "forecast-mcp-auth.bin");
+
+    internal Uri RedirectUri => new($"http://localhost:{OAuthRedirectPort}/callback");
+
+    /// <summary>The MCP endpoint: the one of the ".mcp.json" server entry when there is one, otherwise <see cref="McpUrl"/>.</summary>
+    internal Uri ResolveEndpoint()
+    {
+        foreach (var file in CandidateConfigFiles())
+        {
+            if (TryReadServerUrl(file, McpServerName) is { } url)
+                return url;
+        }
+        return new Uri(McpUrl);
+    }
+
+    private IEnumerable<string> CandidateConfigFiles()
+    {
+        if (!string.IsNullOrWhiteSpace(McpConfigFile))
+        {
+            yield return McpConfigFile;
+            yield break;
+        }
+
+        yield return Path.Combine(AppContext.BaseDirectory, ".mcp.json");
+        for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir is not null; dir = dir.Parent)
+            yield return Path.Combine(dir.FullName, ".mcp.json");
+    }
+
+    internal static Uri? TryReadServerUrl(string file, string serverName)
+    {
+        try
+        {
+            if (!File.Exists(file))
+                return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(file), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+            if (!doc.RootElement.TryGetProperty("mcpServers", out var servers) || servers.ValueKind != JsonValueKind.Object)
+                return null;
+            foreach (var server in servers.EnumerateObject())
+            {
+                if (!string.Equals(server.Name, serverName, StringComparison.OrdinalIgnoreCase)
+                    || !server.Value.TryGetProperty("url", out var url)
+                    || url.ValueKind != JsonValueKind.String)
+                    continue;
+                return Uri.TryCreate(url.GetString(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? uri : null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // An unreadable file falls back to the configured URL.
+        }
+        return null;
+    }
+}
+
+/// <summary>Optional overrides of the tools used by the integration; null means "guess from the catalogue".</summary>
+public sealed class ForecastToolNames
+{
+    public string? ListTasks { get; set; }
+    public string? ListTimeEntries { get; set; }
+    public string? CreateTimeEntry { get; set; }
+    public string? CurrentUser { get; set; }
 }

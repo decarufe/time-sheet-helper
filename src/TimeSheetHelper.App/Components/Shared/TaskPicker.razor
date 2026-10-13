@@ -1,7 +1,9 @@
 @using Microsoft.EntityFrameworkCore
 @using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Engine
 @using TimeSheetHelper.Storage
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@inject WeekService Weeks
 
 <div class="picker-backdrop" @onclick="CancelAsync"></div>
 <div class="picker" role="dialog" aria-modal="true" aria-labelledby="@titleId" @onkeydown="OnKeyDownAsync">
@@ -14,17 +16,63 @@
         <p class="subtitle">@Subtitle</p>
     }
 
+    @if (chosen is not null)
+    {
+        <div class="comment-step">
+            <div class="chosen" style="@TimesheetUi.TaskStyle(chosen.Id)">
+                <span class="swatch" aria-hidden="true"></span>
+                <span class="name">@chosen.TaskName</span>
+                <span class="code">@chosen.ProjectName</span>
+                <button type="button" class="link" @onclick="BackToList">Changer de tâche</button>
+            </div>
+            <label for="@commentId">Commentaire (facultatif)</label>
+            <input @ref="commentInput" id="@commentId" type="text" class="comment" maxlength="@WeekService.MaxCommentLength"
+                   placeholder="Ce qui a été fait pendant ces créneaux…" autocomplete="off"
+                   @bind="comment" @bind:event="oninput" @onkeydown="OnCommentKeyDownAsync" />
+            @if (suggestions.Count > 0)
+            {
+                <div class="suggestions" role="group" aria-label="Commentaires récents pour cette tâche">
+                    <span class="muted">Récents :</span>
+                    @foreach (var suggestion in suggestions)
+                    {
+                        <button type="button" class="chip" title="@suggestion" @onclick="() => UseSuggestion(suggestion)">@suggestion</button>
+                    }
+                </div>
+            }
+            <div class="buttons">
+                <button type="button" class="primary" @onclick="ConfirmAsync">@SubmitLabel</button>
+                <button type="button" @onclick="BackToList">Retour</button>
+            </div>
+        </div>
+    }
+    else if (creating)
+    {
+        <NewTaskForm InitialTaskName="@query" OnCreated="SelectAsync" OnCancel="() => creating = false" />
+    }
+
+    else
+    {
     <input @ref="searchInput" type="search" class="search" placeholder="Rechercher une tâche, un projet ou un client…"
            aria-label="Rechercher une tâche" @onkeydown="OnSearchKeyDownAsync" @bind="query" @bind:event="oninput" @bind:after="StateHasChanged" />
+
+    @if (IgnoredTask() is { } ignored && (query.Trim().Length == 0 || Contains(ForecastTask.IgnoredLabel, query.Trim())))
+    {
+        <button type="button" class="@(ignored.Id == SelectedTaskId ? "task ignored current" : "task ignored")"
+                title="Retire ces créneaux ou ces réunions de la feuille de temps" @onclick="() => SelectAsync(ignored.Id)">
+            <span class="swatch" aria-hidden="true"></span>
+            <span class="name">@ForecastTask.IgnoredLabel</span>
+            <span class="code">Hors feuille de temps</span>
+        </button>
+    }
 
     <div class="list">
         @if (tasks is null)
         {
             <p class="muted">Chargement…</p>
         }
-        else if (tasks.Count == 0)
+        else if (tasks.All(t => t.IsIgnored))
         {
-            <p class="muted">Aucune tâche Forecast active. Synchronisez-les depuis la page <a href="sources">Sources</a>.</p>
+            <p class="muted">Aucune tâche Forecast active. Créez-en une ci-dessous ou synchronisez-les depuis la page <a href="sources">Sources</a>.</p>
         }
         else
         {
@@ -67,13 +115,24 @@
             }
         }
     </div>
+    <button type="button" class="new-task-button" @onclick="() => creating = true">
+        + Nouvelle tâche@(query.Trim().Length > 0 ? $" « {query.Trim()} »" : "")
+    </button>
+    }
 </div>
 
 @code {
     private readonly string titleId = $"picker-{Guid.NewGuid():N}";
+    private readonly string commentId = $"picker-comment-{Guid.NewGuid():N}";
     private List<ForecastTask>? tasks;
     private string query = "";
+    private bool creating;
     private ElementReference searchInput;
+    private ElementReference commentInput;
+    private ForecastTask? chosen;
+    private string comment = "";
+    private IReadOnlyList<string> suggestions = [];
+    private bool focusComment;
 
     [Parameter] public string Title { get; set; } = "Choisir une tâche";
 
@@ -83,11 +142,26 @@
     /// <summary>Task highlighted as the current choice, if any.</summary>
     [Parameter] public int? SelectedTaskId { get; set; }
 
+    /// <summary>Ask for a comment (with the latest comments of the task as suggestions) after the task is chosen.</summary>
+    [Parameter] public bool AllowComment { get; set; }
+
+    [Parameter] public string SubmitLabel { get; set; } = "Assigner";
+
+    /// <summary>Comment entered with the choice; set before <see cref="OnSelected"/> is raised (null when empty).</summary>
+    [Parameter] public string? Comment { get; set; }
+
+    [Parameter] public EventCallback<string?> CommentChanged { get; set; }
+
     [Parameter] public EventCallback<int> OnSelected { get; set; }
 
     [Parameter] public EventCallback OnCancel { get; set; }
 
     protected override async Task OnInitializedAsync()
+    {
+        await LoadTasksAsync();
+    }
+
+    private async Task LoadTasksAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         tasks = await db.ForecastTasks.AsNoTracking().Where(t => t.IsActive).ToListAsync();
@@ -100,6 +174,12 @@
             try { await searchInput.FocusAsync(); }
             catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
         }
+        else if (focusComment)
+        {
+            focusComment = false;
+            try { await commentInput.FocusAsync(); }
+            catch (Exception) { /* focus is a nicety */ }
+        }
     }
 
     private IEnumerable<ForecastTask> Filtered()
@@ -107,14 +187,64 @@
         if (tasks is null)
             return [];
         var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tasks.Where(t => terms.All(term =>
+        return tasks.Where(t => !t.IsIgnored).Where(t => terms.All(term =>
             Contains(t.TaskName, term) || Contains(t.ProjectName, term) || Contains(t.ClientName, term) || Contains(t.ProjectCode, term)));
     }
+
+    private ForecastTask? IgnoredTask() => tasks?.FirstOrDefault(t => t.IsIgnored);
 
     private static bool Contains(string? value, string term) =>
         value is not null && TimesheetUi.French.CompareInfo.IndexOf(value, term, System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace) >= 0;
 
-    private Task SelectAsync(int taskId) => OnSelected.InvokeAsync(taskId);
+    private async Task SelectAsync(int taskId)
+    {
+        if (!AllowComment || tasks?.Any(t => t.Id == taskId && t.IsIgnored) == true)
+        {
+            await OnSelected.InvokeAsync(taskId);
+            return;
+        }
+
+        if (tasks is null || tasks.All(t => t.Id != taskId))
+            await LoadTasksAsync();
+        chosen = tasks?.FirstOrDefault(t => t.Id == taskId);
+        if (chosen is null)
+        {
+            await OnSelected.InvokeAsync(taskId);
+            return;
+        }
+
+        creating = false;
+        comment = "";
+        suggestions = await Weeks.GetRecentCommentsAsync(taskId);
+        focusComment = true;
+    }
+
+    private void BackToList()
+    {
+        chosen = null;
+        suggestions = [];
+    }
+
+    private void UseSuggestion(string suggestion)
+    {
+        comment = suggestion;
+        focusComment = true;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (chosen is null)
+            return;
+        var text = comment.Trim();
+        await CommentChanged.InvokeAsync(text.Length == 0 ? null : text);
+        await OnSelected.InvokeAsync(chosen.Id);
+    }
+
+    private async Task OnCommentKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await ConfirmAsync();
+    }
 
     private Task CancelAsync() => OnCancel.InvokeAsync();
 

@@ -33,8 +33,8 @@ public static class ForecastTaskSync
         var cells = row.Cells.Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
         var all = string.Join(" ", cells.Concat(row.Hrefs));
 
-        var taskCode = ForecastSelectors.TaskCode.Match(all) is { Success: true } t ? t.Value : null;
-        var projectCode = ForecastSelectors.ProjectCode.Match(all) is { Success: true } p ? p.Value : null;
+        var taskCode = ForecastCodes.TaskCode.Match(all) is { Success: true } t ? t.Value : null;
+        var projectCode = ForecastCodes.ProjectCode.Match(all) is { Success: true } p ? p.Value : null;
 
         string? taskName = null, projectName = null;
         if (taskCode is not null)
@@ -103,10 +103,10 @@ public static class ForecastTaskSync
                     rekeyed = true;
                 }
                 else if (p.ExternalId == fallbackKey
-                    && byExternalId.TryGetValue($"{ForecastTimesheetDom.NoProject}/{p.TaskName}", out task))
+                    && byExternalId.TryGetValue($"{ForecastCodes.NoProject}/{p.TaskName}", out task))
                 {
                     // Internal time is scraped without a project label: adopt that row instead of duplicating it.
-                    byExternalId.Remove($"{ForecastTimesheetDom.NoProject}/{p.TaskName}");
+                    byExternalId.Remove($"{ForecastCodes.NoProject}/{p.TaskName}");
                     task.ExternalId = p.ExternalId;
                     byExternalId[p.ExternalId] = task;
                     rekeyed = true;
@@ -148,7 +148,7 @@ public static class ForecastTaskSync
         var deactivated = 0;
         if (deactivateMissing)
         {
-            foreach (var task in existing.Where(t => t.IsActive && !seen.Contains(t.Id)))
+            foreach (var task in existing.Where(t => t.IsActive && !t.IsIgnored && !seen.Contains(t.Id)))
             {
                 task.IsActive = false;
                 deactivated++;

@@ -18,7 +18,8 @@ public enum DayFlag
     OverTarget,
 }
 
-public sealed record DayTaskHours(int ForecastTaskId, decimal Hours);
+/// <param name="Notes">Distinct comments given when assigning the slots of this task, joined; null when there are none.</param>
+public sealed record DayTaskHours(int ForecastTaskId, decimal Hours, string? Notes = null);
 
 /// <param name="Tasks">Hours per classified task (multiples of 0.25).</param>
 /// <param name="TotalHours">Sum of <paramref name="Tasks"/>.</param>

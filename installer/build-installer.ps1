@@ -3,8 +3,7 @@
     Builds the Time Sheet Helper installation package (artifacts/TimeSheetHelper-<version>.zip).
 
 .DESCRIPTION
-    1. Publishes src/TimeSheetHelper.App as a self-contained win-x64 folder (not single-file:
-       Microsoft.Playwright needs its .playwright driver folder next to the executable).
+    1. Publishes src/TimeSheetHelper.App as a self-contained win-x64 folder (not single-file).
     2. Builds the VS Code extension (.vsix) when extensions/vscode exists and Node.js is available.
     3. Assembles app/, vscode/, install.ps1, uninstall.ps1, Install.cmd and README.txt into a zip.
 

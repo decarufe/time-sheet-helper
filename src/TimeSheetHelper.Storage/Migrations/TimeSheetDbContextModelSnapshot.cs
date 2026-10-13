@@ -205,6 +205,9 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.Property<int?>("ForecastTaskId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Notes")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("SlotStartUtc")
                         .HasColumnType("TEXT");
 

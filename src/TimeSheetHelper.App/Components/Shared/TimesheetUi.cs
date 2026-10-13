@@ -63,6 +63,7 @@ public static class TimesheetUi
         SlotKind.Meeting => "Réunion",
         SlotKind.Override => "Manuel",
         SlotKind.ExcludedByOverride => "Pas du travail",
+        SlotKind.Ignored => "Ignoré",
         _ => "Vide",
     };
 

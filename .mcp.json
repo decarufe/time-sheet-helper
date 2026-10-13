@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"Forecast MCP": {
+			"url": "https://mcp.forecast.it/mcp",
+			"type": "http"
+		}
+	}
+}

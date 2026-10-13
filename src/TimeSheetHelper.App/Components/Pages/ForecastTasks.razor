@@ -100,7 +100,7 @@
                         {
                             <tr class="@(task.IsActive ? null : "disabled")">
                                 <td>@if (task.ProjectCode is { } pc) { <code>@pc</code> } @task.ProjectName</td>
-                                <td>@if (ForecastSelectors.TaskCode.IsMatch(task.ExternalId)) { <code>@task.ExternalId</code> } @task.TaskName</td>
+                                <td>@if (ForecastCodes.TaskCode.IsMatch(task.ExternalId)) { <code>@task.ExternalId</code> } @task.TaskName</td>
                                 <td class="nowrap muted">@(task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
                                 <td class="actions">
                                     <button @onclick="() => ToggleAsync(task)">@(task.IsActive ? "Désactiver" : "Réactiver")</button>
@@ -158,7 +158,7 @@
     private async Task LoadTasksAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        tasks = await db.ForecastTasks.AsNoTracking().ToListAsync();
+        tasks = await db.ForecastTasks.AsNoTracking().Where(t => t.ExternalId != ForecastTask.IgnoredExternalId).ToListAsync();
     }
 
     private async Task ApplyAsync()

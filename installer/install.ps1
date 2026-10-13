@@ -3,7 +3,7 @@
     Installs (or upgrades) Time Sheet Helper for the current user. No administrator rights required.
 
 .DESCRIPTION
-    - Checks prerequisites (Windows 10/11 x64, Microsoft Edge) and offers optional tools through
+    - Checks prerequisites (Windows 10/11 x64) and offers optional tools through
       winget (Git, GitHub CLI, VS Code) - always after confirmation, unless -Yes is given.
     - Stops a running instance, copies app\ to %LOCALAPPDATA%\Programs\TimeSheetHelper while
       preserving appsettings.Local.json. User data in %LOCALAPPDATA%\TimeSheetHelper is never touched.
@@ -211,19 +211,6 @@ function ConvertTo-PlainText([Security.SecureString]$Secure) {
 # ------------------------------------------------------------------------------------------------
 # Detection helpers
 # ------------------------------------------------------------------------------------------------
-function Find-Edge {
-    $candidates = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
-        (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
-        (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')
-    )
-    foreach ($root in 'HKLM:', 'HKCU:') {
-        $appPath = Get-ItemProperty -Path "$root\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe" -ErrorAction SilentlyContinue
-        if ($appPath -and $appPath.PSObject.Properties['(default)']) { $candidates += $appPath.'(default)' }
-    }
-    return $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-}
-
 function Find-Tool {
     # Returns the path of a command-line tool, looking in PATH then in well-known folders.
     param([string]$Command, [string[]]$Fallbacks = @())
@@ -294,14 +281,6 @@ if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
     Write-Warn "Session administrateur détectée. L'installation est par utilisateur : lancez-la plutôt depuis une session normale."
 }
 
-$edge = Find-Edge
-if ($edge) {
-    Write-Ok "Microsoft Edge : $edge"
-}
-else {
-    Write-Warn "Microsoft Edge est introuvable. Il est requis pour la saisie automatique dans Forecast (Playwright, canal msedge)."
-}
-
 $winget = Find-Tool 'winget.exe' @((Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'))
 if ($winget) { Write-Ok 'winget disponible' } else { Write-Warn "winget est introuvable (App Installer) : les outils manquants devront être installés manuellement." }
 
@@ -314,10 +293,6 @@ $wantedTools = @(
         Why = 'obtention du jeton GitHub'
         Fallbacks = @((Join-Path $env:ProgramFiles 'GitHub CLI\gh.exe'), (Join-Path $env:LOCALAPPDATA 'Programs\GitHub CLI\gh.exe')) }
 )
-if (-not $edge) {
-    $wantedTools += @{ Id = 'Microsoft.Edge'; Name = 'Microsoft Edge'; Command = 'msedge.exe'; Default = $true; UserScope = $false
-        Why = 'automatisation de Forecast'; Fallbacks = @() }
-}
 
 foreach ($tool in $wantedTools) {
     $path = Find-Tool $tool.Command $tool.Fallbacks

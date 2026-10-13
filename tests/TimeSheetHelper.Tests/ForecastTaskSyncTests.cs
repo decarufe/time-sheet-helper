@@ -153,6 +153,65 @@ public sealed class ForecastTaskSyncTests : IDisposable
         Assert.DoesNotContain("Old task", await importer.ExportAsync());
     }
 
+    [Fact]
+    public async Task Add_creates_a_task_reusing_the_code_of_a_known_project()
+    {
+        await using (var db = CreateDb())
+        {
+            db.ForecastTasks.Add(new ForecastTask { ExternalId = "T1", ProjectName = "Acme", ProjectCode = "P7", ClientName = "Acme Inc", TaskName = "Dev" });
+            await db.SaveChangesAsync();
+        }
+
+        var importer = new ForecastTaskImporter(new SharedConnectionFactory(CreateDb), new FakeTimeProvider(Now));
+        var result = await importer.AddAsync("  Acme ", "Revue  de code", taskCode: "t99");
+
+        Assert.Null(result.Error);
+        await using var check = CreateDb();
+        var created = await check.ForecastTasks.SingleAsync(t => t.Id == result.TaskId);
+        Assert.Equal("T99", created.ExternalId);
+        Assert.Equal("Revue de code", created.TaskName);
+        Assert.Equal("P7", created.ProjectCode);
+        Assert.Equal("Acme Inc", created.ClientName);
+        Assert.True(created.IsActive);
+    }
+
+    [Fact]
+    public async Task Add_reactivates_an_existing_task_instead_of_duplicating_it()
+    {
+        int id;
+        await using (var db = CreateDb())
+        {
+            var task = new ForecastTask { ExternalId = "Internal Time/Sport", ProjectName = "Internal Time", TaskName = "Sport", IsActive = false };
+            db.ForecastTasks.Add(task);
+            await db.SaveChangesAsync();
+            id = task.Id;
+        }
+
+        var importer = new ForecastTaskImporter(new SharedConnectionFactory(CreateDb), new FakeTimeProvider(Now));
+        var result = await importer.AddAsync("Internal Time", "Sport");
+
+        Assert.Equal(id, result.TaskId);
+        await using var check = CreateDb();
+        Assert.True((await check.ForecastTasks.SingleAsync()).IsActive);
+    }
+
+    [Theory]
+    [InlineData("", "Dev", null, null)]
+    [InlineData("Acme", "  ", null, null)]
+    [InlineData("Acme", "Dev", "X12", null)]
+    [InlineData("Acme", "Dev", null, "T12x")]
+    public async Task Add_rejects_missing_names_and_malformed_codes(string project, string task, string? projectCode, string? taskCode)
+    {
+        var importer = new ForecastTaskImporter(new SharedConnectionFactory(CreateDb), new FakeTimeProvider(Now));
+
+        var result = await importer.AddAsync(project, task, projectCode, taskCode);
+
+        Assert.Null(result.TaskId);
+        Assert.NotNull(result.Error);
+        await using var check = CreateDb();
+        Assert.Empty(check.ForecastTasks);
+    }
+
     private sealed class SharedConnectionFactory(Func<TimeSheetDbContext> create) : IDbContextFactory<TimeSheetDbContext>
     {
         public TimeSheetDbContext CreateDbContext() => create();

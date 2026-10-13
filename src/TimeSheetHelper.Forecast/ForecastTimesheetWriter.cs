@@ -1,7 +1,5 @@
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Playwright;
 using TimeSheetHelper.Core.Forecast;
 using TimeSheetHelper.Core.Timesheets;
 using TimeSheetHelper.Storage;
@@ -9,31 +7,20 @@ using TimeSheetHelper.Storage;
 namespace TimeSheetHelper.Forecast;
 
 /// <summary>
-/// Types a <see cref="TimesheetDraft"/> into the Forecast weekly grid and reads it back.
-///
-/// Grid and cell popover are VERIFIED (see <see cref="ForecastTimesheetDom"/> and <see cref="ForecastSelectors.HourPopup"/>):
-/// a day cell opens a popover whose "Add" button creates a time entry. Only empty cells are typed into; cells that
-/// already hold other hours are reported, never changed (see <see cref="ForecastFillPlanner.Decide"/>). The read-back
-/// reloads the page so that only values actually persisted by Forecast are reported as OK.
-/// Sending the week for approval is never done here.
+/// Registers a <see cref="TimesheetDraft"/> in Forecast through the MCP server and reads it back.
+/// Only empty (task, day) cells receive a registration; a cell that already holds other hours is reported and left
+/// alone (see <see cref="ForecastFillPlanner.Decide"/>), because creating a registration adds to what exists.
+/// Sending the week for manager approval is never done here.
 /// </summary>
 public sealed class ForecastTimesheetWriter(
-    ForecastSession session,
+    ForecastApi api,
     IDbContextFactory<TimeSheetDbContext> dbFactory,
-    TimeProvider timeProvider,
     ILogger<ForecastTimesheetWriter> logger)
 {
-    private const int MaxWeekNavigationClicks = 104;
-
     public async Task<ForecastFillReport> FillWeekAsync(
         TimesheetDraft draft, ForecastSubmitMode mode, CancellationToken cancellationToken = default)
     {
         var report = new ForecastFillReport { WeekStart = draft.WeekStart, Mode = mode };
-        var stamp = timeProvider.GetLocalNow().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-        var dir = Path.Combine(DataPaths.Root, "forecast-fill",
-            $"{draft.WeekStart:yyyy-MM-dd}_{stamp}_{(mode == ForecastSubmitMode.DryRun ? "simulation" : "saisie")}");
-        Directory.CreateDirectory(dir);
-        report.OutputDirectory = dir;
 
         var plan = await PlanAsync(draft, report.Warnings, cancellationToken);
         if (plan.Count == 0)
@@ -42,52 +29,158 @@ public sealed class ForecastTimesheetWriter(
             return report;
         }
 
-        var page = await session.EnsureLoggedInAsync(cancellationToken);
-        await session.GotoAsync(page, session.Options.TimesheetsPath);
-        if (!await NavigateToWeekAsync(page, draft.WeekStart, cancellationToken))
+        var weekEnd = draft.WeekStart.AddDays(6);
+        await using var session = await api.OpenAsync(cancellationToken);
+
+        IReadOnlyList<ForecastRemoteTask> remoteTasks;
+        IReadOnlyList<ForecastRemoteEntry> existing;
+        try
         {
-            var shot = await ScreenshotAsync(page, dir, "semaine-introuvable", report);
+            remoteTasks = await session.ListTasksAsync(cancellationToken);
+            existing = await session.ListTimeEntriesAsync(draft.WeekStart, weekEnd, cancellationToken);
+            if (mode == ForecastSubmitMode.Fill)
+                session.Require(ForecastToolRole.CreateTimeEntry);
+        }
+        catch (ForecastToolException ex)
+        {
             foreach (var cell in plan)
-                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, shot,
-                    "Impossible d'afficher la semaine dans Forecast (navigation ou en-têtes à vérifier)."));
+                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, ex.Message));
             return report;
         }
 
-        await ScreenshotAsync(page, dir, "avant", report);
+        if (remoteTasks.Count == 0)
+            report.Warnings.Add("Forecast n'a renvoyé aucune tâche : impossible d'y retrouver celles du brouillon.");
 
-        var pending = new List<ForecastPlannedCell>();
-        foreach (var taskCells in plan.GroupBy(c => c.Task.Id))
+        var written = new List<(ForecastPlannedCell Cell, ForecastRemoteTask Remote, decimal Before)>();
+        var looked = new Dictionary<string, ForecastRemoteTask?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cell in plan)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var task = taskCells.First().Task;
+            if ((FindRemote(cell.Task, remoteTasks) ?? await LookUpByCodeAsync(session, cell.Task, looked, cancellationToken)) is not { } remote)
+            {
+                report.Cells.Add(Result(cell, ForecastCellStatus.RowNotFound, null,
+                    $"« {cell.Task.DisplayName} » est introuvable dans Forecast (code {cell.Task.ExternalId}) : "
+                    + "cherchez la tâche dans Forecast et reliez-la (bouton « Rechercher et relier »)."));
+                continue;
+            }
+
+            var current = HoursOf(existing, remote, cell.Date);
+            var (action, message) = ForecastFillPlanner.Decide(cell.Hours, current);
+            if (mode == ForecastSubmitMode.DryRun || action != ForecastCellAction.Type)
+            {
+                var status = action switch
+                {
+                    ForecastCellAction.AlreadyDone => ForecastCellStatus.Ok,
+                    ForecastCellAction.Conflict => ForecastCellStatus.Mismatch,
+                    _ => ForecastCellStatus.Planned,
+                };
+                report.Cells.Add(Result(cell, status, current, message));
+                continue;
+            }
+
             try
             {
-                await WriteTaskAsync(page, task, taskCells.ToList(), mode, dir, report, pending);
+                await session.CreateTimeEntryAsync(remote.Id, cell.Date, cell.Hours, cell.Notes, cancellationToken);
+                written.Add((cell, remote, current));
             }
-            catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+            catch (Exception ex) when (ex is ForecastToolException or TimeoutException or HttpRequestException)
             {
-                logger.LogWarning(ex, "Échec sur la tâche {Task}", task.DisplayName);
-                var shot = await ScreenshotAsync(page, dir, $"erreur-{task.Id}", report);
-                foreach (var cell in taskCells)
-                    report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, shot, ex.Message.Split('\n')[0]));
+                logger.LogWarning(ex, "Échec de la saisie de {Task} le {Date}", cell.Task.DisplayName, cell.Date);
+                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, ex.Message));
             }
         }
 
-        if (mode == ForecastSubmitMode.Fill && pending.Count > 0)
-            await VerifyAsync(page, draft.WeekStart, pending, report, cancellationToken);
+        if (written.Count > 0)
+            await VerifyAsync(session, draft.WeekStart, weekEnd, written, report, cancellationToken);
 
-        await ScreenshotAsync(page, dir, "apres", report);
         logger.LogInformation("{Summary}", report.Summary);
         return report;
     }
 
     /// <summary>
-    /// Sends the week for manager approval. Deliberately not implemented: the button was not found in the capture
-    /// and submitting locks the week.
+    /// Sends the week for manager approval. Deliberately not implemented: nothing in the Forecast tools has been
+    /// checked for it, and submitting locks the week.
     /// </summary>
     public Task SubmitForApprovalAsync(DateOnly weekStart, CancellationToken cancellationToken = default) =>
         throw new NotImplementedException(
-            "TODO: soumission pour approbation non implémentée tant que les sélecteurs ne sont pas vérifiés.");
+            "TODO: soumission pour approbation non implémentée : à faire à la main dans Forecast.");
+
+    /// <summary>
+    /// Time can be logged against any task, not only the ones assigned to the person (the only ones listed): a task
+    /// known by its T-number but missing from that list is asked for by number.
+    /// </summary>
+    private async Task<ForecastRemoteTask?> LookUpByCodeAsync(
+        ForecastMcpSession session, ForecastTask task, Dictionary<string, ForecastRemoteTask?> looked, CancellationToken cancellationToken)
+    {
+        if (ForecastCodes.TaskCode.Match(task.ExternalId) is not { Success: true } code)
+            return null;
+        if (looked.TryGetValue(code.Value, out var known))
+            return known;
+
+        ForecastRemoteTask? found = null;
+        try
+        {
+            found = (await session.FindTasksAsync(code.Value, cancellationToken))
+                .FirstOrDefault(r => string.Equals(r.Code, code.Value, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is ForecastToolException or TimeoutException or HttpRequestException)
+        {
+            logger.LogWarning(ex, "Recherche de la tâche {Code} impossible.", code.Value);
+        }
+
+        looked[code.Value] = found;
+        return found;
+    }
+
+    internal static ForecastRemoteTask? FindRemote(ForecastTask task, IReadOnlyList<ForecastRemoteTask> remote)
+    {
+        if (ForecastCodes.TaskCode.Match(task.ExternalId) is { Success: true } code)
+        {
+            var byCode = remote.FirstOrDefault(r => string.Equals(r.Code, code.Value, StringComparison.OrdinalIgnoreCase));
+            if (byCode is not null)
+                return byCode;
+        }
+
+        var title = Key(task.TaskName);
+        var project = Key(task.ProjectName);
+        var byNames = remote
+            .Where(r => Key(r.Title) == title)
+            .Where(r => Key(r.ProjectName) == project || Key(r.ClientName) == project)
+            .Take(2)
+            .ToList();
+        return byNames.Count == 1 ? byNames[0] : null;
+    }
+
+    private async Task VerifyAsync(
+        ForecastMcpSession session, DateOnly from, DateOnly to,
+        IReadOnlyList<(ForecastPlannedCell Cell, ForecastRemoteTask Remote, decimal Before)> written,
+        ForecastFillReport report, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ForecastRemoteEntry> after;
+        try
+        {
+            after = await session.ListTimeEntriesAsync(from, to, cancellationToken);
+        }
+        catch (Exception ex) when (ex is ForecastToolException or TimeoutException or HttpRequestException)
+        {
+            report.Warnings.Add($"Relecture impossible : {ex.Message}");
+            foreach (var (cell, _, _) in written)
+                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, "Saisi, mais non relu dans Forecast."));
+            return;
+        }
+
+        // The registrations of one project and day cannot be told apart (see HoursOf): what was added is checked for the group.
+        foreach (var group in written.GroupBy(w => (Key: w.Remote.ProjectId ?? w.Remote.Id, w.Cell.Date)))
+        {
+            var members = group.ToList();
+            var added = HoursOf(after, members[0].Remote, group.Key.Date) - members[0].Before;
+            var (status, actual, message) = ForecastFillPlanner.Compare(members.Sum(m => m.Cell.Hours), added);
+            foreach (var (cell, _, _) in members)
+                report.Cells.Add(status == ForecastCellStatus.Ok
+                    ? Result(cell, status, cell.Hours, message)
+                    : Result(cell, status, actual, message));
+        }
+    }
 
     private async Task<IReadOnlyList<ForecastPlannedCell>> PlanAsync(
         TimesheetDraft draft, ICollection<string> warnings, CancellationToken cancellationToken)
@@ -98,186 +191,21 @@ public sealed class ForecastTimesheetWriter(
         return ForecastFillPlanner.Plan(draft, tasks, warnings);
     }
 
-    private async Task WriteTaskAsync(
-        IPage page, ForecastTask task, IReadOnlyList<ForecastPlannedCell> cells, ForecastSubmitMode mode,
-        string dir, ForecastFillReport report, List<ForecastPlannedCell> pending)
-    {
-        var (row, headers) = await FindRowAsync(page, task);
-        if (row is null)
-        {
-            var status = mode == ForecastSubmitMode.DryRun ? ForecastCellStatus.Planned : ForecastCellStatus.RowNotFound;
-            foreach (var cell in cells)
-                report.Cells.Add(Result(cell, status, null, null, null,
-                    $"« {task.DisplayName} » n'est ni dans l'onglet Timesheets ni dans Find Tasks : ajoutez-la dans Forecast "
-                    + "(Add Timesheet Entry) ou en favori, puis relancez."));
-            return;
-        }
+    /// <summary>
+    /// The hours registered that day on the task. The registrations of "get_time_analysis" carry an internal task id that
+    /// matches nothing else, so they are matched by project too: two tasks of one project share their hours.
+    /// </summary>
+    private static decimal HoursOf(IReadOnlyList<ForecastRemoteEntry> entries, ForecastRemoteTask task, DateOnly date) =>
+        entries
+            .Where(e => e.Date == date)
+            .Where(e => e.TaskId == task.Id
+                || (e.TaskCode is not null && string.Equals(e.TaskCode, task.Code, StringComparison.OrdinalIgnoreCase))
+                || (task.ProjectId is not null && e.ProjectId == task.ProjectId))
+            .Sum(e => e.Hours);
 
-        var days = ForecastTimesheetDom.HeaderDates(headers, report.WeekStart);
-        foreach (var cell in cells)
-        {
-            var index = days.ToList().IndexOf(cell.Date);
-            if (index < 0 || index >= row.Hours.Count)
-            {
-                report.Cells.Add(Result(cell, ForecastCellStatus.CellNotFound, null, null, null,
-                    $"Pas de cellule pour le {cell.Date:ddd d MMM} (en-têtes : {string.Join(", ", headers)})."));
-                continue;
-            }
+    private static string Key(string? text) =>
+        new((text ?? "").Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
-            var current = row.Hours[index];
-            var (action, message) = ForecastFillPlanner.Decide(cell.Hours, current, Format(cell.Hours));
-            if (mode == ForecastSubmitMode.DryRun || action != ForecastCellAction.Type)
-            {
-                var status = action switch
-                {
-                    ForecastCellAction.AlreadyDone => ForecastCellStatus.Ok,
-                    ForecastCellAction.Conflict => ForecastCellStatus.Mismatch,
-                    _ => ForecastCellStatus.Planned,
-                };
-                report.Cells.Add(Result(cell, status, Parse(current), current, null, message));
-                continue;
-            }
-
-            await ForecastSelectors.DayCells(page, row.Index).Nth(index).ClickAsync();
-            var input = ForecastSelectors.HourPopupInput(page);
-            try
-            {
-                await input.WaitForAsync(new() { Timeout = 5000 });
-            }
-            catch (TimeoutException)
-            {
-                var shot = await ScreenshotAsync(page, dir, $"popup-introuvable-{task.Id}", report);
-                await page.Keyboard.PressAsync("Escape");
-                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, shot,
-                    "Le popup de saisie ne s'est pas ouvert : relancez « forecast discover »."));
-                continue;
-            }
-
-            await input.FillAsync(Format(cell.Hours));
-            await ForecastSelectors.HourPopupAddButton(page).ClickAsync();
-            await ForecastSelectors.HourPopup(page).WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 5000 });
-            await ForecastSession.WaitForIdleAsync(page, 5000);
-            pending.Add(cell);
-        }
-    }
-
-    /// <summary>Reloads the week and compares every written cell (and the other days of those rows) with the plan.</summary>
-    private async Task VerifyAsync(
-        IPage page, DateOnly weekStart, IReadOnlyList<ForecastPlannedCell> written,
-        ForecastFillReport report, CancellationToken cancellationToken)
-    {
-        await page.ReloadAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await ForecastSession.WaitForIdleAsync(page);
-        if (!await NavigateToWeekAsync(page, weekStart, cancellationToken))
-        {
-            report.Warnings.Add("Relecture impossible : la semaine n'a pas pu être réaffichée.");
-            foreach (var cell in written)
-                report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, null, null, "Saisi mais non relu."));
-            return;
-        }
-
-        foreach (var taskCells in written.GroupBy(c => c.Task.Id))
-        {
-            var task = taskCells.First().Task;
-            var (row, headers) = await FindRowAsync(page, task);
-            if (row is null)
-            {
-                foreach (var cell in taskCells)
-                    report.Cells.Add(Result(cell, ForecastCellStatus.RowNotFound, null, null, null, "Ligne disparue après rechargement."));
-                continue;
-            }
-
-            var days = ForecastTimesheetDom.HeaderDates(headers, weekStart);
-            var expectedByDate = taskCells.ToDictionary(c => c.Date, c => c.Hours);
-            for (var i = 0; i < Math.Min(days.Count, row.Hours.Count); i++)
-            {
-                if (days[i] is not { } date)
-                    continue;
-                // Cells already settled before typing (already done, conflict) are reported once.
-                if (!expectedByDate.ContainsKey(date) && report.Cells.Any(c => c.ForecastTaskId == task.Id && c.Date == date))
-                    continue;
-                var text = row.Hours[i];
-                var expected = expectedByDate.GetValueOrDefault(date);
-                var cell = new ForecastPlannedCell(task, date, expected);
-                var (status, actual, message) = ForecastFillPlanner.Compare(expected, text);
-
-                if (expected == 0 && status == ForecastCellStatus.Ok)
-                    continue; // Empty day, nothing planned: not worth reporting.
-                if (expected == 0)
-                    message = $"Valeur déjà présente dans Forecast et absente du brouillon (non effacée) : « {text} ».";
-
-                report.Cells.Add(Result(cell, status, actual, text, null, message));
-            }
-        }
-    }
-
-    /// <summary>The task row, looked up in the "Timesheets" tab first, then in "Find Tasks".</summary>
-    private static async Task<(ForecastGridRow? Row, IReadOnlyList<string> Headers)> FindRowAsync(IPage page, ForecastTask task)
-    {
-        IReadOnlyList<string> headers = [];
-        foreach (var tab in new[] { ForecastSelectors.TimesheetTab(page), ForecastSelectors.FindTasksTab(page) })
-        {
-            if (await ForecastSession.IsVisibleAsync(tab))
-            {
-                await tab.First.ClickAsync();
-                await ForecastSession.WaitForIdleAsync(page, 5000);
-            }
-            var snapshot = await ForecastTimesheetDom.ReadAsync(page);
-            headers = snapshot.DayHeaders;
-            if (ForecastTimesheetDom.FindRow(snapshot.Rows, task) is { } row)
-                return (row, headers);
-        }
-        return (null, headers);
-    }
-
-    /// <summary>Shows the week of <paramref name="weekStart"/> with the arrows, checked against the day headers.</summary>
-    private static async Task<bool> NavigateToWeekAsync(IPage page, DateOnly weekStart, CancellationToken cancellationToken)
-    {
-        var toggle = ForecastSelectors.WeekViewToggle(page);
-        if (await ForecastSession.IsVisibleAsync(toggle))
-        {
-            await toggle.First.ClickAsync();
-            await ForecastSession.WaitForIdleAsync(page, 3000);
-        }
-
-        for (var i = 0; i <= MaxWeekNavigationClicks; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var headers = (await ForecastTimesheetDom.ReadAsync(page)).DayHeaders;
-            if (ForecastTimesheetDom.IsShowingWeek(headers, weekStart))
-                return true;
-
-            var shown = ForecastTimesheetDom.HeaderDates(headers, weekStart).OfType<DateOnly>().ToList();
-            if (shown.Count == 0)
-                return false;
-
-            var button = shown[0] > weekStart ? ForecastSelectors.PreviousWeekButton(page) : ForecastSelectors.NextWeekButton(page);
-            await button.First.ClickAsync();
-            await ForecastSession.WaitForIdleAsync(page, 3000);
-        }
-        return false;
-    }
-
-    private string Format(decimal hours) => ForecastHours.Format(hours, session.Options.HourFormat);
-
-    private static decimal? Parse(string? text) => ForecastHours.TryParse(text, out var h) ? h : null;
-
-    private static ForecastCellResult Result(
-        ForecastPlannedCell cell, ForecastCellStatus status, decimal? actual, string? actualText, string? screenshot, string? message) =>
-        new(cell.Task.Id, cell.Task.DisplayName, cell.Date, cell.Hours, actual, actualText, status, screenshot, message);
-
-    private static async Task<string?> ScreenshotAsync(IPage page, string dir, string name, ForecastFillReport report)
-    {
-        var path = Path.Combine(dir, $"{name}.png");
-        try
-        {
-            await page.ScreenshotAsync(new() { Path = path, FullPage = true });
-            report.Screenshots.Add(path);
-            return path;
-        }
-        catch (PlaywrightException)
-        {
-            return null;
-        }
-    }
+    private static ForecastCellResult Result(ForecastPlannedCell cell, ForecastCellStatus status, decimal? actual, string? message) =>
+        new(cell.Task.Id, cell.Task.DisplayName, cell.Date, cell.Hours, actual, status, message);
 }

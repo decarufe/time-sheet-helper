@@ -44,13 +44,21 @@ public sealed class WeekService(
     public Task<DayTimeline> GetDayTimelineAsync(DateOnly day, CancellationToken cancellationToken = default) =>
         builder.BuildDayAsync(day, cancellationToken);
 
-    /// <summary>Assigns every slot of the range to a task, or marks it as not work when <paramref name="forecastTaskId"/> is null.</summary>
-    public async Task AssignSlotsAsync(SlotRange range, int? forecastTaskId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Assigns every slot of the range to a task, or marks it as not work when <paramref name="forecastTaskId"/> is null.
+    /// <paramref name="notes"/> replaces any earlier comment of these slots (ignored for "not work").
+    /// </summary>
+    public Task AssignSlotsAsync(SlotRange range, int? forecastTaskId, string? notes = null, CancellationToken cancellationToken = default) =>
+        AssignSlotStartsAsync(range.SlotStarts().ToList(), forecastTaskId, notes, cancellationToken);
+
+    /// <summary>Same as <see cref="AssignSlotsAsync"/> for any set of slots (they need not be contiguous), saved in one go.</summary>
+    public async Task AssignSlotStartsAsync(IReadOnlyCollection<DateTime> slotStarts, int? forecastTaskId, string? notes = null, CancellationToken cancellationToken = default)
     {
-        var starts = range.SlotStarts().ToList();
+        var starts = slotStarts.Distinct().Order().ToList();
         if (starts.Count == 0)
             return;
         var (first, last) = (starts[0], starts[^1]);
+        var comment = forecastTaskId is null ? null : NormalizeComment(notes);
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var existing = await db.SlotOverrides
@@ -60,26 +68,61 @@ public sealed class WeekService(
         foreach (var start in starts)
         {
             if (existing.TryGetValue(start, out var slot))
+            {
                 slot.ForecastTaskId = forecastTaskId;
+                slot.Notes = comment;
+            }
             else
-                db.SlotOverrides.Add(new SlotOverride { SlotStartUtc = start, ForecastTaskId = forecastTaskId });
+            {
+                db.SlotOverrides.Add(new SlotOverride { SlotStartUtc = start, ForecastTaskId = forecastTaskId, Notes = comment });
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>Removes manual assignments in the range: the engine decides again.</summary>
-    public async Task ClearSlotsAsync(SlotRange range, CancellationToken cancellationToken = default)
+    /// <summary>The latest distinct comments given when assigning slots to a task, most recent first.</summary>
+    public async Task<IReadOnlyList<string>> GetRecentCommentsAsync(int forecastTaskId, int max = 8, CancellationToken cancellationToken = default)
     {
-        var starts = range.SlotStarts().ToList();
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var notes = await db.SlotOverrides.AsNoTracking()
+            .Where(o => o.ForecastTaskId == forecastTaskId && o.Notes != null && o.Notes != "")
+            .OrderByDescending(o => o.SlotStartUtc)
+            .Select(o => o.Notes!)
+            .Take(max * 50)
+            .ToListAsync(cancellationToken);
+
+        return notes.Distinct(StringComparer.CurrentCultureIgnoreCase).Take(max).ToList();
+    }
+
+    public const int MaxCommentLength = 500;
+
+    private static string? NormalizeComment(string? notes)
+    {
+        var text = notes?.Trim();
+        if (string.IsNullOrEmpty(text))
+            return null;
+        return text.Length > MaxCommentLength ? text[..MaxCommentLength] : text;
+    }
+
+    /// <summary>Removes manual assignments in the range: the engine decides again.</summary>
+    public Task ClearSlotsAsync(SlotRange range, CancellationToken cancellationToken = default) =>
+        ClearSlotStartsAsync(range.SlotStarts().ToList(), cancellationToken);
+
+    public async Task ClearSlotStartsAsync(IReadOnlyCollection<DateTime> slotStarts, CancellationToken cancellationToken = default)
+    {
+        var starts = slotStarts.Distinct().Order().ToList();
         if (starts.Count == 0)
             return;
         var (first, last) = (starts[0], starts[^1]);
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        await db.SlotOverrides
+        var existing = await db.SlotOverrides
             .Where(o => o.SlotStartUtc >= first && o.SlotStartUtc <= last)
-            .ExecuteDeleteAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        var wanted = starts.ToHashSet();
+        db.SlotOverrides.RemoveRange(existing.Where(o => wanted.Contains(o.SlotStartUtc)));
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

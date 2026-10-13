@@ -50,19 +50,35 @@ public class ForecastFillPlannerTests
         Assert.Equal(2, warnings.Count);
     }
 
-    [Theory]
-    [InlineData(1.5, "1h 30m", ForecastCellStatus.Ok)]
-    [InlineData(1.5, "1,5", ForecastCellStatus.Ok)]
-    [InlineData(1.5, "1.5", ForecastCellStatus.Ok)]
-    [InlineData(1.5, "1h", ForecastCellStatus.Mismatch)]
-    [InlineData(1.5, "", ForecastCellStatus.Mismatch)]
-    [InlineData(0, "", ForecastCellStatus.Ok)]
-    [InlineData(0, "2h", ForecastCellStatus.Mismatch)]
-    [InlineData(1, "n/a", ForecastCellStatus.Mismatch)]
-    public void Compare_parses_grid_text(double expected, string actual, ForecastCellStatus status)
+    [Fact]
+    public void Plan_joins_distinct_notes_of_a_cell()
     {
-        var result = ForecastFillPlanner.Compare((decimal)expected, actual);
+        var first = Entry(1, 0, 1m);
+        first.Notes = "Revue de PR";
+        var second = Entry(1, 0, 1m);
+        second.Notes = "revue de pr";
+        var third = Entry(1, 0, 1m);
+        third.Notes = "Correctif";
+        var draft = new TimesheetDraft { WeekStart = Monday, Entries = [first, second, third, Entry(2, 0, 1m)] };
+
+        var plan = ForecastFillPlanner.Plan(draft, Tasks);
+
+        Assert.Equal("Revue de PR ; Correctif", plan.Single(c => c.Task == Dev).Notes);
+        Assert.Null(plan.Single(c => c.Task == Meetings).Notes);
+    }
+
+    [Theory]
+    [InlineData(1.5, 1.5, ForecastCellStatus.Ok)]
+    [InlineData(1.5, 1.505, ForecastCellStatus.Ok)]
+    [InlineData(1.5, 1.0, ForecastCellStatus.Mismatch)]
+    [InlineData(1.5, 0.0, ForecastCellStatus.Mismatch)]
+    [InlineData(0, 0, ForecastCellStatus.Ok)]
+    [InlineData(0, 2, ForecastCellStatus.Mismatch)]
+    public void Compare_checks_hours_within_tolerance(double expected, double actual, ForecastCellStatus status)
+    {
+        var result = ForecastFillPlanner.Compare((decimal)expected, (decimal)actual);
         Assert.Equal(status, result.Status);
+        Assert.Equal((decimal)actual, result.Actual);
         Assert.Equal(status == ForecastCellStatus.Ok, result.Message is null);
     }
 
@@ -72,20 +88,21 @@ public class ForecastFillPlannerTests
         var report = new ForecastFillReport { WeekStart = Monday, Mode = ForecastSubmitMode.Fill };
         Assert.False(report.Success);
 
-        report.Cells.Add(new ForecastCellResult(1, "Acme / Dev", Monday, 1m, 1m, "1h", ForecastCellStatus.Ok));
+        report.Cells.Add(new ForecastCellResult(1, "Acme / Dev", Monday, 1m, 1m, ForecastCellStatus.Ok));
         Assert.True(report.Success);
 
-        report.Cells.Add(new ForecastCellResult(1, "Acme / Dev", Monday.AddDays(1), 1m, 0m, "", ForecastCellStatus.Mismatch));
+        report.Cells.Add(new ForecastCellResult(1, "Acme / Dev", Monday.AddDays(1), 1m, 0m, ForecastCellStatus.Mismatch));
         Assert.False(report.Success);
         Assert.Contains("1/2", report.Summary);
     }
 
     [Theory]
-    [InlineData("", ForecastCellAction.Type)]
-    [InlineData("0h", ForecastCellAction.Type)]
-    [InlineData("1h 30m", ForecastCellAction.AlreadyDone)]
-    [InlineData("2h", ForecastCellAction.Conflict)]
-    [InlineData("15m", ForecastCellAction.Conflict)]
-    public void Only_empty_cells_are_typed_into(string current, ForecastCellAction expected) =>
-        Assert.Equal(expected, ForecastFillPlanner.Decide(1.5m, current, "1h 30m").Action);
+    [InlineData(0, ForecastCellAction.Type)]
+    [InlineData(1.5, ForecastCellAction.AlreadyDone)]
+    [InlineData(1.499, ForecastCellAction.AlreadyDone)]
+    [InlineData(2, ForecastCellAction.Conflict)]
+    [InlineData(0.25, ForecastCellAction.Conflict)]
+    public void Only_empty_cells_are_added_to(double current, ForecastCellAction expected) =>
+        Assert.Equal(expected, ForecastFillPlanner.Decide(1.5m, (decimal)current).Action);
 }
+

@@ -42,7 +42,7 @@ public sealed class WeekProposalBuilder(
 
         var slotsByDay = new Dictionary<DateOnly, IReadOnlyList<SlotAssignment>>();
         foreach (var day in days)
-            slotsByDay[day] = allocator.AllocateDay(day, resolved, data.Overrides);
+            slotsByDay[day] = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds);
 
         var dayProposals = days.Select(d => SummarizeDay(d, slotsByDay[d])).ToList();
 
@@ -58,9 +58,11 @@ public sealed class WeekProposalBuilder(
             .Select(g => DescribeGroup(g.Key, TimeSpan.FromMinutes(g.Value), resolved, range))
             .ToList();
 
+        var assignable = data.Tasks.Where(t => !t.IsIgnored).ToList();
+        var assignableRules = data.Rules.Where(r => !data.IgnoredTaskIds.Contains(r.ForecastTaskId)).ToList();
         var verdicts = classifyMissing
-            ? await classification.ClassifyAsync(groups, data.Tasks, data.Rules, cancellationToken)
-            : await classification.GetCachedAsync(groups.Select(g => g.Key), data.Tasks.Where(t => t.IsActive).ToList(), cancellationToken);
+            ? await classification.ClassifyAsync(groups, assignable, assignableRules, cancellationToken)
+            : await classification.GetCachedAsync(groups.Select(g => g.Key), assignable.Where(t => t.IsActive).ToList(), cancellationToken);
 
         var groupProposals = groups
             .Select(g => new GroupProposal(
@@ -86,7 +88,7 @@ public sealed class WeekProposalBuilder(
         var (start, end) = allocator.DayBounds(day);
         var data = await LoadAsync(new Interval(start, end), cancellationToken);
         var resolved = resolver.Resolve(data.Activities, data.Rules);
-        var slots = allocator.AllocateDay(day, resolved, data.Overrides);
+        var slots = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds);
 
         var cited = slots.SelectMany(s => s.Evidence).ToHashSet();
         var activities = data.Activities.Where(a => cited.Contains(a.Id)).ToDictionary(a => a.Id);
@@ -95,7 +97,7 @@ public sealed class WeekProposalBuilder(
 
     /// <summary>
     /// Writes the proposal's classified hours into the week's draft. A submitted draft is never modified.
-    /// Notes of entries that still exist (same day and task) are kept.
+    /// Comments given when assigning slots become the entry's notes; otherwise notes of entries that still exist (same day and task) are kept.
     /// </summary>
     public async Task<DraftSaveResult> SaveDraftAsync(WeekProposal proposal, CancellationToken cancellationToken = default)
     {
@@ -113,7 +115,7 @@ public sealed class WeekProposalBuilder(
             db.TimesheetDrafts.Add(draft);
         }
 
-        var knownTasks = await db.ForecastTasks.Select(t => t.Id).ToListAsync(cancellationToken);
+        var knownTasks = await db.ForecastTasks.Where(t => t.ExternalId != ForecastTask.IgnoredExternalId).Select(t => t.Id).ToListAsync(cancellationToken);
         var notes = draft.Entries
             .Where(e => !string.IsNullOrEmpty(e.Notes))
             .GroupBy(e => (e.Date, e.ForecastTaskId))
@@ -131,7 +133,7 @@ public sealed class WeekProposalBuilder(
                     Date = day.Date,
                     ForecastTaskId = task.ForecastTaskId,
                     Hours = task.Hours,
-                    Notes = notes.GetValueOrDefault((day.Date, task.ForecastTaskId)),
+                    Notes = task.Notes ?? notes.GetValueOrDefault((day.Date, task.ForecastTaskId)),
                 });
             }
         }
@@ -140,12 +142,22 @@ public sealed class WeekProposalBuilder(
         return new DraftSaveResult(draft, AlreadySubmitted: false);
     }
 
+    private static string? JoinNotes(IEnumerable<string?> notes)
+    {
+        var distinct = notes
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n!.Trim())
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        return distinct.Count == 0 ? null : string.Join(" ; ", distinct);
+    }
+
     internal DayProposal SummarizeDay(DateOnly day, IReadOnlyList<SlotAssignment> slots)
     {
         var tasks = slots
             .Where(s => s.IsClassified)
             .GroupBy(s => s.TaskId!.Value)
-            .Select(g => new DayTaskHours(g.Key, g.Count() * HoursPerSlot))
+            .Select(g => new DayTaskHours(g.Key, g.Count() * HoursPerSlot, JoinNotes(g.Select(s => s.Notes))))
             .OrderByDescending(t => t.Hours)
             .ThenBy(t => t.ForecastTaskId)
             .ToList();
@@ -203,5 +215,8 @@ public sealed class WeekProposalBuilder(
         IReadOnlyList<Rule> Rules,
         IReadOnlyList<ForecastTask> Tasks,
         IReadOnlyList<SlotOverride> Overrides,
-        DateTime? SubmittedUtc);
+        DateTime? SubmittedUtc)
+    {
+        public IReadOnlySet<int> IgnoredTaskIds { get; } = Tasks.Where(t => t.IsIgnored).Select(t => t.Id).ToHashSet();
+    }
 }

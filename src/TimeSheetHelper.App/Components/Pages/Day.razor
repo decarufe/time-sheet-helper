@@ -76,6 +76,10 @@
                         <span class="swatch" aria-hidden="true"></span>
                         <span class="name">@TaskName(taskId)</span>
                         <span class="hours">@TimesheetUi.Hours(hours) h</span>
+                        @if (TaskNotes(taskId) is { } notes)
+                        {
+                            <span class="task-note">@notes</span>
+                        }
                     </li>
                 }
                 @if (unclassifiedHours > 0)
@@ -91,7 +95,7 @@
                     <li class="muted">Aucune activité de travail détectée ce jour-là.</li>
                 }
             </ul>
-            @if (timeline.Tasks.Count == 0)
+            @if (timeline.Tasks.Values.All(t => t.IsIgnored))
             {
                 <p class="muted">Aucune tâche Forecast : synchronisez-les depuis la page <a href="sources">Sources</a>.</p>
             }
@@ -106,7 +110,7 @@
         </div>
         @if (!IsSubmitted)
         {
-            <p class="hint muted">Cliquez sur un créneau pour le sélectionner, Maj+clic pour étendre la sélection (Maj+↑/↓ au clavier, Échap pour annuler).</p>
+            <p class="hint muted">Cliquez sur un créneau pour le sélectionner, Maj+clic pour étendre la sélection, Ctrl+clic pour ajouter ou retirer des créneaux non consécutifs (Maj+↑/↓ au clavier, Échap pour annuler).</p>
         }
 
         <ol class="timeline" aria-label="Créneaux de la journée">
@@ -118,7 +122,7 @@
                 var selected = IsSelected(index);
                 var expandedRow = expanded.Contains(slot.SlotStartUtc);
                 <li class="slot @KindClass(slot) @(row.Local.Minute == 0 ? "hour-start" : null) @(selected ? "selected" : null)"
-                    style="@(slot.TaskId is { } tid ? TimesheetUi.TaskStyle(tid) : null)">
+                    style="@(slot.TaskId is { } tid && slot.Kind != SlotKind.Ignored ? TimesheetUi.TaskStyle(tid) : null)">
                     <div class="slot-line">
                         <button type="button" class="slot-main" aria-pressed="@(selected ? "true" : "false")"
                                 title="@SlotTitle(row)" disabled="@IsSubmitted"
@@ -126,7 +130,11 @@
                             <span class="time">@row.Local.ToString("HH:mm")</span>
                             <span class="band" aria-hidden="true"></span>
                             <span class="label">@SlotLabel(slot)</span>
-                            @if (slot.Kind is not (SlotKind.Empty or SlotKind.ExcludedByOverride))
+                            @if (!string.IsNullOrEmpty(slot.Notes))
+                            {
+                                <span class="note" title="@slot.Notes">« @slot.Notes »</span>
+                            }
+                            @if (slot.Kind is not (SlotKind.Empty or SlotKind.ExcludedByOverride or SlotKind.Ignored))
                             {
                                 <span class="kind-badge">@TimesheetUi.SlotKindLabel(slot.Kind)</span>
                             }
@@ -205,14 +213,15 @@
     {
         <div class="action-bar" role="toolbar" aria-label="Actions sur la sélection">
             <span class="selection-info">
-                <strong>@visible[sel.Start].Local.ToString("HH:mm") – @visible[sel.End].Local.AddMinutes(15).ToString("HH:mm")</strong>
-                <span class="muted">@(sel.End - sel.Start + 1) @(sel.End > sel.Start ? "créneaux" : "créneau") · @TimesheetUi.Hours((sel.End - sel.Start + 1) * 0.25m) h</span>
+                <strong>@SelectionSpans()</strong>
+                <span class="muted">@sel.Indices.Count @(sel.Indices.Count > 1 ? "créneaux" : "créneau") · @TimesheetUi.Hours(sel.Indices.Count * 0.25m) h</span>
             </span>
             <span class="spacer"></span>
             <button type="button" class="primary" @onclick="() => picker = PickerMode.Assign" disabled="@busy">Assigner à…</button>
             <button type="button" @onclick="() => AssignAsync(null)" disabled="@busy">Pas du travail</button>
             <button type="button" @onclick="ClearOverridesAsync" disabled="@(busy || !SelectionHasOverride)">Annuler l'assignation manuelle</button>
-            <button type="button" @onclick="() => picker = PickerMode.Rule" disabled="@busy">Créer une règle à partir de cette correction</button>
+            <button type="button" @onclick="() => picker = PickerMode.Rule" disabled="@(busy || !sel.IsContiguous)"
+                    title="@(sel.IsContiguous ? null : "Sélectionnez des créneaux consécutifs pour créer une règle.")">Créer une règle à partir de cette correction</button>
             <button type="button" class="ghost" @onclick="ClearSelection" aria-label="Désélectionner">✕</button>
         </div>
     }
@@ -223,6 +232,8 @@
     <TaskPicker Title="@(picker == PickerMode.Assign ? "Assigner les créneaux à…" : "Créer une règle vers…")"
                 Subtitle="@SelectionDescription()"
                 SelectedTaskId="@SelectionTaskId()"
+                AllowComment="@(picker == PickerMode.Assign)"
+                @bind-Comment="assignComment"
                 OnSelected="OnTaskPickedAsync"
                 OnCancel="() => picker = PickerMode.None" />
 }
@@ -232,7 +243,17 @@
 
     private sealed record VisibleSlot(SlotAssignment Slot, DateTime Local);
 
-    private sealed record Selection(int Anchor, int Start, int End);
+    private sealed record Selection(int Anchor, int Edge, IReadOnlySet<int> Indices)
+    {
+        public int Min => Indices.Min();
+
+        public int Max => Indices.Max();
+
+        public bool IsContiguous => Indices.Count == Max - Min + 1;
+
+        public static Selection Span(int anchor, int edge) =>
+            new(anchor, edge, Enumerable.Range(Math.Min(anchor, edge), Math.Abs(anchor - edge) + 1).ToHashSet());
+    }
 
     private sealed record PendingRule(CorrectionTarget Target, int TaskId, RuleProposal Proposal);
 
@@ -254,6 +275,7 @@
     private bool busy;
     private Selection? selection;
     private PickerMode picker;
+    private string? assignComment;
     private PendingRule? pendingRule;
     private Correction? lastCorrection;
 
@@ -267,11 +289,21 @@
 
     private decimal TotalHours => taskHours.Sum(t => t.Hours);
 
+    private string? TaskNotes(int taskId)
+    {
+        var notes = timeline?.Slots
+            .Where(s => s.TaskId == taskId && !string.IsNullOrWhiteSpace(s.Notes))
+            .Select(s => s.Notes!)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        return notes is { Count: > 0 } ? string.Join(" ; ", notes) : null;
+    }
+
     private decimal TargetHours => day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 0m : EngineOptionsAccessor.Value.TargetHoursPerDay;
 
     private string FlagClass => TotalHours < TargetHours ? "under" : TotalHours > TargetHours ? "over" : "ok";
 
-    private bool SelectionHasOverride => SelectedSlots().Any(s => s.Kind is SlotKind.Override or SlotKind.ExcludedByOverride);
+    private bool SelectionHasOverride => SelectedSlots().Any(s => s.Kind is SlotKind.Override or SlotKind.ExcludedByOverride or SlotKind.Ignored);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -334,9 +366,11 @@
             .ToList();
 
         // Keep the selection on the same slots when the visible span changes.
-        var selectedStarts = selection is { } sel && sel.End < visible.Count
-            ? (visible[sel.Start].Slot.SlotStartUtc, visible[sel.End].Slot.SlotStartUtc, visible[sel.Anchor].Slot.SlotStartUtc)
-            : default((DateTime, DateTime, DateTime)?);
+        var kept = selection is { } sel && sel.Indices.Append(sel.Anchor).Append(sel.Edge).Max() < visible.Count
+            ? (Starts: sel.Indices.Order().Select(i => visible[i].Slot.SlotStartUtc).ToList(),
+               Anchor: visible[sel.Anchor].Slot.SlotStartUtc,
+               Edge: visible[sel.Edge].Slot.SlotStartUtc)
+            : default((List<DateTime> Starts, DateTime Anchor, DateTime Edge)?);
 
         if (showWholeDay)
         {
@@ -360,13 +394,18 @@
         }
 
         selection = null;
-        if (selectedStarts is { } keep)
+        if (kept is { } keep)
         {
-            var start = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item1);
-            var end = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item2);
-            var anchor = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Item3);
-            if (start >= 0 && end >= 0 && anchor >= 0)
-                selection = new Selection(anchor, start, end);
+            var indices = keep.Starts
+                .Select(start => visible.FindIndex(v => v.Slot.SlotStartUtc == start))
+                .Where(i => i >= 0)
+                .ToHashSet();
+            if (indices.Count > 0)
+            {
+                var anchor = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Anchor);
+                var edge = visible.FindIndex(v => v.Slot.SlotStartUtc == keep.Edge);
+                selection = new Selection(anchor >= 0 ? anchor : indices.Min(), edge >= 0 ? edge : indices.Max(), indices);
+            }
         }
     }
 
@@ -378,22 +417,29 @@
 
     // Selection
 
-    private bool IsSelected(int index) => selection is { } s && index >= s.Start && index <= s.End;
+    private bool IsSelected(int index) => selection is { } s && s.Indices.Contains(index);
 
     private void OnSlotClick(int index, MouseEventArgs e)
     {
         pendingRule = null;
         if (e.ShiftKey && selection is { } current)
         {
-            selection = new Selection(current.Anchor, Math.Min(current.Anchor, index), Math.Max(current.Anchor, index));
+            selection = Selection.Span(current.Anchor, index);
         }
-        else if (selection is { } single && single.Start == index && single.End == index)
+        else if ((e.CtrlKey || e.MetaKey) && selection is { } multi)
+        {
+            var indices = multi.Indices.ToHashSet();
+            if (!indices.Remove(index))
+                indices.Add(index);
+            selection = indices.Count == 0 ? null : new Selection(index, index, indices);
+        }
+        else if (selection is { Indices.Count: 1 } single && single.Indices.Contains(index))
         {
             selection = null;
         }
         else
         {
-            selection = new Selection(index, index, index);
+            selection = Selection.Span(index, index);
         }
     }
 
@@ -407,11 +453,9 @@
         if (!e.ShiftKey || e.Key is not ("ArrowDown" or "ArrowUp"))
             return;
 
-        var current = selection ?? new Selection(index, index, index);
-        // Move the end opposite to the anchor.
-        var edge = current.Anchor == current.Start ? current.End : current.Start;
-        edge = Math.Clamp(edge + (e.Key == "ArrowDown" ? 1 : -1), 0, visible.Count - 1);
-        selection = new Selection(current.Anchor, Math.Min(current.Anchor, edge), Math.Max(current.Anchor, edge));
+        var current = selection ?? Selection.Span(index, index);
+        var edge = Math.Clamp(current.Edge + (e.Key == "ArrowDown" ? 1 : -1), 0, visible.Count - 1);
+        selection = Selection.Span(current.Anchor, edge);
     }
 
     private void ClearSelection()
@@ -421,10 +465,31 @@
     }
 
     private IEnumerable<SlotAssignment> SelectedSlots() =>
-        selection is { } s ? visible.Skip(s.Start).Take(s.End - s.Start + 1).Select(v => v.Slot) : [];
+        selection is { } s ? s.Indices.Order().Select(i => visible[i].Slot) : [];
 
+    private List<DateTime> SelectedStarts() => SelectedSlots().Select(s => s.SlotStartUtc).ToList();
+
+    /// <summary>The selected range when the selection has no gap: rules are learned from contiguous ranges only.</summary>
     private SlotRange? SelectedRange() =>
-        selection is { } s ? new SlotRange(visible[s.Start].Slot.SlotStartUtc, visible[s.End].Slot.SlotEndUtc) : null;
+        selection is { IsContiguous: true } s ? new SlotRange(visible[s.Min].Slot.SlotStartUtc, visible[s.Max].Slot.SlotEndUtc) : null;
+
+    /// <summary>Time spans of the selection, one per run of consecutive slots ("09:00 – 09:30, 10:15 – 10:30").</summary>
+    private string SelectionSpans()
+    {
+        if (selection is not { } s)
+            return "";
+        var spans = new List<string>();
+        var ordered = s.Indices.Order().ToList();
+        for (var i = 0; i < ordered.Count;)
+        {
+            var j = i;
+            while (j + 1 < ordered.Count && ordered[j + 1] == ordered[j] + 1)
+                j++;
+            spans.Add($"{visible[ordered[i]].Local:HH:mm} – {visible[ordered[j]].Local.AddMinutes(15):HH:mm}");
+            i = j + 1;
+        }
+        return string.Join(", ", spans);
+    }
 
     /// <summary>The group key shared by every work slot of the selection, if any: the correction then targets that group only.</summary>
     private string? SelectionGroupKey()
@@ -446,7 +511,7 @@
     {
         if (selection is not { } s)
             return "";
-        var text = $"{visible[s.Start].Local:HH:mm} – {visible[s.End].Local.AddMinutes(15):HH:mm} ({TimesheetUi.Hours((s.End - s.Start + 1) * 0.25m)} h)";
+        var text = $"{SelectionSpans()} ({TimesheetUi.Hours(s.Indices.Count * 0.25m)} h)";
         return SelectionGroupKey() is { } key ? $"{text} · {TimesheetUi.GroupLabel(key)}" : text;
     }
 
@@ -457,42 +522,53 @@
         var mode = picker;
         picker = PickerMode.None;
         if (mode == PickerMode.Assign)
-            await AssignAsync(taskId);
+        {
+            var notes = assignComment;
+            assignComment = null;
+            await AssignAsync(taskId, notes);
+        }
         else if (mode == PickerMode.Rule && SelectedRange() is { } range)
             await PreviewRuleAsync(new CorrectionTarget(range, SelectionGroupKey()), taskId);
     }
 
-    private async Task AssignAsync(int? taskId)
+    private async Task AssignAsync(int? taskId, string? notes = null)
     {
-        if (SelectedRange() is not { } range)
+        var starts = SelectedStarts();
+        if (starts.Count == 0)
             return;
-        var target = new CorrectionTarget(range, SelectionGroupKey());
+        var target = SelectedRange() is { } range ? new CorrectionTarget(range, SelectionGroupKey()) : null;
 
         await RunAsync(async () =>
         {
-            await Weeks.AssignSlotsAsync(range, taskId);
+            await Weeks.AssignSlotStartsAsync(starts, taskId, notes);
             selection = null;
             await LoadAsync();
             if (taskId is { } id)
             {
-                lastCorrection = new Correction(target, id);
-                Inform($"Créneaux assignés à {TaskName(id)}.");
+                lastCorrection = target is null ? null : new Correction(target, id);
+                var ignored = timeline?.Tasks.GetValueOrDefault(id)?.IsIgnored == true;
+                Inform(ignored
+                    ? (starts.Count > 1 ? "Créneaux retirés de la feuille de temps." : "Créneau retiré de la feuille de temps.")
+                    : starts.Count > 1
+                        ? $"{starts.Count} créneaux assignés à {TaskName(id)}."
+                        : $"Créneau assigné à {TaskName(id)}.");
             }
             else
             {
-                Inform("Créneaux marqués comme hors travail.");
+                Inform(starts.Count > 1 ? "Créneaux marqués comme hors travail." : "Créneau marqué comme hors travail.");
             }
         });
     }
 
     private async Task ClearOverridesAsync()
     {
-        if (SelectedRange() is not { } range)
+        var starts = SelectedStarts();
+        if (starts.Count == 0)
             return;
 
         await RunAsync(async () =>
         {
-            await Weeks.ClearSlotsAsync(range);
+            await Weeks.ClearSlotStartsAsync(starts);
             selection = null;
             await LoadAsync();
             Inform("Assignation manuelle annulée : le moteur décide à nouveau pour ces créneaux.");
@@ -583,6 +659,7 @@
     private string SlotLabel(SlotAssignment slot) => slot switch
     {
         { Kind: SlotKind.ExcludedByOverride } => "Pas du travail",
+        { Kind: SlotKind.Ignored } => "Ignoré",
         { IsWork: true, TaskId: { } id } => TaskName(id),
         { IsWork: true, GroupKey: { } key } => $"Non classé · {TimesheetUi.GroupLabel(key)}",
         { IsWork: true } => "Non classé",
@@ -599,7 +676,7 @@
         SlotKind.Activity => slot.TaskId is null ? "kind-activity unclassified" : "kind-activity",
         SlotKind.Meeting => slot.TaskId is null ? "kind-meeting unclassified" : "kind-meeting",
         SlotKind.Override => "kind-override",
-        SlotKind.ExcludedByOverride => "kind-excluded",
+        SlotKind.ExcludedByOverride or SlotKind.Ignored => "kind-excluded",
         _ => "kind-empty",
     };
 

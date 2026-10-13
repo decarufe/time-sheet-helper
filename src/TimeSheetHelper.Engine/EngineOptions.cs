@@ -16,8 +16,8 @@ public sealed class EngineOptions
     /// <summary>A slot with less activity than this (and no meeting time reaching it) is not work.</summary>
     public TimeSpan MinActivityPerSlot { get; set; } = TimeSpan.FromMinutes(5);
 
-    /// <summary>Expected hours per working day (Monday to Friday); days below are flagged.</summary>
-    public decimal TargetHoursPerDay { get; set; } = 7.5m;
+    /// <summary>Expected hours per working day (Monday to Friday); days below are flagged. Set with "Engine:TargetHoursPerDay".</summary>
+    public decimal TargetHoursPerDay { get; set; } = 8m;
 
     /// <summary>Weight multiplier of an accepted meeting, per second of overlap. High enough to beat any focus.</summary>
     public double MeetingWeight { get; set; } = 10;

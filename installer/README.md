@@ -16,8 +16,7 @@ pwsh ./installer/build-installer.ps1 -SkipExtension  # sans l'extension VS Code
 
 Le script :
 
-1. publie `src/TimeSheetHelper.App` en mode autonome `win-x64` (dossier, pas fichier unique :
-   Playwright a besoin de son dossier `.playwright`, pas de trimming) ;
+1. publie `src/TimeSheetHelper.App` en mode autonome `win-x64` (dossier, pas fichier unique) ;
 2. construit l'extension VS Code (`pnpm install --frozen-lockfile` puis `pnpm run package`) si `extensions/vscode`
    existe et que pnpm est disponible, sinon affiche un avertissement et continue ;
 3. assemble l'archive.
@@ -41,7 +40,7 @@ Contenu de l'archive :
 Décompresser l'archive puis double-cliquer sur `Install.cmd` (ou lancer `install.ps1`).
 L'installation, idempotente (la relancer = mise à jour) :
 
-1. vérifie Windows 10/11 x64 et la présence de **Microsoft Edge** (canal `msedge` de Playwright) ;
+1. vérifie Windows 10/11 x64 ;
 2. propose, via `winget` et **toujours après confirmation**, d'installer Git, GitHub CLI (`gh`) et,
    si l'extension est fournie, VS Code (installation utilisateur) ;
 3. arrête l'instance en cours de `TimeSheetHelper.exe` ;

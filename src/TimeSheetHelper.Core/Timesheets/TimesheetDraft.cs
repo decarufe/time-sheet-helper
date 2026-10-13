@@ -32,6 +32,9 @@ public sealed class SlotOverride
 
     /// <summary>Null means "not work time" (exclude the slot).</summary>
     public int? ForecastTaskId { get; set; }
+
+    /// <summary>Comment given with the assignment; ends up in the notes of the timesheet entry.</summary>
+    public string? Notes { get; set; }
 }
 
 /// <summary>Cached Claude classification of an activity group, keyed by a fingerprint of its metadata.</summary>

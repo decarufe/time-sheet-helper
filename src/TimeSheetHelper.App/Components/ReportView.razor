@@ -1,6 +1,5 @@
-@using TimeSheetHelper.App.Services
 @using TimeSheetHelper.Forecast
-@* Per-cell report of a Forecast simulation or fill, with links to the screenshots. *@
+@* Per-cell report of a Forecast simulation or fill. *@
 
 <section class="report">
     <div class="report-head">
@@ -30,7 +29,6 @@
                         <th class="num">Lu dans Forecast</th>
                         <th>Statut</th>
                         <th>Détail</th>
-                        <th>Capture</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -40,13 +38,13 @@
                             <td>@cell.TaskDisplayName</td>
                             <td class="nowrap">@UiLabels.Day(cell.Date)</td>
                             <td class="num">@UiLabels.Hours(cell.Expected)</td>
-                            <td class="num">@(cell.ActualText is { Length: > 0 } text ? text : cell.Actual is { } actual ? UiLabels.Hours(actual) : "—")</td>
+                            <td class="num">@(cell.Actual is { } actual ? UiLabels.Hours(actual) : "—")</td>
                             <td><span class="status status-@cell.Status.ToString().ToLowerInvariant()">@UiLabels.CellStatus(cell.Status)</span></td>
-                            <td class="message">@cell.Message</td>
-                            <td>
-                                @if (LocalFolders.ScreenshotUrl(cell.ScreenshotPath) is { } url)
+                            <td class="message">
+                                @cell.Message
+                                @if (OnRelink.HasDelegate && cell.Status == ForecastCellStatus.RowNotFound)
                                 {
-                                    <a href="@url" target="_blank" rel="noopener">Voir</a>
+                                    <button class="relink" disabled="@RelinkDisabled" @onclick="() => OnRelink.InvokeAsync(cell)">Rechercher et relier…</button>
                                 }
                             </td>
                         </tr>
@@ -55,24 +53,14 @@
             </table>
         </div>
     }
-
-    <div class="files">
-        @foreach (var shot in Report.Screenshots.Distinct())
-        {
-            @if (LocalFolders.ScreenshotUrl(shot) is { } url)
-            {
-                <a href="@url" target="_blank" rel="noopener">@Path.GetFileNameWithoutExtension(shot)</a>
-            }
-        }
-        @if (Report.OutputDirectory is { } dir)
-        {
-            <button @onclick="() => OnOpenFolder.InvokeAsync(dir)">Ouvrir le dossier des captures</button>
-        }
-    </div>
 </section>
 
 @code {
     [Parameter, EditorRequired] public ForecastFillReport Report { get; set; } = default!;
     [Parameter, EditorRequired] public string Title { get; set; } = "";
-    [Parameter] public EventCallback<string> OnOpenFolder { get; set; }
+
+    /// <summary>When set, a cell whose task was not found in Forecast offers to search for it and link it.</summary>
+    [Parameter] public EventCallback<ForecastCellResult> OnRelink { get; set; }
+
+    [Parameter] public bool RelinkDisabled { get; set; }
 }

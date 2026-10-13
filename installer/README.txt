@@ -34,7 +34,7 @@ Options (PowerShell)
 Prérequis
 ---------
 - Windows 10 ou 11, 64 bits.
-- Microsoft Edge (utilisé pour la saisie automatique dans Forecast).
+- Un navigateur (connexion à Forecast, Microsoft 365).
 - Facultatif : Git, GitHub CLI (gh), VS Code (pour l'extension).
 Le runtime .NET est inclus : rien d'autre à installer.
 

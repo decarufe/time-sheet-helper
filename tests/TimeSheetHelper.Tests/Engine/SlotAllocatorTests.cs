@@ -28,11 +28,11 @@ public class SlotAllocatorTests
         return (new SlotAllocator(options, Fx.Clock), resolver);
     }
 
-    private static SlotAssignment Slot(DateTime slotStartUtc, ActivityEvent[] activities, SlotOverride[]? overrides = null, Action<EngineOptions>? configure = null)
+    private static SlotAssignment Slot(DateTime slotStartUtc, ActivityEvent[] activities, SlotOverride[]? overrides = null, Action<EngineOptions>? configure = null, IReadOnlySet<int>? ignored = null)
     {
         var (allocator, resolver) = Create(configure);
         var resolved = resolver.Resolve(activities, Rules);
-        var slots = allocator.AllocateDay(Fx.Monday, resolved, overrides ?? []);
+        var slots = allocator.AllocateDay(Fx.Monday, resolved, overrides ?? [], ignored);
         return slots.Single(s => s.SlotStartUtc == slotStartUtc);
     }
 
@@ -275,5 +275,41 @@ public class SlotAllocatorTests
         Assert.Equal(TaskA, At(9, 30).TaskId);  // 10 minutes
         Assert.Equal(SlotKind.Empty, At(9, 45).Kind);
         Assert.Equal(3, slots.Count(s => s.IsWork));
+    }
+
+    [Fact]
+    public void Rule_to_the_ignored_task_removes_a_meeting_from_the_timesheet()
+    {
+        var slot = Slot(Fx.Mon(10), [Meeting(Fx.Mon(10), Fx.Mon(10, 30))], ignored: new HashSet<int> { TaskMeeting });
+        Assert.Equal(SlotKind.Ignored, slot.Kind);
+        Assert.False(slot.IsWork);
+        Assert.False(slot.IsClassified);
+    }
+
+    [Fact]
+    public void Rule_to_the_ignored_task_removes_activity_but_other_tasks_stay()
+    {
+        var ignored = new HashSet<int> { TaskA };
+        Assert.Equal(SlotKind.Ignored, Slot(Fx.Mon(9), [Focus(Fx.Mon(9), Fx.Mon(9, 15), "contoso/a")], ignored: ignored).Kind);
+        var kept = Slot(Fx.Mon(9), [Focus(Fx.Mon(9), Fx.Mon(9, 15), "contoso/b")], ignored: ignored);
+        Assert.Equal(TaskB, kept.TaskId);
+        Assert.True(kept.IsClassified);
+    }
+
+    [Fact]
+    public void Override_to_the_ignored_task_removes_the_slot()
+    {
+        var slot = Slot(Fx.Mon(10),
+            [Meeting(Fx.Mon(10), Fx.Mon(10, 30))],
+            [new SlotOverride { SlotStartUtc = Fx.Mon(10), ForecastTaskId = TaskB }],
+            ignored: new HashSet<int> { TaskB });
+        Assert.Equal(SlotKind.Ignored, slot.Kind);
+        Assert.False(slot.IsWork);
+    }
+
+    [Fact]
+    public void Empty_slot_stays_empty_without_ignored_tasks()
+    {
+        Assert.Equal(SlotKind.Empty, Slot(Fx.Mon(20), [], ignored: new HashSet<int> { TaskA }).Kind);
     }
 }

@@ -3,13 +3,9 @@ using TimeSheetHelper.Storage;
 
 namespace TimeSheetHelper.App.Services;
 
-/// <summary>Opens app data folders in Explorer and serves Forecast fill screenshots, never anything outside the data folder.</summary>
+/// <summary>Opens app data folders in Explorer, never anything outside the data folder.</summary>
 public static class LocalFolders
 {
-    public const string FillScreenshotsRoute = "/forecast-fill";
-
-    public static string ForecastFillRoot => Path.Combine(DataPaths.Root, "forecast-fill");
-
     /// <summary>True when <paramref name="path"/> is <paramref name="root"/> or inside it (after normalization).</summary>
     public static bool IsUnder(string path, string root)
     {
@@ -30,32 +26,5 @@ public static class LocalFolders
             ? new ProcessStartInfo("explorer.exe") { ArgumentList = { "/select," + full } }
             : new ProcessStartInfo("explorer.exe") { ArgumentList = { full } };
         Process.Start(startInfo)?.Dispose();
-    }
-
-    /// <summary>URL of a screenshot under the forecast-fill folder, or null when it is elsewhere.</summary>
-    public static string? ScreenshotUrl(string? path)
-    {
-        if (string.IsNullOrEmpty(path) || !IsUnder(path, ForecastFillRoot))
-            return null;
-        var relative = Path.GetRelativePath(ForecastFillRoot, Path.GetFullPath(path));
-        return FillScreenshotsRoute + "/" + string.Join('/', relative.Split(Path.DirectorySeparatorChar).Select(Uri.EscapeDataString));
-    }
-
-    /// <summary>GET /forecast-fill/{**path}: PNG screenshots of the Forecast fill reports only.</summary>
-    public static WebApplication MapForecastScreenshots(this WebApplication app)
-    {
-        app.MapGet(FillScreenshotsRoute + "/{**path}", (string path) =>
-        {
-            if (string.IsNullOrWhiteSpace(path) || !path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                return Results.NotFound();
-
-            var root = ForecastFillRoot;
-            var full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
-            if (!IsUnder(full, root) || full.Equals(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
-                return Results.NotFound();
-
-            return Results.File(full, "image/png");
-        });
-        return app;
     }
 }

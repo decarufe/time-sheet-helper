@@ -114,7 +114,7 @@ public sealed partial class GroupKeyBuilder(IOptions<EngineOptions> options)
 
         var s = subject.Trim().ToLowerInvariant();
         s = ReplyPrefix().Replace(s, "");
-        s = Digits().Replace(s, " ");
+        s = StandaloneNumbers().Replace(s, " ");
         s = NonWord().Replace(s, " ");
         return Spaces().Replace(s, " ").Trim();
     }
@@ -163,6 +163,10 @@ public sealed partial class GroupKeyBuilder(IOptions<EngineOptions> options)
 
     [GeneratedRegex(@"\d+")]
     private static partial Regex Digits();
+
+    // Free-standing numbers only: digits glued to a word ("o365", "3d") or hyphenated to one ("1-on-1") are part of the name.
+    [GeneratedRegex(@"(?<![\p{L}\p{N}])(?<!\p{L}-)\d+(?![\p{L}\p{N}])(?!-\p{L})")]
+    private static partial Regex StandaloneNumbers();
 
     [GeneratedRegex(@"[^\p{L}\p{N}]+")]
     private static partial Regex NonWord();

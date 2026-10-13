@@ -11,6 +11,7 @@
 @inject WeekService Weeks
 @inject ForecastTimesheetWriter Writer
 @inject ForecastRunner ForecastOps
+@inject ForecastTaskLinker Linker
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Navigation
 
@@ -31,9 +32,9 @@
 
     <aside class="notice" role="note">
         <strong>Ce que fait cette page.</strong>
-        La simulation ouvre Forecast dans Edge, repère les lignes et les cellules et prend des captures, sans rien saisir.
-        La saisie tape ensuite les heures dans votre feuille de temps Forecast (chaque cellule est enregistrée par Forecast),
-        puis relit la grille pour vérifier.
+        La simulation interroge Forecast par son serveur MCP : elle vérifie que chaque tâche est trouvée et indique ce qui serait saisi, sans rien enregistrer.
+        La saisie crée ensuite les entrées de temps dans votre feuille Forecast, puis relit celles de la semaine pour vérifier.
+        Une cellule qui contient déjà d'autres heures n'est jamais modifiée : elle est signalée comme écart.
         <strong>L'envoi pour approbation n'est pas automatisé :</strong> une fois les heures vérifiées, ouvrez Forecast
         et soumettez la semaine vous-même.
     </aside>
@@ -151,16 +152,75 @@
             </section>
         }
 
+        @if (relinkMessage is not null)
+        {
+            <p class="alert success" role="status">@relinkMessage</p>
+        }
         @if (fill is not null)
         {
-            <ReportView Report="fill" Title="Résultat de la saisie (relecture de la grille)" OnOpenFolder="OpenFolder" />
+            <ReportView Report="fill" Title="Résultat de la saisie (relecture des entrées)" />
         }
         @if (simulation is not null)
         {
-            <ReportView Report="simulation" Title="Résultat de la simulation" OnOpenFolder="OpenFolder" />
+            <ReportView Report="simulation" Title="Résultat de la simulation" OnRelink="OpenRelinkAsync" RelinkDisabled="@AnyBusy" />
         }
     }
 </div>
+
+@if (relinkCell is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal relink-modal" role="dialog" aria-modal="true" aria-labelledby="relink-title">
+            <h2 id="relink-title">Relier « @relinkCell.TaskDisplayName » à une tâche Forecast</h2>
+            <p class="muted">
+                Cherchez la tâche dans Forecast (par nom ou par numéro, p. ex. T3382) puis choisissez celle qui correspond :
+                la tâche locale en prend l'identité, et les simulations et saisies suivantes la retrouveront.
+            </p>
+            <form class="relink-search" @onsubmit="SearchRelinkAsync" @onsubmit:preventDefault>
+                <label class="visually-hidden" for="relink-query">Nom ou numéro de la tâche</label>
+                <input id="relink-query" type="search" @bind="relinkQuery" @bind:event="oninput" autocomplete="off" />
+                <button type="submit" class="primary" disabled="@(relinkSearching || string.IsNullOrWhiteSpace(relinkQuery))">Rechercher</button>
+            </form>
+
+            @if (relinkSearching)
+            {
+                <p class="muted" role="status">Recherche dans Forecast…</p>
+            }
+            @if (relinkError is not null)
+            {
+                <p class="alert error" role="alert">@relinkError</p>
+            }
+            @if (relinkResults.Count > 0)
+            {
+                <div class="relink-results">
+                    <table>
+                        <thead>
+                            <tr><th>N°</th><th>Tâche</th><th>Projet</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var remote in relinkResults)
+                            {
+                                <tr>
+                                    <td class="nowrap">@remote.Code</td>
+                                    <td>@remote.Title</td>
+                                    <td>@remote.ProjectName</td>
+                                    <td><button class="primary" disabled="@(string.IsNullOrWhiteSpace(remote.Code) || relinkSearching)" @onclick="() => RelinkAsync(remote)">Relier</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (relinkTruncated)
+                {
+                    <p class="muted">Seules les @RelinkLimit premières tâches sont affichées : précisez la recherche pour affiner.</p>
+                }
+            }
+            <div class="modal-buttons">
+                <button @onclick="() => relinkCell = null">Fermer</button>
+            </div>
+        </div>
+    </div>
+}
 
 @if (confirmFill && draft is not null)
 {
@@ -169,11 +229,11 @@
             <h2 id="confirm-title">Saisir les heures dans Forecast ?</h2>
             <div id="confirm-text">
                 <p>
-                    Time Sheet Helper va ouvrir Edge et <strong>taper @UiLabels.Hours(grandTotal)</strong> réparties sur
+                    Time Sheet Helper va créer des entrées de temps pour <strong>@UiLabels.Hours(grandTotal)</strong> réparties sur
                     @simulation?.Cells.Count cellule(s) dans votre <strong>vraie feuille de temps Forecast</strong>,
                     @UiLabels.WeekTitle(monday).ToLower(UiLabels.French).
                 </p>
-                <p>Les valeurs déjà présentes dans ces cellules seront remplacées. Ne touchez pas à la fenêtre Edge pendant la saisie.</p>
+                <p>Les cellules qui contiennent déjà d'autres heures ne sont pas modifiées : elles sont signalées dans le rapport.</p>
                 <p>La semaine ne sera <strong>pas</strong> envoyée pour approbation : vous le ferez vous-même dans Forecast.</p>
             </div>
             <div class="modal-buttons">
@@ -208,7 +268,16 @@
     private OpState fillOp = OpState.Idle;
     private bool confirmFill;
 
-    private bool AnyBusy => simulationOp.Busy || fillOp.Busy;
+    private const int RelinkLimit = 50;
+    private ForecastCellResult? relinkCell;
+    private string relinkQuery = "";
+    private List<ForecastRemoteTask> relinkResults = [];
+    private bool relinkTruncated;
+    private bool relinkSearching;
+    private string? relinkError;
+    private string? relinkMessage;
+
+    private bool AnyBusy => simulationOp.Busy || fillOp.Busy || relinkSearching;
 
     private bool CanFill =>
         draft is { SubmittedUtc: null }
@@ -314,7 +383,7 @@
             return;
         fill = null;
         fillOp = OpState.Idle;
-        simulationOp = new OpState(true, "Simulation en cours dans Edge… connectez-vous à Forecast si la fenêtre le demande.", null);
+        simulationOp = new OpState(true, "Simulation en cours via le serveur MCP de Forecast…", null);
         try
         {
             var current = await ReadDraftAsync() ?? draft;
@@ -326,6 +395,10 @@
             simulationOp = report.Success
                 ? new OpState(false, report.Summary, null)
                 : new OpState(false, null, report.Summary);
+        }
+        catch (ForecastAuthRequiredException)
+        {
+            simulationOp = new OpState(false, null, AuthRequiredMessage);
         }
         catch (Exception ex)
         {
@@ -339,7 +412,7 @@
         if (draft is null || !CanFill)
             return;
 
-        fillOp = new OpState(true, "Saisie en cours dans Forecast… ne touchez pas à la fenêtre Edge.", null);
+        fillOp = new OpState(true, "Saisie en cours dans Forecast…", null);
         StateHasChanged();
         try
         {
@@ -371,14 +444,86 @@
             }
             else
             {
-                fillOp = new OpState(false, null, $"{report.Summary}. Certaines cellules ne correspondent pas : vérifiez le rapport et la grille Forecast. "
+                fillOp = new OpState(false, null, $"{report.Summary}. Certaines cellules ne correspondent pas : vérifiez le rapport et la feuille de temps Forecast. "
                                                   + "La semaine n'est pas marquée comme saisie.");
             }
         }
+        catch (ForecastAuthRequiredException)
+        {
+            fillOp = new OpState(false, null, AuthRequiredMessage);
+        }
         catch (Exception ex)
         {
-            fillOp = new OpState(false, null, $"Saisie interrompue : {ex.Message}. Vérifiez la grille dans Forecast.");
+            fillOp = new OpState(false, null, $"Saisie interrompue : {ex.Message}. Vérifiez la feuille de temps dans Forecast.");
         }
+    }
+
+    private async Task OpenRelinkAsync(ForecastCellResult cell)
+    {
+        relinkCell = cell;
+        relinkMessage = null;
+        relinkError = null;
+        relinkResults = [];
+        relinkTruncated = false;
+        relinkQuery = tasks.TryGetValue(cell.ForecastTaskId, out var task) ? task.TaskName : cell.TaskDisplayName;
+        await SearchRelinkAsync();
+    }
+
+    private async Task SearchRelinkAsync()
+    {
+        if (string.IsNullOrWhiteSpace(relinkQuery) || relinkSearching)
+            return;
+
+        relinkSearching = true;
+        relinkError = null;
+        relinkResults = [];
+        relinkTruncated = false;
+        StateHasChanged();
+        try
+        {
+            var query = relinkQuery;
+            var found = await ForecastOps.RunAsync("recherche de tâche", ct => Linker.SearchAsync(query, ct));
+            relinkTruncated = found.Count > RelinkLimit;
+            relinkResults = found.Take(RelinkLimit).ToList();
+            if (relinkResults.Count == 0)
+                relinkError = $"Aucune tâche Forecast ne correspond à « {query.Trim()} ».";
+        }
+        catch (ForecastAuthRequiredException)
+        {
+            relinkError = AuthRequiredMessage;
+        }
+        catch (Exception ex)
+        {
+            relinkError = $"Recherche impossible : {ex.Message}";
+        }
+        finally
+        {
+            relinkSearching = false;
+        }
+    }
+
+    private async Task RelinkAsync(ForecastRemoteTask remote)
+    {
+        if (relinkCell is not { } cell)
+            return;
+
+        try
+        {
+            var result = await Linker.RelinkAsync(cell.ForecastTaskId, remote);
+            relinkCell = null;
+            relinkMessage = result.Message;
+            if (await ReadDraftAsync() is { } current)
+                await SetDraftAsync(current);
+            simulation = fill = null;
+            simulationFingerprint = null;
+        }
+        catch (Exception ex)
+        {
+            relinkError = $"Liaison impossible : {ex.Message}";
+            return;
+        }
+
+        await SimulateAsync();
     }
 
     private async Task ReopenAsync()
@@ -396,15 +541,6 @@
         await LoadAsync();
     }
 
-    private void OpenFolder(string path)
-    {
-        try
-        {
-            LocalFolders.OpenInExplorer(path);
-        }
-        catch (Exception ex)
-        {
-            simulationOp = new OpState(false, null, ex.Message);
-        }
-    }
+    private const string AuthRequiredMessage =
+        "Vous n'êtes pas connecté à Forecast. Ouvrez la page Sources et cliquez sur « Se connecter à Forecast », puis relancez l'opération.";
 }

@@ -23,14 +23,15 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
     public DateOnly LocalDate(DateTime utc) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZone));
 
-    public IReadOnlyList<SlotAssignment> AllocateDay(DateOnly day, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides)
+    /// <param name="ignoredTaskIds">Tasks that remove their slots from the timesheet (the built-in "Ignoré" task).</param>
+    public IReadOnlyList<SlotAssignment> AllocateDay(DateOnly day, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null)
     {
         var (start, end) = DayBounds(day);
-        return Allocate(new Interval(start, end), activities, overrides);
+        return Allocate(new Interval(start, end), activities, overrides, ignoredTaskIds);
     }
 
     /// <summary>Allocates every slot of <paramref name="range"/> (which should start on a slot boundary).</summary>
-    public IReadOnlyList<SlotAssignment> Allocate(Interval range, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides)
+    public IReadOnlyList<SlotAssignment> Allocate(Interval range, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null)
     {
         var overrideBySlot = overrides
             .GroupBy(o => DateTime.SpecifyKind(o.SlotStartUtc, DateTimeKind.Utc))
@@ -42,12 +43,12 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         {
             var slot = new Interval(slotStart, slotStart + EngineOptions.SlotLength);
             overrideBySlot.TryGetValue(slotStart, out var slotOverride);
-            slots.Add(AllocateSlot(slot, inRange, slotOverride));
+            slots.Add(AllocateSlot(slot, inRange, slotOverride, ignoredTaskIds));
         }
         return slots;
     }
 
-    internal SlotAssignment AllocateSlot(Interval slot, IReadOnlyList<ResolvedActivity> activities, SlotOverride? slotOverride)
+    internal SlotAssignment AllocateSlot(Interval slot, IReadOnlyList<ResolvedActivity> activities, SlotOverride? slotOverride, IReadOnlySet<int>? ignoredTaskIds = null)
     {
         var o = options.Value;
         var here = activities.Where(a => a.Window.Overlaps(slot)).ToList();
@@ -114,11 +115,17 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
             .Select(kv => kv.Key)
             .ToList();
 
+        bool IsIgnored(int? taskId) => taskId is { } id && ignoredTaskIds?.Contains(id) == true;
+
         if (slotOverride is not null)
         {
+            if (IsIgnored(slotOverride.ForecastTaskId))
+                return new SlotAssignment(slot.Start, SlotKind.Ignored, slotOverride.ForecastTaskId, null, 1.0,
+                    ranked, evidenceIds, covered, slotOverride.Notes);
+
             return slotOverride.ForecastTaskId is { } taskId
                 ? new SlotAssignment(slot.Start, SlotKind.Override, taskId, null, 1.0,
-                    ranked.Where(c => c.TaskId != taskId).ToList(), evidenceIds, covered)
+                    ranked.Where(c => c.TaskId != taskId).ToList(), evidenceIds, covered, slotOverride.Notes)
                 : new SlotAssignment(slot.Start, SlotKind.ExcludedByOverride, null, null, 1.0, ranked, evidenceIds, covered);
         }
 
@@ -126,6 +133,9 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
             return new SlotAssignment(slot.Start, SlotKind.Empty, null, null, 0, ranked, evidenceIds, covered);
 
         var winner = ranked[0];
+        if (IsIgnored(winner.TaskId))
+            return new SlotAssignment(slot.Start, SlotKind.Ignored, winner.TaskId, null, winner.Share, ranked.Skip(1).ToList(), evidenceIds, covered);
+
         var winnerKey = new Candidate(winner.TaskId, winner.GroupKey);
         var kind = meetingWeights.GetValueOrDefault(winnerKey) > 0 ? SlotKind.Meeting : SlotKind.Activity;
 

@@ -1,0 +1,56 @@
+.new-task {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+h3 {
+    font-size: 0.95rem;
+    margin: 0 0 2px;
+}
+
+label {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+}
+
+details {
+    margin-top: 2px;
+}
+
+summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.codes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.hint {
+    margin: 6px 0 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.error {
+    margin: 0;
+    color: var(--danger, #b3261e);
+    font-size: 0.9rem;
+}
+
+.buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}

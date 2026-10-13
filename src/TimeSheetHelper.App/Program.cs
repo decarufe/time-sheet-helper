@@ -36,13 +36,12 @@ if (!app.Environment.IsDevelopment())
 }
 // The "not found" page is for the UI only: re-executing an API error would turn a 401 into an antiforgery 400.
 app.UseWhen(
-    context => !context.Request.Path.StartsWithSegments("/ingest") && !context.Request.Path.StartsWithSegments(LocalFolders.FillScreenshotsRoute),
+    context => !context.Request.Path.StartsWithSegments("/ingest"),
     ui => ui.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 
 app.UseAntiforgery();
 
 app.MapIngestEndpoints();
-app.MapForecastScreenshots();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

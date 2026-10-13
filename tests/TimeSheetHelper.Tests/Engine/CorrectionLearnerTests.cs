@@ -85,6 +85,16 @@ public class CorrectionLearnerTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Subject_keeps_numbers_that_belong_to_the_name()
+    {
+        var p = _sut.Propose([A(30, a => { a.Source = ActivitySource.Calendar; a.Subject = "1-on-1 Eric- Hélène"; })], 7);
+        var regex = new Regex(p!.Pattern, RegexOptions.IgnoreCase);
+        Assert.Matches(regex, "1-on-1 Eric- Hélène");
+        Assert.DoesNotMatch(regex, "Eric- Hélène");
+        Assert.DoesNotMatch(regex, "Hélène on Eric");
+    }
+
+    [Fact]
     public void Participants_domain_when_nothing_else()
     {
         var p = _sut.Propose([A(30, a => { a.Source = ActivitySource.Teams; a.Participants = "me@contoso.com;bob@fabrikam.com"; })], 7);

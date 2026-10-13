@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @using System.Text.RegularExpressions
 @using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.App.Components.Shared
 @using TimeSheetHelper.Core.Activities
 @using TimeSheetHelper.Core.Forecast
 @using TimeSheetHelper.Core.Rules
@@ -158,9 +159,17 @@
                             <option value="@task.Id">@task.DisplayName@(task.IsActive ? "" : " (inactive)")</option>
                         }
                     </select>
-                    @if (tasks.Count == 0)
+                    @if (!creatingTask)
                     {
-                        <p class="hint">Aucune tâche en cache : synchronisez les tâches dans <a href="sources">Sources</a>.</p>
+                        <button type="button" @onclick="() => creatingTask = true">+ Nouvelle tâche</button>
+                    }
+                    else
+                    {
+                        <NewTaskForm SubmitLabel="Créer et choisir" OnCreated="TaskCreatedAsync" OnCancel="() => creatingTask = false" />
+                    }
+                    @if (tasks.All(t => t.IsIgnored))
+                    {
+                        <p class="hint">Aucune tâche en cache : créez-en une, ou synchronisez les tâches dans <a href="sources">Sources</a>.</p>
                     }
                     else if (submitted && form.ForecastTaskId == 0)
                     {
@@ -242,6 +251,7 @@
     private Dictionary<int, ForecastTask> taskById = [];
     private RuleForm? form;
     private bool submitted;
+    private bool creatingTask;
     private int? confirmDeleteId;
     private string? loadError;
     private string? saveError;
@@ -283,7 +293,7 @@
         await using var db = await DbFactory.CreateDbContextAsync();
         rules = await db.Rules.AsNoTracking().OrderBy(r => r.Order).ThenBy(r => r.Id).ToListAsync();
         tasks = await db.ForecastTasks.AsNoTracking().ToListAsync();
-        tasks = tasks.OrderBy(t => t.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
+        tasks = tasks.OrderBy(t => !t.IsIgnored).ThenBy(t => t.DisplayName, StringComparer.CurrentCultureIgnoreCase).ToList();
         taskById = tasks.ToDictionary(t => t.Id);
     }
 
@@ -317,9 +327,18 @@
         confirmDeleteId = null;
         saveError = null;
         submitted = false;
+        creatingTask = false;
         form = new RuleForm();
         await EnsurePreviewDataAsync();
         UpdatePreview();
+    }
+
+    private async Task TaskCreatedAsync(int taskId)
+    {
+        await LoadAsync();
+        if (form is not null)
+            form.ForecastTaskId = taskId;
+        creatingTask = false;
     }
 
     private async Task StartEdit(Rule rule)
@@ -327,6 +346,7 @@
         confirmDeleteId = null;
         saveError = null;
         submitted = false;
+        creatingTask = false;
         form = new RuleForm
         {
             Id = rule.Id,

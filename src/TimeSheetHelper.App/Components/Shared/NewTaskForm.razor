@@ -1,0 +1,105 @@
+@using Microsoft.EntityFrameworkCore
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Storage
+@inject ForecastTaskImporter Importer
+@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+
+<form class="new-task" @onsubmit="CreateAsync" @onsubmit:preventDefault>
+    <h3>Nouvelle tâche</h3>
+
+    <label for="@projectId">Projet</label>
+    <input id="@projectId" @ref="projectInput" type="text" list="@listId" autocomplete="off" placeholder="Choisir ou saisir un projet"
+           @bind="project" @bind:event="oninput" />
+    <datalist id="@listId">
+        @foreach (var name in projects)
+        {
+            <option value="@name"></option>
+        }
+    </datalist>
+
+    <label for="@taskId">Tâche</label>
+    <input id="@taskId" type="text" autocomplete="off" placeholder="Nom de la tâche" @bind="task" @bind:event="oninput" />
+
+    <details>
+        <summary>Codes Forecast (facultatif)</summary>
+        <div class="codes">
+            <label>Code du projet <input type="text" placeholder="P1078" @bind="projectCode" /></label>
+            <label>Code de la tâche <input type="text" placeholder="T35647" @bind="taskCode" /></label>
+        </div>
+        <p class="hint">Sans code, la tâche est repérée par « projet / tâche » (temps interne). Un projet déjà connu garde son code.</p>
+    </details>
+
+    @if (error is not null)
+    {
+        <p class="error" role="alert">@error</p>
+    }
+
+    <div class="buttons">
+        <button type="submit" class="primary" disabled="@busy">@(busy ? "Création…" : SubmitLabel)</button>
+        <button type="button" disabled="@busy" @onclick="() => OnCancel.InvokeAsync()">Annuler</button>
+    </div>
+</form>
+
+@code {
+    private readonly string projectId = $"nt-project-{Guid.NewGuid():N}";
+    private readonly string taskId = $"nt-task-{Guid.NewGuid():N}";
+    private readonly string listId = $"nt-projects-{Guid.NewGuid():N}";
+    private ElementReference projectInput;
+    private List<string> projects = [];
+    private string project = "";
+    private string task = "";
+    private string projectCode = "";
+    private string taskCode = "";
+    private string? error;
+    private bool busy;
+
+    /// <summary>Pre-fills the task name (typically what was typed in a search box that found nothing).</summary>
+    [Parameter] public string? InitialTaskName { get; set; }
+
+    [Parameter] public string SubmitLabel { get; set; } = "Créer et choisir";
+
+    /// <summary>Raised with the id of the task that was created (or found again and reactivated).</summary>
+    [Parameter] public EventCallback<int> OnCreated { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        task = InitialTaskName?.Trim() ?? "";
+        await using var db = await DbFactory.CreateDbContextAsync();
+        projects = (await db.ForecastTasks.AsNoTracking().Select(t => t.ProjectName).Distinct().ToListAsync())
+            .OrderBy(p => p, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try { await projectInput.FocusAsync(); }
+            catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            var result = await Importer.AddAsync(project, task, projectCode, taskCode);
+            if (result.TaskId is { } id)
+                await OnCreated.InvokeAsync(id);
+            else
+                error = result.Error;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

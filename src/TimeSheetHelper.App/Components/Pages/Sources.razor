@@ -19,9 +19,8 @@
 @inject IProcessRunner Processes
 @inject GraphAuthenticator Graph
 @inject ForecastRunner ForecastOps
-@inject ForecastSession ForecastSession
+@inject IForecastConnector ForecastConnector
 @inject ForecastTaskReader TaskReader
-@inject ForecastDiscovery Discovery
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject TimeProvider Clock
 
@@ -315,7 +314,8 @@
             <span class="pill @(activeTasks > 0 ? "ok" : "warn")">@activeTasks tâche(s) active(s)</span>
         </header>
         <p class="hint">
-            Forecast est piloté dans Edge avec un profil dédié : la session reste ouverte entre deux utilisations.
+            Forecast est joint par son serveur MCP (<code>.mcp.json</code>) : la connexion OAuth se fait dans votre navigateur
+            et reste mémorisée (chiffrée) entre deux utilisations.
             @if (lastTaskSeenUtc is { } seen)
             {
                 <span>Tâches lues pour la dernière fois @UiLabels.Ago(seen, Now).</span>
@@ -328,19 +328,10 @@
         <div class="card-actions">
             <button class="primary" disabled="@ForecastOps.IsBusy" @onclick="ForecastLoginAsync">Se connecter à Forecast</button>
             <button disabled="@ForecastOps.IsBusy" @onclick="ForecastSyncTasksAsync">Synchroniser les tâches</button>
-            <button disabled="@ForecastOps.IsBusy" @onclick="ForecastDiscoverAsync">Découverte de l'interface</button>
+            <button disabled="@(ForecastOps.IsBusy || !forecastHasCredentials)" @onclick="ForecastLogoutAsync">Se déconnecter</button>
             <a href="taches">Modifier la liste des tâches</a>
         </div>
         <OpStatus State="@Op("forecast")" />
-        @if (discoveryFolder is not null)
-        {
-            <div class="folder">
-                <span>Captures de la découverte :</span>
-                <code>@discoveryFolder</code>
-                <button @onclick="() => OpenFolder(discoveryFolder)">Ouvrir dans l'Explorateur</button>
-            </div>
-            <p class="hint">Ces fichiers contiennent vos données Forecast ; ils servent à ajuster les sélecteurs de l'automatisation.</p>
-        }
     </article>
 </div>
 
@@ -365,7 +356,7 @@
     private bool? m365SignedIn;
     private int activeTasks;
     private DateTime? lastTaskSeenUtc;
-    private string? discoveryFolder;
+    private bool forecastHasCredentials;
     private System.Threading.Timer? refreshTimer;
     private bool disposed;
 
@@ -374,7 +365,7 @@
     protected override async Task OnInitializedAsync()
     {
         RefreshSecretStates();
-        discoveryFolder = LatestDiscoveryFolder();
+        forecastHasCredentials = ForecastConnector.HasCredentials;
         await LoadTaskCountAsync();
     }
 
@@ -460,7 +451,7 @@
     private async Task LoadTaskCountAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        activeTasks = await db.ForecastTasks.CountAsync(t => t.IsActive);
+        activeTasks = await db.ForecastTasks.CountAsync(t => t.IsActive && t.ExternalId != TimeSheetHelper.Core.Forecast.ForecastTask.IgnoredExternalId);
         lastTaskSeenUtc = await db.ForecastTasks.MaxAsync(t => (DateTime?)t.LastSeenUtc);
     }
 
@@ -550,12 +541,22 @@
         });
 
     private Task ForecastLoginAsync() =>
-        RunOpAsync("forecast", "Ouverture de Forecast dans Edge… connectez-vous si la page de connexion s'affiche.", () =>
+        RunOpAsync("forecast", "Connexion à Forecast… terminez l'autorisation dans la fenêtre du navigateur.", () =>
             ForecastOps.RunAsync<string?>("connexion", async ct =>
             {
-                await ForecastSession.EnsureLoggedInAsync(ct);
-                return "Connecté à Forecast. La session est conservée pour les prochaines utilisations.";
+                await using var client = await ForecastConnector.ConnectAsync(interactive: true, cancellationToken: ct);
+                var tools = await client.ListToolsAsync(ct);
+                forecastHasCredentials = ForecastConnector.HasCredentials;
+                return $"Connecté à Forecast ({tools.Count} outil(s) disponibles). La connexion est conservée pour les prochaines utilisations.";
             }));
+
+    private Task ForecastLogoutAsync() =>
+        RunOpAsync("forecast", "Déconnexion…", async () =>
+        {
+            await ForecastConnector.SignOutAsync();
+            forecastHasCredentials = ForecastConnector.HasCredentials;
+            return "Connexion à Forecast oubliée.";
+        });
 
     private Task ForecastSyncTasksAsync() =>
         RunOpAsync("forecast", "Lecture des tâches dans Forecast…", async () =>
@@ -564,40 +565,6 @@
             await LoadTaskCountAsync();
             return result.Warning is not null ? throw new InvalidOperationException(result.Warning) : result.Summary;
         });
-
-    private Task ForecastDiscoverAsync() =>
-        RunOpAsync("forecast", "Découverte de l'interface Forecast (rien n'est enregistré dans Forecast)…", async () =>
-        {
-            discoveryFolder = await ForecastOps.RunAsync("découverte", ct => Discovery.RunAsync(ct));
-            return "Découverte terminée.";
-        });
-
-    private void OpenFolder(string path)
-    {
-        try
-        {
-            LocalFolders.OpenInExplorer(path);
-        }
-        catch (Exception ex)
-        {
-            ops["forecast"] = new OpState(false, null, ex.Message);
-        }
-    }
-
-    private static string? LatestDiscoveryFolder()
-    {
-        try
-        {
-            var root = Path.Combine(DataPaths.Root, "forecast-discovery");
-            return Directory.Exists(root)
-                ? Directory.EnumerateDirectories(root).OrderDescending(StringComparer.Ordinal).FirstOrDefault()
-                : null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-    }
 
     private void OnSchedulerChanged() => Refresh();
 
