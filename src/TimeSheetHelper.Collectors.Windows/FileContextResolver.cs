@@ -19,11 +19,11 @@ public sealed class FileContextResolver(IOptionsMonitor<FocusTrackerOptions> opt
             switch (processName.ToUpperInvariant())
             {
                 case "WINWORD":
-                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("Word.Application", app => app.ActiveDocument)), processName, title);
+                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("Word.Application", app => app.ActiveDocument)), processName, title, hwnd);
                 case "EXCEL":
-                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("Excel.Application", app => app.ActiveWorkbook)), processName, title);
+                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("Excel.Application", app => app.ActiveWorkbook)), processName, title, hwnd);
                 case "POWERPNT":
-                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("PowerPoint.Application", app => app.ActivePresentation)), processName, title);
+                    return FromPathOrTitle(await RunComAsync(() => GetOfficeDocument("PowerPoint.Application", app => app.ActivePresentation)), processName, title, hwnd);
                 case "EXPLORER":
                     var folder = await RunComAsync(() => GetExplorerFolder(hwnd, title));
                     if (folder is not null) return new FileContext(null, folder);
@@ -62,14 +62,50 @@ public sealed class FileContextResolver(IOptionsMonitor<FocusTrackerOptions> opt
         return new FileContext(path, Path.GetDirectoryName(path));
     }
 
-    private FileContext FromPathOrTitle(string? path, string processName, string title) =>
-        path is not null ? FromPath(path) : FromTitle(processName, title);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Process, IntPtr Hwnd, string Title), FileContext> lastKnown = new();
+
+    private FileContext FromPathOrTitle(string? path, string processName, string title, IntPtr hwnd)
+    {
+        var key = (processName, hwnd, title);
+        if (path is not null)
+            return lastKnown[key] = FromPath(path);
+
+        // Office was busy or has no document: keep what we knew for this very window and title.
+        if (lastKnown.TryGetValue(key, out var known))
+            return known;
+        return FromTitle(processName, title);
+    }
 
     private static async Task<string?> RunComAsync(Func<string?> action)
     {
         // Office can block COM calls while a modal dialog is open; never let that stall the tracker.
-        var task = Task.Factory.StartNew(action, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        var task = Task.Factory.StartNew(() => RetryWhenBusy(action), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         return await task.WaitAsync(ComTimeout);
+    }
+
+    private const int ServerCallRetryLater = unchecked((int)0x8001010A);
+    private const int CallRejected = unchecked((int)0x80010001);
+    private const int BusyAttempts = 4;
+
+    /// <summary>
+    /// Office answers "busy" (RPC_E_SERVERCALL_RETRYLATER) while a cell is being edited or a dialog is open.
+    /// Retries briefly, then returns null so the caller falls back to the last known context or the title.
+    /// </summary>
+    private static string? RetryWhenBusy(Func<string?> action)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return action();
+            }
+            catch (COMException ex) when (ex.HResult is ServerCallRetryLater or CallRejected)
+            {
+                if (attempt >= BusyAttempts)
+                    return null;
+                Thread.Sleep(150);
+            }
+        }
     }
 
     private static string? GetOfficeDocument(string progId, Func<dynamic, dynamic?> getDocument)
