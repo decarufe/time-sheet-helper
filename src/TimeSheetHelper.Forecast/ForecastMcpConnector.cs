@@ -255,15 +255,31 @@ public sealed class ForecastMcpConnector(
         public async Task<IReadOnlyList<ForecastToolInfo>> ListToolsAsync(CancellationToken cancellationToken = default)
         {
             using var cts = Timeout(cancellationToken);
-            var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
-            return tools.Select(t => new ForecastToolInfo(t.Name, t.Description, t.JsonSchema)).ToList();
+            try
+            {
+                var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
+                return tools.Select(t => new ForecastToolInfo(t.Name, t.Description, t.JsonSchema)).ToList();
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Le serveur Forecast n'a pas répondu dans le délai de {requestTimeout.TotalSeconds:0} s.");
+            }
         }
 
         public async Task<ForecastToolResult> CallToolAsync(
             string toolName, IReadOnlyDictionary<string, object?> arguments, CancellationToken cancellationToken = default)
         {
             using var cts = Timeout(cancellationToken);
-            var result = await client.CallToolAsync(toolName, arguments, cancellationToken: cts.Token);
+            CallToolResult result;
+            try
+            {
+                result = await client.CallToolAsync(toolName, arguments, cancellationToken: cts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The request outlived its timeout: not a cancellation by the caller, so it must not end the whole operation.
+                throw new TimeoutException($"« {toolName} » n'a pas répondu dans le délai de {requestTimeout.TotalSeconds:0} s.");
+            }
 
             var text = string.Join("\n", result.Content.OfType<TextContentBlock>().Select(b => b.Text));
             JsonElement? json = null;

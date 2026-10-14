@@ -5,8 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- Comes with the desktop shell's WebView2 package (see TimeSheetHelper.Desktop.csproj). -->
-    <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,7 +27,6 @@
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Engine\TimeSheetHelper.Engine.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.App\TimeSheetHelper.App.csproj" />
-    <ProjectReference Include="..\..\src\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Plugins.Abstractions\TimeSheetHelper.Plugins.Abstractions.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.TestPlugin\TimeSheetHelper.TestPlugin.csproj" />
   </ItemGroup>

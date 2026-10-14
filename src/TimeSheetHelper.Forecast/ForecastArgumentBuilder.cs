@@ -13,6 +13,7 @@ public sealed record ForecastArgumentValues
     public string? TaskId { get; init; }
     public decimal? Hours { get; init; }
     public string? Notes { get; init; }
+    public int? MaxResults { get; init; }
 }
 
 public sealed record ForecastArguments(IReadOnlyDictionary<string, object?> Values, IReadOnlyList<string> MissingRequired)
@@ -50,7 +51,7 @@ public static class ForecastArgumentBuilder
     public static bool AcceptsDateRange(ForecastToolInfo tool) =>
         tool.ParameterNames.Select(Normalize).Any(n => Role(n) == ParameterRole.From);
 
-    private enum ParameterRole { None, From, To, Date, Person, Task, Hours, Notes }
+    private enum ParameterRole { None, From, To, Date, Person, Task, Hours, Notes, Limit }
 
     private static object? Value(string name, JsonElement definition, ForecastArgumentValues v)
     {
@@ -69,6 +70,8 @@ public static class ForecastArgumentBuilder
                 return Id(v.TaskId, definition);
             case ParameterRole.Notes:
                 return v.Notes;
+            case ParameterRole.Limit when v.MaxResults is { } max:
+                return Type(definition) == "string" ? max.ToString(CultureInfo.InvariantCulture) : max;
             case ParameterRole.Hours when v.Hours is { } hours:
                 return Duration(hours, normalized, definition);
             default:
@@ -96,6 +99,8 @@ public static class ForecastArgumentBuilder
             return ParameterRole.Hours;
         if (n is "notes" or "note" or "comment" or "comments" or "description" or "text" or "message")
             return ParameterRole.Notes;
+        if (n is "maxresults" or "limit" or "pagesize" or "maxitems")
+            return ParameterRole.Limit;
         return ParameterRole.None;
     }
 

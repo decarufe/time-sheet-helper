@@ -3,8 +3,8 @@
     Builds the Time Sheet Helper Windows installer (artifacts/TimeSheetHelper-<version>.msi).
 
 .DESCRIPTION
-    1. Publishes src/TimeSheetHelper.App as a self-contained win-x64 folder. The publish also places the window
-       (TimeSheetHelper.Desktop.exe, WebView2) and the bundled source plugins (plugins\<package>\) in that folder.
+    1. Publishes src/TimeSheetHelper.App as a self-contained win-x64 folder. The publish also places the bundled source
+       plugins (plugins\<package>\) in that folder.
     2. Builds the VS Code extension (.vsix) when extensions/vscode exists and pnpm is available.
     3. Builds installer/TimeSheetHelper.Installer (WiX) into a per-user .msi: no administrator rights, no .NET to install.
 
@@ -85,7 +85,7 @@ if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
 New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
 
 # --- Application, window and plugins ---------------------------------------------------------------
-Write-Step 'Publication de l''application, de la fenêtre et des plugins (.NET autonome, win-x64)'
+Write-Step 'Publication de l''application et des plugins (.NET autonome, win-x64)'
 Invoke-Native dotnet @(
     'publish', $appProject,
     '-c', $Configuration,
@@ -99,7 +99,7 @@ Invoke-Native dotnet @(
     "-p:InformationalVersion=$Version",
     '-nologo'
 )
-foreach ($required in 'TimeSheetHelper.exe', 'TimeSheetHelper.Desktop.exe', 'plugins\windows-activity\plugin.json', 'plugins\devops\plugin.json', 'plugins\microsoft-365\plugin.json') {
+foreach ($required in 'TimeSheetHelper.exe', 'plugins\windows-activity\plugin.json', 'plugins\devops\plugin.json', 'plugins\microsoft-365\plugin.json') {
     if (-not (Test-Path (Join-Path $publishDir $required))) { throw "$required est absent de la sortie de publication ($publishDir)." }
 }
 

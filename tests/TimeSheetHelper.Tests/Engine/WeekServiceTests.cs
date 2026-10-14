@@ -219,6 +219,62 @@ public class WeekServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Not_work_slot_leaves_the_totals_and_the_draft_and_stays_not_work_on_recompute()
+    {
+        await _host.AddActivitiesAsync(Code(Fx.Mon(9), Fx.Mon(10), "contoso/api"));
+        await _sut.AssignSlotStartsAsync([Fx.Mon(14)], _support.Id);
+
+        // "Pas du travail" in the day view: the slot is stored as not work.
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9, 15), Fx.Mon(14)], null);
+
+        for (var pass = 0; pass < 2; pass++) // a second computation must give the same result
+        {
+            var monday = (await _sut.GetWeekAsync(Fx.Monday)).Days[0];
+            Assert.Equal(0.75m, monday.TotalHours);
+            Assert.DoesNotContain(monday.Tasks, t => t.ForecastTaskId == _support.Id);
+
+            var timeline = await _sut.GetDayTimelineAsync(Fx.Monday);
+            Assert.Equal(SlotKind.ExcludedByOverride, timeline.Slots.Single(s => s.SlotStartUtc == Fx.Mon(9, 15)).Kind);
+            Assert.Equal(SlotKind.ExcludedByOverride, timeline.Slots.Single(s => s.SlotStartUtc == Fx.Mon(14)).Kind);
+        }
+
+        var draft = (await _sut.RebuildDraftAsync(Fx.Monday)).Draft;
+        var entry = Assert.Single(draft.Entries);
+        Assert.Equal((_dev.Id, 0.75m), (entry.ForecastTaskId, entry.Hours));
+    }
+
+    [Fact]
+    public async Task Not_work_keeps_the_collected_activity_and_clearing_it_gives_the_slot_back_to_the_engine()
+    {
+        await _host.AddActivitiesAsync(Code(Fx.Mon(9), Fx.Mon(10), "contoso/api"));
+
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], null);
+
+        var timeline = await _sut.GetDayTimelineAsync(Fx.Monday);
+        var removed = timeline.Slots.Single(s => s.SlotStartUtc == Fx.Mon(9));
+        Assert.NotEmpty(removed.Evidence);
+        Assert.All(removed.Evidence, id => Assert.True(timeline.Activities.ContainsKey(id)));
+        await using (var db = _host.Db())
+            Assert.Equal(1, await db.Activities.CountAsync());
+
+        await _sut.ClearSlotStartsAsync([Fx.Mon(9)]);
+
+        var restored = (await _sut.GetDayTimelineAsync(Fx.Monday)).Slots.Single(s => s.SlotStartUtc == Fx.Mon(9));
+        Assert.Equal((SlotKind.Activity, _dev.Id), (restored.Kind, restored.TaskId));
+        Assert.Equal(1m, (await _sut.GetWeekAsync(Fx.Monday)).Days[0].TotalHours);
+    }
+
+    [Fact]
+    public async Task Marking_a_slot_as_not_work_twice_keeps_a_single_override()
+    {
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], null);
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], null);
+
+        await using var db = _host.Db();
+        Assert.Equal(Fx.Mon(9), (await db.SlotOverrides.SingleAsync()).SlotStartUtc);
+    }
+
+    [Fact]
     public async Task Correction_on_a_group_learns_a_rule()
     {
         await _host.AddActivitiesAsync(

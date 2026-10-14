@@ -13,11 +13,22 @@ if (Cli.IsCommand(args))
     return await Cli.RunAsync(args);
 
 using var singleInstance = new Mutex(initiallyOwned: true, SingleInstanceName(), out var isFirstInstance);
+var openUi = args.Contains(UiLauncher.OpenArgument, StringComparer.OrdinalIgnoreCase);
 if (!isFirstInstance)
+{
+    // Started again from the Start menu: the running application only has to show its page.
+    if (openUi)
+        UiLauncher.Open(UiLauncher.ConfiguredUrl(UiLauncher.ReadSettings()));
     return 0;
+}
 
 // Content root = exe folder, so appsettings and wwwroot are found whatever the working directory (startup shortcut, installer).
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory });
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    // "--open" is ours, not a configuration switch.
+    Args = args.Where(a => !a.Equals(UiLauncher.OpenArgument, StringComparison.OrdinalIgnoreCase)).ToArray(),
+    ContentRootPath = AppContext.BaseDirectory,
+});
 AppServices.AddConfiguration(builder.Configuration);
 
 builder.Services.AddRazorComponents()
@@ -39,6 +50,9 @@ builder.Services.AddSingleton<TrayIcon>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 
 var app = builder.Build();
+
+if (openUi)
+    app.Lifetime.ApplicationStarted.Register(() => UiLauncher.Open(UiLauncher.ConfiguredUrl(app.Configuration)));
 
 await AppServices.MigrateDatabaseAsync(app.Services);
 TimesheetUi.Sources = app.Services.GetRequiredService<ISourceCatalog>();

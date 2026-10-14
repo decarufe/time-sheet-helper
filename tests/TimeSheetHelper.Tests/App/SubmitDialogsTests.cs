@@ -1,0 +1,129 @@
+using TimeSheetHelper.App.Components.Shared;
+using TimeSheetHelper.Forecast.Submission;
+
+namespace TimeSheetHelper.Tests.App;
+
+public sealed class SubmitDialogsTests
+{
+    private static IReadOnlyList<SubmissionGap> ToVerify(int count) =>
+        Enumerable.Range(0, count)
+            .Select(i => GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null, day: i % 5, title: $"Point {i + 1}"))
+            .ToList();
+
+    private static IReadOnlyList<string> Fill(
+        int toVerify = 0, int ignored = 0, SubmissionSummary? summary = null, decimal hours = 37.5m, int cells = 12) =>
+        SubmitDialogs.FillParagraphs(hours, cells, GapFx.Monday, ToVerify(toVerify), ignored, summary);
+
+    [Fact]
+    public void A_clean_fill_says_what_is_typed_that_existing_hours_are_kept_and_that_nothing_is_sent_for_approval()
+    {
+        var paragraphs = Fill();
+
+        Assert.Equal(3, paragraphs.Count);
+        Assert.Contains("37,50 h", paragraphs[0]);
+        Assert.Contains("12 cellules", paragraphs[0]);
+        Assert.Contains("ne sont pas modifiées", paragraphs[1]);
+        Assert.Contains("pas envoyée pour approbation", paragraphs[^1]);
+    }
+
+    [Fact]
+    public void A_single_cell_is_written_in_the_singular()
+    {
+        Assert.Contains("1 cellule ", Fill(cells: 1)[0]);
+    }
+
+    [Fact]
+    public void Open_points_to_verify_are_listed_and_said_not_to_block()
+    {
+        var paragraphs = Fill(toVerify: 2);
+
+        var open = Assert.Single(paragraphs, p => p.Contains("à vérifier"));
+        Assert.Contains("2 points à vérifier restent ouverts", open);
+        Assert.Contains("ne bloquent pas la saisie", open);
+        Assert.Contains("Point 1 ; Point 2", open);
+    }
+
+    [Fact]
+    public void One_open_point_is_written_in_the_singular()
+    {
+        var open = Assert.Single(Fill(toVerify: 1), p => p.Contains("à vérifier"));
+
+        Assert.Contains("1 point à vérifier reste ouvert", open);
+        Assert.Contains("ne bloque pas la saisie", open);
+    }
+
+    [Fact]
+    public void Only_five_open_points_are_named_and_the_others_are_counted()
+    {
+        var open = Assert.Single(Fill(toVerify: 7), p => p.Contains("à vérifier"));
+
+        Assert.Contains("Point 5", open);
+        Assert.DoesNotContain("Point 6", open);
+        Assert.Contains("et 2 autre(s)", open);
+    }
+
+    [Fact]
+    public void Ignored_gaps_are_recalled_with_the_fact_that_the_fill_does_not_change()
+    {
+        var one = Assert.Single(Fill(ignored: 1), p => p.Contains("ignoré"));
+        var several = Assert.Single(Fill(ignored: 3), p => p.Contains("ignoré"));
+
+        Assert.StartsWith("1 écart ignoré pour cette session", one);
+        Assert.StartsWith("3 écarts ignorés pour cette session", several);
+        Assert.Contains("la saisie reste la même", one);
+    }
+
+    [Fact]
+    public void Time_without_a_project_is_said_to_stay_in_forecast_and_out_of_the_fill()
+    {
+        var withNonProject = Fill(summary: GapFx.Summary(nonProject: 2m));
+        var without = Fill(summary: GapFx.Summary());
+
+        Assert.Contains(withNonProject, p => p.Contains("2,00 h sans projet restent dans Forecast"));
+        Assert.DoesNotContain(without, p => p.Contains("sans projet"));
+    }
+
+    [Fact]
+    public void The_approval_reminder_always_comes_last()
+    {
+        var paragraphs = Fill(toVerify: 1, ignored: 1, summary: GapFx.Summary(nonProject: 1m));
+
+        Assert.Contains("approbation", paragraphs[^1]);
+        Assert.Equal(6, paragraphs.Count);
+    }
+
+    private static SubmitDialogs.MergeImpact Impact(int rules = 2, int cells = 3, decimal hours = 4.5m) =>
+        new("Ancienne", "Intégration paie v2", "T3382", cells, hours, rules);
+
+    [Fact]
+    public void The_merge_title_names_both_tasks()
+    {
+        var title = SubmitDialogs.MergeTitle(Impact());
+
+        Assert.Equal("Fusionner « Ancienne » avec T3382 ?", title);
+    }
+
+    [Fact]
+    public void The_merge_message_counts_what_moves_and_says_it_cannot_be_undone()
+    {
+        var message = SubmitDialogs.MergeMessage(Impact());
+
+        Assert.Contains("« Ancienne »", message);
+        Assert.Contains("« Intégration paie v2 »", message);
+        Assert.Contains("2 règles", message);
+        Assert.Contains("3 cellules du brouillon", message);
+        Assert.Contains("4,50 h", message);
+        Assert.Contains("18 créneaux de 15 minutes", message);
+        Assert.Contains("irréversible", message);
+    }
+
+    [Fact]
+    public void The_merge_message_uses_the_singular_for_one_rule_one_cell_and_one_slot()
+    {
+        var message = SubmitDialogs.MergeMessage(Impact(rules: 1, cells: 1, hours: 0.25m));
+
+        Assert.Contains("1 règle ", message);
+        Assert.Contains("1 cellule du brouillon", message);
+        Assert.Contains("1 créneau de 15 minutes", message);
+    }
+}

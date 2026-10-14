@@ -12,9 +12,16 @@ public sealed class ActivityStore(IDbContextFactory<TimeSheetDbContext> dbFactor
         // Collectors hand back the same instance as a segment grows; once it has an Id it is an update.
         if (activity.Id != 0)
         {
-            db.Activities.Update(activity);
-            await db.SaveChangesAsync(cancellationToken);
-            return;
+            if (await db.Activities.AnyAsync(a => a.Id == activity.Id, cancellationToken))
+            {
+                db.Activities.Update(activity);
+                await db.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            // The user deleted this segment while the collector still holds it: store the rest as a new row
+            // (the deleted slots stay masked by their tombstones).
+            activity.Id = 0;
         }
 
         if (activity.ExternalId is not null)

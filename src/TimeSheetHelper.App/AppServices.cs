@@ -26,6 +26,7 @@ public static class AppServices
         services.AddSourcePlugins();
         services.AddForecast(configuration);
         services.AddTimesheetEngine(configuration);
+        services.AddSingleton<SubmissionReviewService>();
         return services;
     }
 

@@ -23,10 +23,10 @@ public sealed class WeekProposalBuilder(
     private const decimal HoursPerSlot = 0.25m;
 
     /// <summary>Activities this long before a range are loaded so commit windows can see the previous commit.</summary>
-    private static readonly TimeSpan LookBehind = TimeSpan.FromDays(1);
+    internal static readonly TimeSpan LookBehind = TimeSpan.FromDays(1);
 
     /// <summary>Point events shortly after a range still reach into it through their evidence window.</summary>
-    private static readonly TimeSpan LookAhead = TimeSpan.FromHours(2);
+    internal static readonly TimeSpan LookAhead = TimeSpan.FromHours(2);
 
     public static DateOnly WeekStartOf(DateOnly day) => day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
 
@@ -38,11 +38,11 @@ public sealed class WeekProposalBuilder(
         var range = new Interval(allocator.DayBounds(days[0]).StartUtc, allocator.DayBounds(days[^1]).EndUtc);
 
         var data = await LoadAsync(range, cancellationToken);
-        var resolved = resolver.Resolve(data.Activities, data.Rules);
+        var resolved = Resolve(data);
 
         var slotsByDay = new Dictionary<DateOnly, IReadOnlyList<SlotAssignment>>();
         foreach (var day in days)
-            slotsByDay[day] = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds);
+            slotsByDay[day] = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds, data.RemovedSlots);
 
         var dayProposals = days.Select(d => SummarizeDay(d, slotsByDay[d])).ToList();
 
@@ -87,8 +87,8 @@ public sealed class WeekProposalBuilder(
     {
         var (start, end) = allocator.DayBounds(day);
         var data = await LoadAsync(new Interval(start, end), cancellationToken);
-        var resolved = resolver.Resolve(data.Activities, data.Rules);
-        var slots = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds);
+        var resolved = Resolve(data);
+        var slots = allocator.AllocateDay(day, resolved, data.Overrides, data.IgnoredTaskIds, data.RemovedSlots);
 
         var cited = slots.SelectMany(s => s.Evidence).ToHashSet();
         var activities = data.Activities.Where(a => cited.Contains(a.Id)).ToDictionary(a => a.Id);
@@ -191,6 +191,12 @@ public sealed class WeekProposalBuilder(
             duration);
     }
 
+    /// <summary>Resolves the activities, leaving out those whose every slot was deleted by the user (e.g. re-ingested by a collector).</summary>
+    private IReadOnlyList<ResolvedActivity> Resolve(WeekData data) =>
+        resolver.Resolve(data.Activities, data.Rules)
+            .Where(r => !RemovedSlots.CoversOnly(r.Window, data.RemovedSlots))
+            .ToList();
+
     private async Task<WeekData> LoadAsync(Interval range, CancellationToken cancellationToken)
     {
         var activities = await activityStore.GetRangeAsync(range.Start - LookBehind, range.End + LookAhead, cancellationToken);
@@ -201,13 +207,17 @@ public sealed class WeekProposalBuilder(
         var overrides = await db.SlotOverrides.AsNoTracking()
             .Where(o => o.SlotStartUtc >= range.Start && o.SlotStartUtc < range.End)
             .ToListAsync(cancellationToken);
+        var removed = (await db.RemovedSlots.AsNoTracking()
+            .Where(r => r.SlotStartUtc >= range.Start - LookBehind && r.SlotStartUtc < range.End + LookAhead)
+            .Select(r => r.SlotStartUtc)
+            .ToListAsync(cancellationToken)).ToHashSet();
         var weekStart = WeekStartOf(allocator.LocalDate(range.Start));
         var submitted = await db.TimesheetDrafts.AsNoTracking()
             .Where(d => d.WeekStart == weekStart)
             .Select(d => d.SubmittedUtc)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return new WeekData(activities, rules, tasks, overrides, submitted);
+        return new WeekData(activities, rules, tasks, overrides, submitted, removed);
     }
 
     private sealed record WeekData(
@@ -215,7 +225,8 @@ public sealed class WeekProposalBuilder(
         IReadOnlyList<Rule> Rules,
         IReadOnlyList<ForecastTask> Tasks,
         IReadOnlyList<SlotOverride> Overrides,
-        DateTime? SubmittedUtc)
+        DateTime? SubmittedUtc,
+        IReadOnlySet<DateTime> RemovedSlots)
     {
         public IReadOnlySet<int> IgnoredTaskIds { get; } = Tasks.Where(t => t.IsIgnored).Select(t => t.Id).ToHashSet();
     }

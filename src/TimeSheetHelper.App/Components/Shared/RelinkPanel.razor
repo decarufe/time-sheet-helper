@@ -1,0 +1,95 @@
+@using TimeSheetHelper.Forecast
+@inject IForecastLookup Lookup
+@inject ILogger<RelinkPanel> Logger
+
+@* Inline search of the Forecast task a local task stands for: results while typing, then one click to link (a merge is confirmed by the page). *@
+<div class="relink" role="group" aria-labelledby="@titleId">
+    <p id="@titleId" class="title">Relier « @LocalTaskName » à une tâche Forecast</p>
+    <p class="muted hint">
+        Cherchez la tâche par nom ou par numéro (p. ex. T3382), puis choisissez-la : la tâche locale en prend l'identité
+        et les simulations et saisies suivantes la retrouveront.
+    </p>
+    <label for="@inputId">Nom ou numéro de la tâche dans Forecast</label>
+    <SuggestInput @ref="input" Id="@inputId" Label="Tâches Forecast correspondantes" Placeholder="Au moins 2 caractères"
+                  Value="@query" ValueChanged="OnQueryChanged" Search="SearchAsync" OnSelected="OnSelected" />
+
+    @if (selected is not null)
+    {
+        <div class="selected" role="status">
+            <span>
+                Tâche choisie : <strong>@selected.Code</strong> — @selected.Name
+                <span class="muted">(@Where(selected))</span>
+            </span>
+            <button type="button" class="primary" disabled="@Disabled" @onclick="() => OnPick.InvokeAsync(selected)">Relier à @selected.Code</button>
+        </div>
+    }
+
+    <div class="buttons">
+        <button type="button" @onclick="() => OnCancel.InvokeAsync()">Fermer</button>
+    </div>
+</div>
+
+@code {
+    private readonly string titleId = $"relink-title-{Guid.NewGuid():N}";
+    private readonly string inputId = $"relink-input-{Guid.NewGuid():N}";
+    private SuggestInput? input;
+    private string query = "";
+    private ForecastTaskMatch? selected;
+
+    /// <summary>The local task to link (named in the title).</summary>
+    [Parameter, EditorRequired] public string LocalTaskName { get; set; } = "";
+
+    /// <summary>What the search box starts with: the name of the local task.</summary>
+    [Parameter] public string? InitialQuery { get; set; }
+
+    /// <summary>Another operation is running: the link button waits.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public EventCallback<ForecastTaskMatch> OnPick { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override void OnInitialized() => query = InitialQuery?.Trim() ?? "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && input is not null)
+            await input.FocusAsync();
+    }
+
+    private void OnQueryChanged(string value)
+    {
+        query = value;
+        selected = null;
+    }
+
+    private async Task<SuggestionBatch> SearchAsync(string text, CancellationToken token)
+    {
+        try
+        {
+            return ForecastSuggestions.TaskBatch(await Lookup.SearchTasksAsync(text, null, token), numberFirst: false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Type only: the message could repeat what the user typed.
+            Logger.LogWarning("Forecast task search failed unexpectedly ({ExceptionType}).", ex.GetType().Name);
+            return new SuggestionBatch([], false, "La recherche dans Forecast a échoué : réessayez ou précisez la saisie.");
+        }
+    }
+
+    private void OnSelected(SuggestionOption option)
+    {
+        if (option.Tag is ForecastTaskMatch match)
+        {
+            selected = match;
+            query = match.Name;
+        }
+    }
+
+    private static string Where(ForecastTaskMatch match) =>
+        string.Join(" · ", new[] { match.ProjectCode, match.ProjectName, match.ClientName }.Where(p => !string.IsNullOrWhiteSpace(p)));
+}

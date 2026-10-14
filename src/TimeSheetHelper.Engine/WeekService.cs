@@ -26,6 +26,12 @@ public sealed record SlotRange(DateTime StartUtc, DateTime EndUtc)
 /// <summary>What the user corrected: an unclassified group within a range, or every activity of a range.</summary>
 public sealed record CorrectionTarget(SlotRange Range, string? GroupKey = null);
 
+/// <summary>What <see cref="WeekService.RemoveSlotsAsync"/> did.</summary>
+/// <param name="SlotsRemoved">Slots now deleted (already deleted ones included).</param>
+/// <param name="ActivitiesDeleted">Activities erased because every slot they touch is deleted.</param>
+/// <param name="ActivitiesKept">Activities that also touch a slot still alive: kept, but ignored inside the deleted slots.</param>
+public sealed record SlotRemovalResult(int SlotsRemoved, int ActivitiesDeleted, int ActivitiesKept);
+
 /// <summary>Façade used by the UI: week and day views, manual assignments, suggestions and learned rules.</summary>
 public sealed class WeekService(
     IDbContextFactory<TimeSheetDbContext> dbFactory,
@@ -79,6 +85,62 @@ public sealed class WeekService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Deletes slots for good ("Supprimer"): their manual assignment is dropped and every activity linked to them is erased.
+    /// The slots are tombstoned, so the engine ignores whatever a later sync brings back for them (same ExternalId, growing segment).
+    /// An activity that also touches a slot still alive (a long meeting, a point event whose window reaches back) is kept,
+    /// but ignored inside the deleted slots. Not to be confused with <c>AssignSlotStartsAsync(starts, null)</c> ("Pas du travail"), which keeps the activities.
+    /// There is no undo: erased activities cannot come back.
+    /// </summary>
+    public async Task<SlotRemovalResult> RemoveSlotsAsync(IReadOnlyCollection<DateTime> slotStarts, CancellationToken cancellationToken = default)
+    {
+        var starts = slotStarts.Select(s => DateTime.SpecifyKind(s, DateTimeKind.Utc)).Distinct().Order().ToList();
+        if (starts.Count == 0)
+            return new SlotRemovalResult(0, 0, 0);
+        var (first, last) = (starts[0], starts[^1]);
+        var from = first - WeekProposalBuilder.LookBehind;
+        var to = last + EngineOptions.SlotLength + WeekProposalBuilder.LookAhead;
+        var wanted = starts.ToHashSet();
+
+        var activities = await activityStore.GetRangeAsync(from, to, cancellationToken);
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var rules = await db.Rules.AsNoTracking().ToListAsync(cancellationToken);
+        var alreadyRemoved = await db.RemovedSlots.AsNoTracking()
+            .Where(r => r.SlotStartUtc >= from && r.SlotStartUtc < to)
+            .Select(r => r.SlotStartUtc)
+            .ToListAsync(cancellationToken);
+
+        var allRemoved = alreadyRemoved.Concat(starts).ToHashSet();
+        foreach (var start in starts.Except(alreadyRemoved))
+            db.RemovedSlots.Add(new RemovedSlot { SlotStartUtc = start });
+
+        var overrides = await db.SlotOverrides
+            .Where(o => o.SlotStartUtc >= first && o.SlotStartUtc <= last)
+            .ToListAsync(cancellationToken);
+        db.SlotOverrides.RemoveRange(overrides.Where(o => wanted.Contains(o.SlotStartUtc)));
+
+        var windows = resolver.Resolve(activities, rules).ToDictionary(r => r.Activity, r => r.Window);
+        var doomed = new HashSet<long>();
+        var kept = 0;
+        foreach (var activity in activities)
+        {
+            var window = windows.TryGetValue(activity, out var resolved) ? resolved : new Interval(activity.StartUtc, activity.EndUtc ?? activity.StartUtc);
+            if (!RemovedSlots.Touched(window).Any(wanted.Contains))
+                continue;
+            if (RemovedSlots.CoversOnly(window, allRemoved))
+                doomed.Add(activity.Id);
+            else
+                kept++;
+        }
+
+        if (doomed.Count > 0)
+            db.Activities.RemoveRange(await db.Activities.Where(a => doomed.Contains(a.Id)).ToListAsync(cancellationToken));
+
+        await db.SaveChangesAsync(cancellationToken);
+        return new SlotRemovalResult(starts.Count, doomed.Count, kept);
     }
 
     /// <summary>The latest distinct comments given when assigning slots to a task, most recent first.</summary>
@@ -194,12 +256,19 @@ public sealed class WeekService(
     {
         var activities = await activityStore.GetRangeAsync(range.StartUtc - TimeSpan.FromDays(1), range.EndUtc, cancellationToken);
         List<Rule> rules;
+        HashSet<DateTime> removed;
         await using (var db = await dbFactory.CreateDbContextAsync(cancellationToken))
+        {
             rules = await db.Rules.AsNoTracking().ToListAsync(cancellationToken);
+            removed = (await db.RemovedSlots.AsNoTracking()
+                .Where(r => r.SlotStartUtc >= range.StartUtc - WeekProposalBuilder.LookBehind && r.SlotStartUtc < range.EndUtc + WeekProposalBuilder.LookAhead)
+                .Select(r => r.SlotStartUtc)
+                .ToListAsync(cancellationToken)).ToHashSet();
+        }
 
         var window = new Interval(range.StartUtc, range.EndUtc);
         return resolver.Resolve(activities, rules)
-            .Where(r => r.Role != ActivityRole.Mask && r.Window.Overlaps(window))
+            .Where(r => r.Role != ActivityRole.Mask && r.Window.Overlaps(window) && !RemovedSlots.CoversOnly(r.Window, removed))
             .Where(r => groupKey is null || r.Candidate?.GroupKey == groupKey)
             .Select(r => r.Activity)
             .ToList();

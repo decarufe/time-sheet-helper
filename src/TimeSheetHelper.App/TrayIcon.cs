@@ -27,18 +27,8 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
         return Task.CompletedTask;
     }
 
-    /// <summary>Opens the application's window (the desktop shell next to this executable, else the default browser).</summary>
-    public void OpenUi()
-    {
-        var desktop = Path.Combine(AppContext.BaseDirectory, "TimeSheetHelper.Desktop.exe");
-        if (File.Exists(desktop))
-        {
-            Process.Start(new ProcessStartInfo(desktop) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory });
-            return;
-        }
-
-        Process.Start(new ProcessStartInfo(configuration["Urls"]!.Split(';')[0]) { UseShellExecute = true });
-    }
+    /// <summary>Opens the application in the default browser.</summary>
+    public void OpenUi() => UiLauncher.Open(UiLauncher.ConfiguredUrl(configuration));
 
     private void Run()
     {

@@ -30,6 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CorrectionLearner>();
         services.AddSingleton<WeekProposalBuilder>();
         services.AddSingleton<WeekService>();
+        services.AddSingleton<GroupAssignmentService>();
         return services;
     }
 }

@@ -21,7 +21,6 @@
   -->
   <ItemGroup>
     <ProjectReference Include="@(BundledPlugin)" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -63,29 +62,6 @@
     <Copy SourceFiles="@(_StagedPluginFile)"
           DestinationFiles="@(_StagedPluginFile->'$(PublishDir)plugins\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
-  </Target>
-
-  <!--
-    The window that shows the application (WebView2) is a separate executable placed next to this one, so the tray
-    icon can open it. It inherits the runtime identifier and self-contained settings of this build: a self-contained
-    publish of the application gives a self-contained window.
-  -->
-  <Target Name="StageDesktopShell" AfterTargets="Build">
-    <PropertyGroup>
-      <_DesktopStageDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(OutDir)'))</_DesktopStageDir>
-    </PropertyGroup>
-    <MSBuild Projects="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);PublishDir=$(_DesktopStageDir)" />
-  </Target>
-
-  <Target Name="PublishDesktopShell" AfterTargets="Publish">
-    <PropertyGroup>
-      <_DesktopPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_DesktopPublishDir>
-    </PropertyGroup>
-    <MSBuild Projects="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);PublishDir=$(_DesktopPublishDir)" />
   </Target>
 
   <!--

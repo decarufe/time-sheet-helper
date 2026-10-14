@@ -25,7 +25,85 @@ public enum ForecastCellStatus
     /// <summary>The task is not known to Forecast under this code or name.</summary>
     RowNotFound,
     Error,
+
+    /// <summary>The day holds registrations Forecast has approved or invoiced: nothing is registered for this cell.</summary>
+    Locked,
+
+    /// <summary>What Forecast holds for the cell could not be established (read incomplete, outcome of a write unknown).</summary>
+    Unknown,
 }
+
+/// <summary>Why a cell is in the state it is in, when its status alone does not say.</summary>
+public enum ForecastCellIssue
+{
+    None,
+
+    /// <summary>Several tasks of Forecast bear this name: the right one cannot be chosen.</summary>
+    TaskAmbiguous,
+
+    /// <summary>The draft refers to a task the local catalogue does not know (deleted).</summary>
+    TaskUnknownLocally,
+
+    /// <summary>A previous cell stopped the fill (timeout, network): this one was not tried.</summary>
+    NotAttempted,
+
+    WriteRefused,
+    WriteFailed,
+
+    /// <summary>The server could not say whether the registration was applied.</summary>
+    OutcomeUnknown,
+
+    /// <summary>The week could not be read whole: nothing can be compared.</summary>
+    ReadIncomplete,
+}
+
+/// <summary>State of the registration of a cell in Forecast after a fill (or a simulation).</summary>
+public enum ForecastEntryState
+{
+    /// <summary>Simulation: nothing was tried.</summary>
+    NotApplicable,
+
+    /// <summary>The hours are in Forecast (registered now, or already there).</summary>
+    Entered,
+
+    /// <summary>Nothing was registered for this cell.</summary>
+    NotEntered,
+
+    /// <summary>It is not known whether the hours are in Forecast.</summary>
+    Unknown,
+}
+
+/// <summary>How precisely the cell was compared with what Forecast holds.</summary>
+public enum ForecastComparisonLevel
+{
+    /// <summary>Nothing in Forecast to compare with.</summary>
+    None,
+
+    TaskAndDay,
+
+    /// <summary>
+    /// By project and day: the registrations of "get_time_analysis" carry an internal task id that matches no task number, so
+    /// the hours of another task of the same project are indistinguishable.
+    /// </summary>
+    ProjectAndDay,
+}
+
+public enum ForecastFindingKind
+{
+    /// <summary>A warning of the plan step of a registration.</summary>
+    PlanWarning,
+    TaskInactive,
+    TaskClosed,
+    TaskBlocked,
+    ProjectClosed,
+    EstimateExceeded,
+
+    /// <summary>Registrations of the day are submitted for approval.</summary>
+    PendingApproval,
+}
+
+/// <summary>Something noticed about a cell that does not stop it (read-only checks, warnings of Forecast).</summary>
+public sealed record ForecastCellFinding(ForecastFindingKind Kind, string Message);
 
 public enum ForecastCellAction
 {
@@ -52,6 +130,23 @@ public sealed record ForecastCellResult(
     string? Message = null)
 {
     public bool IsOk => Status is ForecastCellStatus.Ok or ForecastCellStatus.Planned;
+
+    public ForecastCellIssue Issue { get; init; }
+
+    public ForecastEntryState EntryState { get; init; }
+
+    public ForecastComparisonLevel Comparison { get; init; }
+
+    /// <summary>Cells of one project and day share the hours Forecast holds for them: they share this key.</summary>
+    public string? GroupKey { get; init; }
+
+    /// <summary>Hours expected for the whole group when it has several cells (the comparison is made on the group).</summary>
+    public decimal? GroupExpected { get; init; }
+
+    /// <summary>The registrations of Forecast the cell was compared with.</summary>
+    public IReadOnlyList<ForecastRemoteEntry> ExistingEntries { get; init; } = [];
+
+    public IReadOnlyList<ForecastCellFinding> Findings { get; init; } = [];
 }
 
 public sealed class ForecastFillReport
@@ -61,14 +156,50 @@ public sealed class ForecastFillReport
     public List<ForecastCellResult> Cells { get; } = [];
     public List<string> Warnings { get; } = [];
 
+    /// <summary>Forecast could not be asked (tool missing, error, timeout, network): every cell carries this message.</summary>
+    public string? GlobalError { get; set; }
+
+    /// <summary>The registrations of the week could not be read whole: no cell was compared, nothing was registered.</summary>
+    public bool ReadTruncated { get; set; }
+
+    public string? ReadDetail { get; set; }
+
+    /// <summary>The fill stopped before the end (timeout, network, cancellation): see <see cref="InterruptionMessage"/>.</summary>
+    public bool Interrupted { get; set; }
+
+    public string? InterruptionMessage { get; set; }
+
+    /// <summary>Checks that could not be made (tool missing, estimate in points, error): what the read-only checks left out.</summary>
+    public List<string> PreflightLimits { get; } = [];
+
+    /// <summary>
+    /// Registrations of the week that Forecast holds without a project (internal or idle time). The application does not write them
+    /// (the tool that registers time needs a project or a task): they are listed so that the page shows them as left out.
+    /// </summary>
+    public List<ForecastRemoteEntry> NonProjectEntries { get; } = [];
+
     public bool Success => Cells.All(c => c.IsOk) && Cells.Count > 0;
+
+    /// <summary>Some cells are in Forecast and others are not: running the fill again registers only what is missing.</summary>
+    public bool IsPartial =>
+        Mode == ForecastSubmitMode.Fill
+        && Cells.Any(c => c.EntryState == ForecastEntryState.Entered)
+        && Cells.Any(c => c.EntryState != ForecastEntryState.Entered);
 
     public string Summary =>
         $"Semaine du {WeekStart:yyyy-MM-dd} ({(Mode == ForecastSubmitMode.DryRun ? "simulation" : "saisie")}) : "
         + $"{Cells.Count(c => c.IsOk)}/{Cells.Count} cellules OK"
         + (Cells.Any(c => !c.IsOk) ? $", {Cells.Count(c => !c.IsOk)} en erreur" : "")
-        + (Warnings.Count > 0 ? $", {Warnings.Count} avertissement(s)" : "");
+        + (Warnings.Count > 0 ? $", {Warnings.Count} avertissement(s)" : "")
+        + (ReadTruncated ? ", lecture de Forecast incomplète" : "")
+        + (Interrupted ? ", saisie interrompue" : "");
 }
+
+/// <summary>A draft entry the plan could not turn into a cell: its task is unknown locally.</summary>
+public sealed record ForecastRejectedEntry(int ForecastTaskId, DateOnly Date, decimal Hours);
+
+/// <summary>The cells to register, and the entries that could not become one.</summary>
+public sealed record ForecastFillPlan(IReadOnlyList<ForecastPlannedCell> Cells, IReadOnlyList<ForecastRejectedEntry> Rejected);
 
 /// <summary>Pure logic of the fill: what to register, and whether what Forecast holds matches.</summary>
 public static class ForecastFillPlanner
@@ -84,8 +215,23 @@ public static class ForecastFillPlanner
     public static IReadOnlyList<ForecastPlannedCell> Plan(
         TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, ICollection<string>? warnings = null)
     {
+        var plan = PlanDetailed(draft, tasks, warnings);
+        foreach (var rejected in plan.Rejected)
+            warnings?.Add($"Tâche Forecast #{rejected.ForecastTaskId} inconnue : entrée du {rejected.Date:yyyy-MM-dd} ignorée.");
+        return plan.Cells;
+    }
+
+    /// <summary>
+    /// Same as <see cref="Plan"/>, but the entries of a task the catalogue does not know are returned in
+    /// <see cref="ForecastFillPlan.Rejected"/> instead of being dropped: a cell that silently vanishes is a gap, not a success.
+    /// Entries outside the week are still only reported in <paramref name="warnings"/>.
+    /// </summary>
+    public static ForecastFillPlan PlanDetailed(
+        TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, ICollection<string>? warnings = null)
+    {
         var weekEnd = draft.WeekStart.AddDays(7);
         var cells = new List<ForecastPlannedCell>();
+        var rejected = new List<ForecastRejectedEntry>();
 
         foreach (var group in draft.Entries.GroupBy(e => (e.ForecastTaskId, e.Date)))
         {
@@ -96,13 +242,14 @@ public static class ForecastFillPlanner
                 continue;
             }
 
+            var hours = ForecastHours.RoundToQuarter(group.Sum(e => e.Hours));
             if (!tasks.TryGetValue(taskId, out var task))
             {
-                warnings?.Add($"Tâche Forecast #{taskId} inconnue : entrée du {date:yyyy-MM-dd} ignorée.");
+                if (hours > 0)
+                    rejected.Add(new ForecastRejectedEntry(taskId, date, hours));
                 continue;
             }
 
-            var hours = ForecastHours.RoundToQuarter(group.Sum(e => e.Hours));
             if (hours <= 0)
                 continue;
 
@@ -113,11 +260,13 @@ public static class ForecastFillPlanner
             cells.Add(new ForecastPlannedCell(task, date, hours, notes.Length > 0 ? notes : null));
         }
 
-        return cells
-            .OrderBy(c => c.Task.ProjectName, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(c => c.Task.TaskName, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(c => c.Date)
-            .ToList();
+        return new ForecastFillPlan(
+            cells
+                .OrderBy(c => c.Task.ProjectName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(c => c.Task.TaskName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(c => c.Date)
+                .ToList(),
+            rejected.OrderBy(r => r.ForecastTaskId).ThenBy(r => r.Date).ToList());
     }
 
     /// <summary>

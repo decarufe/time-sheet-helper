@@ -1,0 +1,273 @@
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Forecast.Submission
+
+@* "Écarts à régler": open gaps by severity then type, simple filters, "next gap", and the folded sections settled / ignored / without gap. *@
+<section class="gap-list" aria-labelledby="gaps-title" aria-busy="@(Updating ? "true" : null)">
+    <div class="list-head">
+        <h2 id="gaps-title" tabindex="-1" @ref="heading">
+            Écarts à régler
+            <span class="muted">(@Counts)</span>
+        </h2>
+        <div class="list-tools">
+            <div role="group" aria-label="Filtrer par gravité" class="filters">
+                <button type="button" aria-pressed="@(Filter.Severity is null ? "true" : "false")" @onclick="() => SetSeverityAsync(null)">Tous</button>
+                <button type="button" aria-pressed="@(Filter.Severity == SubmissionGapSeverity.Blocking ? "true" : "false")"
+                        @onclick="() => SetSeverityAsync(SubmissionGapSeverity.Blocking)">Bloquants (@Board.OpenBlockingCount)</button>
+                <button type="button" aria-pressed="@(Filter.Severity == SubmissionGapSeverity.ToVerify ? "true" : "false")"
+                        @onclick="() => SetSeverityAsync(SubmissionGapSeverity.ToVerify)">À vérifier (@Board.OpenToVerifyCount)</button>
+                <button type="button" aria-pressed="@(Filter.Severity == SubmissionGapSeverity.Info ? "true" : "false")"
+                        @onclick="() => SetSeverityAsync(SubmissionGapSeverity.Info)">Info (@Board.OpenInfoCount)</button>
+            </div>
+            @if (Days.Count > 0)
+            {
+                <label class="day-filter">
+                    <span class="visually-hidden">Filtrer par jour</span>
+                    <select @onchange="OnDayChangedAsync" aria-label="Filtrer par jour">
+                        <option value="" selected="@(Filter.Day is null)">Tous les jours</option>
+                        @foreach (var day in Days)
+                        {
+                            <option value="@TimesheetUi.IsoDate(day)" selected="@(Filter.Day == day)">@UiLabels.Day(day)</option>
+                        }
+                    </select>
+                </label>
+            }
+            <button type="button" disabled="@(Board.Visible.Count == 0)" @onclick="NextAsync">
+                Écart suivant@(Board.Visible.Count > 0 ? $" ({Board.Visible.Count})" : "")
+            </button>
+        </div>
+    </div>
+
+    @if (Analyzing)
+    {
+        <p class="muted" role="status">Analyse du brouillon…</p>
+    }
+    else if (Board.Sections.Count == 0 && Board.Ignored.Count == 0)
+    {
+        <p class="empty" role="status">
+            @(Filter.IsActive && Board.OpenCount > 0
+                ? "Aucun écart ne correspond à ce filtre."
+                : "Aucun écart à régler pour le moment.")
+        </p>
+    }
+
+    @foreach (var section in Board.Sections)
+    {
+        var collapsed = IsCollapsed(section.Severity);
+        var sectionId = $"gap-section-{section.Severity}";
+        <div class="section @GapLabels.SeverityClass(section.Severity)">
+            <h3>
+                <button type="button" class="fold" aria-expanded="@(collapsed ? "false" : "true")" aria-controls="@sectionId"
+                        @onclick="() => ToggleSection(section.Severity)">
+                    <span aria-hidden="true">@(collapsed ? "▸" : "▾")</span>
+                    @GapLabels.Severity(section.Severity) (@section.Count)
+                </button>
+            </h3>
+            <div id="@sectionId" hidden="@collapsed">
+                @foreach (var group in section.Groups)
+                {
+                    <h4 class="group-heading">@group.Heading <span class="muted">(@group.Gaps.Count)</span></h4>
+                    @foreach (var gap in group.Gaps)
+                    {
+                        <GapCard @key="gap.Id" Gap="gap" Actions="ActionsFor(gap)" Busy="Busy" Updating="Updating"
+                                 OpenPanel="@PanelFor(gap)" Focus="@(focusId == gap.Id)" FocusStamp="focusStamp"
+                                 OnAction="r => OnAction.InvokeAsync((gap, r))" OnFocused="id => currentId = id">
+                            @Panel?.Invoke(gap)
+                        </GapCard>
+                    }
+                }
+            </div>
+        </div>
+    }
+
+    @if (Board.Ignored.Count > 0)
+    {
+        <div class="section">
+            <h3>
+                <button type="button" class="fold" aria-expanded="@(ignoredOpen ? "true" : "false")" aria-controls="gaps-ignored"
+                        @onclick="() => ignoredOpen = !ignoredOpen">
+                    <span aria-hidden="true">@(ignoredOpen ? "▾" : "▸")</span> Ignorés pour cette session (@Board.Ignored.Count)
+                </button>
+            </h3>
+            <div id="gaps-ignored" hidden="@(!ignoredOpen)">
+                @foreach (var gap in Board.Ignored)
+                {
+                    <GapCard @key="gap.Id" Gap="gap" Actions="NoActions" Ignored="true" Busy="Busy" Updating="Updating"
+                             Focus="@(focusId == gap.Id)" FocusStamp="focusStamp" OnRestore="id => OnRestore.InvokeAsync(id)" />
+                }
+            </div>
+        </div>
+    }
+
+    <div class="section">
+        <h3>
+            <button type="button" class="fold" aria-expanded="@(resolvedOpen ? "true" : "false")" aria-controls="gaps-resolved"
+                    @onclick="() => resolvedOpen = !resolvedOpen">
+                <span aria-hidden="true">@(resolvedOpen ? "▾" : "▸")</span> Réglés pendant cette session (@Resolved.Count)
+            </button>
+        </h3>
+        <div id="gaps-resolved" hidden="@(!resolvedOpen)">
+            @if (Resolved.Count == 0)
+            {
+                <p class="muted">Rien de réglé pour l'instant.</p>
+            }
+            else
+            {
+                <ul class="resolved">
+                    @foreach (var item in Resolved)
+                    {
+                        <li>
+                            <span class="tick" aria-hidden="true">✓</span>
+                            <strong>@item.Title</strong>
+                            @if (item.Context.Length > 0)
+                            {
+                                <span class="muted"> — @item.Context</span>
+                            }
+                            <span class="muted"> · @GapLabels.Severity(item.Severity).ToLowerInvariant() · @UiLabels.Ago(item.AtUtc, DateTime.UtcNow)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>
+            <button type="button" class="fold" aria-expanded="@(cleanOpen ? "true" : "false")" aria-controls="gaps-clean"
+                    @onclick="() => cleanOpen = !cleanOpen">
+                <span aria-hidden="true">@(cleanOpen ? "▾" : "▸")</span> Sans écart (@CleanCells.Count)
+            </button>
+        </h3>
+        <div id="gaps-clean" hidden="@(!cleanOpen)">
+            @if (!HasSimulation)
+            {
+                <p class="muted">Lancez la simulation pour voir les cellules prêtes ou déjà dans Forecast.</p>
+            }
+            else if (CleanCells.Count == 0)
+            {
+                <p class="muted">Aucune cellule sans écart.</p>
+            }
+            else
+            {
+                <table>
+                    <caption class="visually-hidden">Cellules sans écart</caption>
+                    <thead>
+                        <tr><th scope="col">Tâche</th><th scope="col">Jour</th><th scope="col" class="num">Attendu</th><th scope="col">État</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cell in CleanCells)
+                        {
+                            <tr>
+                                <td>@cell.TaskDisplayName</td>
+                                <td class="nowrap">@UiLabels.Day(cell.Date)</td>
+                                <td class="num">@TimesheetUi.HoursLabel(cell.Expected)</td>
+                                <td>@UiLabels.CellStatus(cell.Status)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    private ElementReference heading;
+    private static readonly IReadOnlyList<GapActionView> NoActions = [];
+    private string? currentId;
+    private string? focusId;
+    private int focusStamp;
+    private int headingStamp;
+    private int headingFocused;
+    private readonly HashSet<SubmissionGapSeverity> collapsedSections = [SubmissionGapSeverity.Info];
+    private bool resolvedOpen;
+    private bool ignoredOpen;
+    private bool cleanOpen;
+
+    [Parameter, EditorRequired] public GapBoard Board { get; set; } = default!;
+
+    [Parameter] public GapFilter Filter { get; set; } = GapFilter.None;
+
+    [Parameter] public EventCallback<GapFilter> FilterChanged { get; set; }
+
+    /// <summary>Days offered by the day filter.</summary>
+    [Parameter] public IReadOnlyList<DateOnly> Days { get; set; } = [];
+
+    [Parameter, EditorRequired] public Func<SubmissionGap, IReadOnlyList<GapActionView>> ActionsFor { get; set; } = _ => [];
+
+    /// <summary>The resolution whose inline panel is open for a gap (null when none).</summary>
+    [Parameter] public Func<SubmissionGap, SubmissionGapResolution?>? OpenPanelFor { get; set; }
+
+    [Parameter] public RenderFragment<SubmissionGap>? Panel { get; set; }
+
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>The data is being refreshed: the cards are greyed until the new analysis replaces them.</summary>
+    [Parameter] public bool Updating { get; set; }
+
+    /// <summary>No analysis yet (first load).</summary>
+    [Parameter] public bool Analyzing { get; set; }
+
+    [Parameter] public bool HasSimulation { get; set; }
+
+    [Parameter] public IReadOnlyList<ResolvedGap> Resolved { get; set; } = [];
+
+    [Parameter] public IReadOnlyList<ForecastCellResult> CleanCells { get; set; } = [];
+
+    [Parameter] public EventCallback<(SubmissionGap Gap, SubmissionGapResolution Resolution)> OnAction { get; set; }
+
+    [Parameter] public EventCallback<string> OnRestore { get; set; }
+
+    private string Counts =>
+        $"{Board.OpenBlockingCount} {(Board.OpenBlockingCount > 1 ? "bloquants" : "bloquant")} · {Board.OpenToVerifyCount} à vérifier · {Board.OpenInfoCount} info";
+
+    private SubmissionGapResolution? PanelFor(SubmissionGap gap) => OpenPanelFor?.Invoke(gap);
+
+    private bool IsCollapsed(SubmissionGapSeverity severity) => collapsedSections.Contains(severity);
+
+    private void ToggleSection(SubmissionGapSeverity severity)
+    {
+        if (!collapsedSections.Remove(severity))
+            collapsedSections.Add(severity);
+    }
+
+    /// <summary>Opens the section of the gap and gives its card the focus (null: the title of the list, when nothing is left).</summary>
+    public void RequestFocus(string? gapId)
+    {
+        if (gapId is not null && Board.Find(gapId) is { } gap)
+        {
+            collapsedSections.Remove(gap.Severity);
+            if (Board.Ignored.Any(g => g.Id == gapId))
+                ignoredOpen = true;
+            focusId = gapId;
+            focusStamp++;
+        }
+        else
+        {
+            focusId = null;
+            headingStamp++;
+        }
+
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (headingStamp != headingFocused)
+        {
+            headingFocused = headingStamp;
+            try { await heading.FocusAsync(); }
+            catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+        }
+    }
+
+    private Task SetSeverityAsync(SubmissionGapSeverity? severity) => FilterChanged.InvokeAsync(Filter with { Severity = severity });
+
+    private Task OnDayChangedAsync(ChangeEventArgs e) =>
+        FilterChanged.InvokeAsync(Filter with { Day = TimesheetUi.TryParseIsoDate(e.Value?.ToString(), out var day) ? day : null });
+
+    private Task NextAsync()
+    {
+        RequestFocus(Board.NextId(currentId));
+        return Task.CompletedTask;
+    }
+}

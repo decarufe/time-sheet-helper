@@ -1,0 +1,112 @@
+.gap-list {
+  margin-top: 24px;
+}
+
+.list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.list-head h2 {
+  margin: 0;
+}
+.list-head h2:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.list-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.filters button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.empty {
+  padding: 12px 0;
+  color: var(--muted);
+}
+
+.section {
+  margin-top: 14px;
+}
+.section h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+button.fold {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--fg);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.section.sev-blocking > h3 button.fold {
+  color: var(--danger);
+}
+.section.sev-verify > h3 button.fold {
+  color: var(--warn);
+}
+
+.group-heading {
+  margin: 12px 0 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.resolved {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+.resolved li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tick {
+  color: var(--ok);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+[hidden] {
+  display: none;
+}

@@ -49,10 +49,13 @@ public static class UiLabels
         ForecastCellStatus.Mismatch => "Écart",
         ForecastCellStatus.RowNotFound => "Tâche introuvable",
         ForecastCellStatus.Error => "Erreur",
+        ForecastCellStatus.Locked => "Verrouillé",
+        ForecastCellStatus.Unknown => "Inconnu",
         _ => status.ToString(),
     };
 
-    public static string Hours(decimal hours) => hours.ToString("0.##", French) + " h";
+    /// <summary>Hours with their unit: the same format as <see cref="Shared.TimesheetUi.HoursLabel"/> ("7,50 h").</summary>
+    public static string Hours(decimal hours) => Shared.TimesheetUi.HoursLabel(hours);
 
     public static string Day(DateOnly date) => date.ToString("ddd d MMM", French);
 

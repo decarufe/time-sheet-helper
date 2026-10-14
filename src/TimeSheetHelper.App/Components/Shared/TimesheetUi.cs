@@ -1,5 +1,6 @@
 using System.Globalization;
 using TimeSheetHelper.Core.Activities;
+using TimeSheetHelper.Engine;
 using TimeSheetHelper.Engine.Allocation;
 using TimeSheetHelper.Engine.Grouping;
 
@@ -18,6 +19,13 @@ public static class TimesheetUi
 
     /// <summary>Hours with two decimals and a French decimal comma, e.g. "1,75".</summary>
     public static string Hours(decimal hours) => hours.ToString("0.00", French);
+
+    /// <summary>The one format of hours with their unit, e.g. "1,75 h" (the tables use <see cref="Hours"/> without the unit).</summary>
+    public static string HoursLabel(decimal hours) => Hours(hours) + " h";
+
+    /// <summary>A difference in hours with its sign, e.g. "+1,25 h", "−0,75 h"; "0,00 h" when there is none.</summary>
+    public static string SignedHours(decimal hours) =>
+        hours > 0 ? "+" + HoursLabel(hours) : hours < 0 ? "−" + HoursLabel(-hours) : HoursLabel(0);
 
     public static string Percent(double share) => $"{Math.Round(share * 100):0} %";
 
@@ -64,8 +72,51 @@ public static class TimesheetUi
         SlotKind.Override => "Manuel",
         SlotKind.ExcludedByOverride => "Pas du travail",
         SlotKind.Ignored => "Ignoré",
+        SlotKind.Removed => "Supprimé",
         _ => "Vide",
     };
+
+    /// <summary>A slot the user deleted ("Supprimer"): no activity left. Not the same as "Pas du travail", which keeps the activities.</summary>
+    public static bool IsRemoved(SlotAssignment slot) => slot.Kind == SlotKind.Removed;
+
+    public static string RemoveConfirmationTitle(int slotCount) =>
+        slotCount == 1 ? "Supprimer ce créneau ?" : $"Supprimer ces {slotCount} créneaux ?";
+
+    /// <summary>Irreversible-delete warning; the activity count is unknown before deleting, so it is not promised.</summary>
+    public static string RemoveConfirmationMessage(int slotCount) =>
+        (slotCount == 1 ? "Ce créneau de 15 minutes sera supprimé" : $"Ces {slotCount} créneaux de 15 minutes seront supprimés")
+        + " et les activités qui y sont associées seront supprimées définitivement. "
+        + "Les activités qui touchent aussi d'autres créneaux sont conservées. "
+        + "Cette action est irréversible. Pour garder les activités, utilisez plutôt « Pas du travail ».";
+
+    /// <summary>Outcome of "Supprimer": slots removed, activities erased, and the ones kept because they touch other slots.</summary>
+    public static string RemovalResultMessage(SlotRemovalResult result)
+    {
+        if (result.SlotsRemoved == 0)
+            return "Aucun créneau à supprimer.";
+
+        var slots = $"{result.SlotsRemoved} {Plural(result.SlotsRemoved, "créneau supprimé", "créneaux supprimés")}";
+        var erased = result.ActivitiesDeleted == 0
+            ? "aucune activité effacée"
+            : $"{result.ActivitiesDeleted} {Plural(result.ActivitiesDeleted, "activité effacée", "activités effacées")}";
+        var text = $"{slots}, {erased}.";
+        if (result.ActivitiesKept > 0)
+        {
+            text += result.ActivitiesKept == 1
+                ? " 1 activité conservée car elle touche aussi d'autres créneaux."
+                : $" {result.ActivitiesKept} activités conservées car elles touchent aussi d'autres créneaux.";
+        }
+        return text;
+    }
+
+    private static string Plural(int count, string singular, string plural) => count > 1 ? plural : singular;
+
+    /// <summary>True when <paramref name="next"/> starts exactly one slot after <paramref name="previous"/>.</summary>
+    public static bool AreAdjacent(DateTime previous, DateTime next) => next - previous == EngineOptions.SlotLength;
+
+    /// <summary>True when the slot starts, in ascending order, follow each other without a gap.</summary>
+    public static bool AreConsecutive(IReadOnlyList<DateTime> slotStartsUtc) =>
+        slotStartsUtc.Count > 0 && slotStartsUtc.Zip(slotStartsUtc.Skip(1), AreAdjacent).All(adjacent => adjacent);
 
     /// <summary>Traits of the sources, set at startup from the plugin catalog; the built-in ones until then.</summary>
     public static ISourceCatalog Sources { get; set; } = SourceCatalog.Default;

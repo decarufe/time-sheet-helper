@@ -1,0 +1,60 @@
+<div class="confirm-backdrop" @onclick="CancelAsync"></div>
+<div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="@titleId" aria-describedby="@messageId" @onkeydown="OnKeyDownAsync">
+    <h2 id="@titleId">@Title</h2>
+    @if (!string.IsNullOrEmpty(Subtitle))
+    {
+        <p class="subtitle">@Subtitle</p>
+    }
+    <div id="@messageId" class="message">
+        @if (ChildContent is not null)
+        {
+            @ChildContent
+        }
+        else
+        {
+            @Message
+        }
+    </div>
+    <div class="buttons">
+        <button type="button" class="danger" @onclick="ConfirmAsync">@ConfirmLabel</button>
+        <button type="button" @ref="cancelButton" @onclick="CancelAsync">Annuler</button>
+    </div>
+</div>
+
+@code {
+    private readonly string titleId = $"confirm-title-{Guid.NewGuid():N}";
+    private readonly string messageId = $"confirm-message-{Guid.NewGuid():N}";
+    private ElementReference cancelButton;
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    [Parameter] public string Message { get; set; } = "";
+
+    /// <summary>Rich content (several paragraphs) shown instead of <see cref="Message"/>.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional context line under the title (what is concerned).</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    [Parameter] public string ConfirmLabel { get; set; } = "Confirmer";
+
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Focus the safe choice: a stray Enter must not trigger the destructive action.
+        if (firstRender)
+        {
+            try { await cancelButton.FocusAsync(); }
+            catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+        }
+    }
+
+    private Task ConfirmAsync() => OnConfirm.InvokeAsync();
+
+    private Task CancelAsync() => OnCancel.InvokeAsync();
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) => e.Key == "Escape" ? CancelAsync() : Task.CompletedTask;
+}

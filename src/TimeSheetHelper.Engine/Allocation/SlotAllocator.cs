@@ -26,14 +26,15 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZone));
 
     /// <param name="ignoredTaskIds">Tasks that remove their slots from the timesheet (the built-in "Ignoré" task).</param>
-    public IReadOnlyList<SlotAssignment> AllocateDay(DateOnly day, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null)
+    /// <param name="removedSlots">Start of the slots the user deleted: their activities are ignored.</param>
+    public IReadOnlyList<SlotAssignment> AllocateDay(DateOnly day, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null, IReadOnlySet<DateTime>? removedSlots = null)
     {
         var (start, end) = DayBounds(day);
-        return Allocate(new Interval(start, end), activities, overrides, ignoredTaskIds);
+        return Allocate(new Interval(start, end), activities, overrides, ignoredTaskIds, removedSlots);
     }
 
     /// <summary>Allocates every slot of <paramref name="range"/> (which should start on a slot boundary).</summary>
-    public IReadOnlyList<SlotAssignment> Allocate(Interval range, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null)
+    public IReadOnlyList<SlotAssignment> Allocate(Interval range, IReadOnlyList<ResolvedActivity> activities, IEnumerable<SlotOverride> overrides, IReadOnlySet<int>? ignoredTaskIds = null, IReadOnlySet<DateTime>? removedSlots = null)
     {
         var overrideBySlot = overrides
             .GroupBy(o => DateTime.SpecifyKind(o.SlotStartUtc, DateTimeKind.Utc))
@@ -45,15 +46,15 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         {
             var slot = new Interval(slotStart, slotStart + EngineOptions.SlotLength);
             overrideBySlot.TryGetValue(slotStart, out var slotOverride);
-            slots.Add(AllocateSlot(slot, inRange, slotOverride, ignoredTaskIds));
+            slots.Add(AllocateSlot(slot, inRange, slotOverride, ignoredTaskIds, removedSlots?.Contains(slotStart) == true));
         }
         return slots;
     }
 
-    internal SlotAssignment AllocateSlot(Interval slot, IReadOnlyList<ResolvedActivity> activities, SlotOverride? slotOverride, IReadOnlySet<int>? ignoredTaskIds = null)
+    internal SlotAssignment AllocateSlot(Interval slot, IReadOnlyList<ResolvedActivity> activities, SlotOverride? slotOverride, IReadOnlySet<int>? ignoredTaskIds = null, bool removed = false)
     {
         var o = options.Value;
-        var here = activities.Where(a => a.Window.Overlaps(slot)).ToList();
+        var here = removed ? new List<ResolvedActivity>() : activities.Where(a => a.Window.Overlaps(slot)).ToList();
 
         var masks = Interval.Merge(here.Where(a => a.Role == ActivityRole.Mask).Select(a => a.Window.Clip(slot)));
 
@@ -130,6 +131,9 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
                     ranked.Where(c => c.TaskId != taskId).ToList(), evidenceIds, covered, slotOverride.Notes)
                 : new SlotAssignment(slot.Start, SlotKind.ExcludedByOverride, null, null, 1.0, ranked, evidenceIds, covered);
         }
+
+        if (removed)
+            return new SlotAssignment(slot.Start, SlotKind.Removed, null, null, 0, [], [], TimeSpan.Zero);
 
         if (covered < o.MinActivityPerSlot || ranked.Count == 0)
             return new SlotAssignment(slot.Start, SlotKind.Empty, null, null, 0, ranked, evidenceIds, covered);

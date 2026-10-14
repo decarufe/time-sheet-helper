@@ -1,6 +1,7 @@
 @page "/"
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
 @using TimeSheetHelper.App.Components.Shared
 @using TimeSheetHelper.Core.Forecast
 @using TimeSheetHelper.Engine
@@ -9,6 +10,7 @@
 @using TimeSheetHelper.Engine.Proposals
 @using TimeSheetHelper.Storage
 @inject WeekService Weeks
+@inject GroupAssignmentService Assignments
 @inject SlotAllocator Allocator
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Nav
@@ -48,7 +50,7 @@
     {
         @if (IsSubmitted)
         {
-            <p class="notice submitted">
+            <p class="notice submitted" tabindex="-1" @ref="submittedNotice">
                 Feuille de temps soumise le @submittedUtc!.Value.ToLocalTime().ToString("d MMMM yyyy 'à' HH:mm", TimesheetUi.French) — affichage en lecture seule.
             </p>
         }
@@ -191,7 +193,7 @@
         @if (!IsSubmitted)
         {
             <section class="unclassified" aria-labelledby="unclassified-title">
-                <h2 id="unclassified-title">
+                <h2 id="unclassified-title" tabindex="-1" @ref="unclassifiedHeading">
                     Activité non classée
                     @if (proposal.UnclassifiedGroups.Count > 0)
                     {
@@ -199,9 +201,67 @@
                     }
                 </h2>
 
-                @if (proposal.UnclassifiedGroups.Count == 0)
+                @if (proposal.UnclassifiedGroups.Count == 0 && pendingGroups.Count == 0)
                 {
                     <p class="muted">@(HasActivity ? "Toute l'activité de la semaine est classée." : "Aucune activité à classer.")</p>
+                }
+
+                @foreach (var pending in pendingGroups)
+                {
+                    var rulePreview = rulePreviews.GetValueOrDefault(pending.Id);
+                    var groupLabel = TimesheetUi.GroupValue(pending.GroupKey);
+                    <article class="group pending" aria-label="@($"À confirmer : {groupLabel}")">
+                        <div class="group-head">
+                            <span class="kind">@TimesheetUi.GroupKindLabel(pending.Kind)</span>
+                            <strong class="group-value">@groupLabel</strong>
+                            <span class="state-badge to-confirm">À confirmer</span>
+                            <span class="hours">@TimesheetUi.Hours(pending.Hours) h</span>
+                        </div>
+
+                        @MetaView(pending.Metadata)
+
+                        <div class="confirm" role="group" aria-label="@($"Assignation à confirmer pour {groupLabel}")">
+                            <p>
+                                Assigné à
+                                <span class="task-chip" style="@TimesheetUi.TaskStyle(pending.TaskId)">
+                                    <span class="swatch" aria-hidden="true"></span>@TaskName(pending.TaskId)
+                                </span>
+                                et déjà compté dans les totaux.
+                            </p>
+                            @if (pending.StoredRuleId is not null)
+                            {
+                                <p class="muted">Une tentative précédente a créé la règle sans aller au bout : « Confirmer » termine l'opération (aucune règle en double).</p>
+                            }
+                            else if (rulePreview is not null)
+                            {
+                                <p class="muted">« Confirmer » crée la règle : <strong>@rulePreview.Name</strong> → @TaskName(pending.TaskId).</p>
+                            }
+                            else
+                            {
+                                <p class="muted">Aucune règle stable ne peut être déduite de ce groupe : « Confirmer » est indisponible.</p>
+                            }
+                            @if (proposal.UnclassifiedGroups.FirstOrDefault(g => g.Key == pending.GroupKey) is { } uncovered)
+                            {
+                                <p class="uncovered">
+                                    @TimesheetUi.Hours(uncovered.Hours) h de ce groupe ne sont pas couvertes par cette assignation (activité arrivée depuis) : elles restent non classées.
+                                    <button type="button" @onclick="() => ExtendPendingAsync(pending)" disabled="@busy"
+                                            aria-label="@($"Ajouter les nouveaux créneaux de {groupLabel} à l'assignation")">Ajouter à l'assignation</button>
+                                </p>
+                            }
+                            <div class="actions">
+                                <button type="button" class="primary" @ref="confirmButtons[pending.Id]" @onclick="() => ConfirmPendingAsync(pending)"
+                                        disabled="@(busy || !CanConfirm(pending))"
+                                        aria-label="@($"Confirmer : créer la règle pour {groupLabel}")"
+                                        title="Crée la règle et retire l'étiquette « à confirmer »">Confirmer</button>
+                                <button type="button" @ref="keepOnceButtons[pending.Id]" @onclick="() => KeepOncePendingAsync(pending)" disabled="@busy"
+                                        aria-label="@($"Cette fois seulement : garder l'assignation de {groupLabel} sans créer de règle")"
+                                        title="Garde l'assignation sans créer de règle">Cette fois seulement</button>
+                                <button type="button" @onclick="() => CancelPendingAsync(pending)" disabled="@busy"
+                                        aria-label="@($"Annuler : défaire l'assignation de {groupLabel}")"
+                                        title="Défait l'assignation : retour à l'état précédent, aucune règle">Annuler</button>
+                            </div>
+                        </div>
+                    </article>
                 }
 
                 @foreach (var group in proposal.UnclassifiedGroups)
@@ -211,31 +271,11 @@
                         <div class="group-head">
                             <span class="kind">@TimesheetUi.GroupKindLabel(group.Kind)</span>
                             <strong class="group-value">@TimesheetUi.GroupValue(group.Key)</strong>
+                            <span class="state-badge unclassified-badge">Non classé</span>
                             <span class="hours">@TimesheetUi.Hours(group.Hours) h</span>
                         </div>
 
-                        <dl class="meta">
-                            @if (group.Metadata.Sources.Count > 0)
-                            {
-                                <dt>Sources</dt>
-                                <dd>@string.Join(", ", group.Metadata.Sources.Select(TimesheetUi.SourceLabel))</dd>
-                            }
-                            @if (group.Metadata.SampleTitles.Count > 0)
-                            {
-                                <dt>Titres</dt>
-                                <dd>@Samples(group.Metadata.SampleTitles)</dd>
-                            }
-                            @if (group.Metadata.SamplePaths.Count > 0)
-                            {
-                                <dt>Chemins</dt>
-                                <dd><code>@Samples(group.Metadata.SamplePaths)</code></dd>
-                            }
-                            @if (group.Metadata.SampleSubjects.Count > 0)
-                            {
-                                <dt>Sujets</dt>
-                                <dd>@Samples(group.Metadata.SampleSubjects)</dd>
-                            }
-                        </dl>
+                        @MetaView(group.Metadata)
 
                         <div class="suggestion">
                             @if (suggestedTask is not null)
@@ -264,29 +304,13 @@
                             }
                         </div>
 
-                        @if (pendingRule is { } pending && pending.GroupKey == group.Key)
-                        {
-                            <div class="confirm" role="alertdialog" aria-label="Confirmer la règle">
-                                <p>
-                                    Toujours associer <strong>« @pending.Proposal.Name »</strong> à
-                                    <strong>@TaskName(pending.TaskId)</strong> ?
-                                </p>
-                                <div class="actions">
-                                    <button type="button" class="primary" @onclick="ConfirmRuleAsync" disabled="@busy">Confirmer</button>
-                                    <button type="button" @onclick="() => pendingRule = null" disabled="@busy">Annuler</button>
-                                </div>
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="actions">
-                                @if (suggestedTask is not null)
-                                {
-                                    <button type="button" class="primary" @onclick="() => AcceptAsync(group)" disabled="@busy">Accepter</button>
-                                }
-                                <button type="button" @onclick="() => pickerGroupKey = group.Key" disabled="@busy">Choisir une tâche…</button>
-                            </div>
-                        }
+                        <div class="actions">
+                            @if (suggestedTask is not null)
+                            {
+                                <button type="button" class="primary" @onclick="() => AcceptAsync(group)" disabled="@busy">Accepter</button>
+                            }
+                            <button type="button" @onclick="() => pickerGroupKey = group.Key" disabled="@busy">Choisir une tâche…</button>
+                        </div>
                     </article>
                 }
             </section>
@@ -308,7 +332,28 @@
 
     private sealed record Row(int TaskId, string Name, IReadOnlyDictionary<DateOnly, Cell> Cells, decimal Total);
 
-    private sealed record PendingRule(string GroupKey, int TaskId, RuleProposal Proposal);
+    private RenderFragment MetaView(Engine.Classification.ActivityGroup metadata) => @<dl class="meta">
+        @if (metadata.Sources.Count > 0)
+        {
+            <dt>Sources</dt>
+            <dd>@string.Join(", ", metadata.Sources.Select(TimesheetUi.SourceLabel))</dd>
+        }
+        @if (metadata.SampleTitles.Count > 0)
+        {
+            <dt>Titres</dt>
+            <dd>@Samples(metadata.SampleTitles)</dd>
+        }
+        @if (metadata.SamplePaths.Count > 0)
+        {
+            <dt>Chemins</dt>
+            <dd><code>@Samples(metadata.SamplePaths)</code></dd>
+        }
+        @if (metadata.SampleSubjects.Count > 0)
+        {
+            <dt>Sujets</dt>
+            <dd>@Samples(metadata.SampleSubjects)</dd>
+        }
+    </dl>;
 
     [SupplyParameterFromQuery(Name = "semaine")]
     public string? WeekParameter { get; set; }
@@ -324,7 +369,19 @@
     private bool messageIsError;
     private bool busy;
     private string? pickerGroupKey;
-    private PendingRule? pendingRule;
+    private IReadOnlyList<PendingGroupAssignment> pendingGroups = [];
+    private Dictionary<Guid, RuleProposal?> rulePreviews = [];
+    private readonly Dictionary<Guid, ElementReference> confirmButtons = [];
+    private readonly Dictionary<Guid, ElementReference> keepOnceButtons = [];
+    private ElementReference unclassifiedHeading;
+    private ElementReference submittedNotice;
+    private FocusTarget focusTarget;
+    private Guid focusPendingId;
+
+    private enum FocusTarget { None, Pending, Heading, Submitted }
+
+    private const string SubmittedWhilePending =
+        "Cette semaine a été soumise entre-temps : l'assignation en attente est abandonnée et rien n'a été modifié (le brouillon soumis reste figé).";
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
 
@@ -347,7 +404,6 @@
 
         monday = week;
         pickerGroupKey = null;
-        pendingRule = null;
         message = null;
         await LoadAsync();
     }
@@ -371,6 +427,7 @@
                 ? draft!.Entries.GroupBy(e => e.Date).ToDictionary(g => g.Key, g => g.Sum(e => e.Hours))
                 : [];
             proposal = week;
+            await LoadPendingAsync();
         }
         catch (Exception ex)
         {
@@ -481,35 +538,167 @@
         if (groupKey is null)
             return;
 
-        await RunAsync(async () =>
-        {
-            var preview = await Weeks.ProposeRuleFromCorrectionAsync(new CorrectionTarget(WeekRange(), groupKey), taskId);
-            if (preview is null)
-            {
-                Fail("Aucune règle stable n'a pu être déduite de ce groupe. Assignez les créneaux depuis la vue Jour.");
-                return;
-            }
-            pendingRule = new PendingRule(groupKey, taskId, preview);
-        });
+        var before = Assignments.GetPending(monday).FirstOrDefault(p => p.GroupKey == groupKey);
+        await AssignAsync(groupKey, taskId, before);
     }
 
-    private async Task ConfirmRuleAsync()
-    {
-        if (pendingRule is not { } pending)
-            return;
+    private Task ExtendPendingAsync(PendingGroupAssignment pending) => AssignAsync(pending.GroupKey, pending.TaskId, pending);
 
+    private async Task AssignAsync(string groupKey, int taskId, PendingGroupAssignment? before)
+    {
+        Guid? assignedId = null;
         await RunAsync(async () =>
         {
-            var rule = await Weeks.CreateRuleFromCorrectionAsync(new CorrectionTarget(WeekRange(), pending.GroupKey), pending.TaskId);
-            pendingRule = null;
-            if (rule is null)
+            var pending = await Assignments.AssignAsync(monday, groupKey, taskId);
+            await LoadAsync();
+            if (pending is null)
             {
-                Fail("La règle n'a pas pu être créée : aucune valeur stable trouvée.");
+                Fail(IsSubmitted ? SubmittedWhilePending : "Ce groupe n'a plus de créneaux à assigner : il est déjà classé ou supprimé.");
                 return;
             }
-            await LoadAsync();
-            Inform($"Règle créée : « {rule.Name} » → {TaskName(rule.ForecastTaskId)}.");
+
+            assignedId = pending.Id;
+            var added = pending.Slots.Count - (before?.Slots.Count ?? 0);
+            var group = $"« {TimesheetUi.GroupValue(groupKey)} » assigné à {TaskName(taskId)} : compté dans les totaux.";
+            if (before is null)
+                Inform($"{group} Choisissez Confirmer, Cette fois seulement ou Annuler.");
+            else if (added > 0)
+                Inform($"{group} {added} nouveau(x) créneau(x) ajouté(s) à l'assignation en attente (Annuler les couvre aussi).");
+            else
+                Inform($"{group} Aucun nouveau créneau à ajouter.");
         });
+        RestoreFocus(assignedId);
+    }
+
+    private async Task ConfirmPendingAsync(PendingGroupAssignment pending)
+    {
+        await RunAsync(async () =>
+        {
+            var result = await Assignments.ConfirmAsync(pending.Id);
+            await LoadAsync();
+            if (result is null)
+                Inform("Cette assignation a déjà été traitée.");
+            else if (result.WeekSubmitted)
+                Fail(SubmittedWhilePending);
+            else if (result.Rule is null)
+                Fail("Aucune règle stable n'a pu être déduite de ce groupe. Choisissez Cette fois seulement ou Annuler.");
+            else
+                Inform($"Règle créée : « {result.Rule.Name} » → {TaskName(result.Rule.ForecastTaskId)}."
+                    + (result.SlotsKeptManual > 0 ? $" {result.SlotsKeptManual} créneau(x) hors de la règle gardent l'assignation manuelle." : ""));
+        });
+        RestoreFocus(pending.Id);
+    }
+
+    private async Task KeepOncePendingAsync(PendingGroupAssignment pending)
+    {
+        await RunAsync(async () =>
+        {
+            var result = await Assignments.TryKeepOnceAsync(pending.Id);
+            await LoadAsync();
+            if (result.WeekSubmitted)
+                Fail(SubmittedWhilePending);
+            else
+                Inform(result.Kept
+                    ? $"Assignation conservée pour cette fois seulement : « {TimesheetUi.GroupValue(pending.GroupKey)} » → {TaskName(pending.TaskId)}, aucune règle créée."
+                    : "Cette assignation a déjà été traitée.");
+        });
+        RestoreFocus(pending.Id);
+    }
+
+    private async Task CancelPendingAsync(PendingGroupAssignment pending)
+    {
+        await RunAsync(async () =>
+        {
+            var result = await Assignments.CancelAsync(pending.Id);
+            await LoadAsync();
+            if (result is null)
+                Inform("Cette assignation a déjà été traitée.");
+            else if (result.WeekSubmitted)
+                Fail(SubmittedWhilePending);
+            else
+                Inform($"Assignation annulée : {result.SlotsRestored} créneau(x) remis dans leur état précédent"
+                    + (result.SlotsSkipped > 0 ? $", {result.SlotsSkipped} laissé(s) tel(s) quel(s) car modifié(s) depuis." : "."));
+        });
+        RestoreFocus(pending.Id);
+    }
+
+    private async Task LoadPendingAsync()
+    {
+        pendingGroups = await Assignments.GetPendingAsync(monday);
+        var previews = new Dictionary<Guid, RuleProposal?>();
+        foreach (var pending in pendingGroups)
+            previews[pending.Id] = await Weeks.ProposeRuleFromCorrectionAsync(new CorrectionTarget(WeekRange(), pending.GroupKey), pending.TaskId);
+        rulePreviews = previews;
+
+        foreach (var stale in confirmButtons.Keys.Where(id => pendingGroups.All(p => p.Id != id)).ToList())
+            confirmButtons.Remove(stale);
+        foreach (var stale in keepOnceButtons.Keys.Where(id => pendingGroups.All(p => p.Id != id)).ToList())
+            keepOnceButtons.Remove(stale);
+    }
+
+    /// <summary>Après une action la carte focalisée disparaît : le focus va à la carte (ou à la suivante), sinon à l'en-tête de la section, sinon au bandeau « soumise ».</summary>
+    private void RestoreFocus(Guid? preferredId)
+    {
+        if (IsSubmitted)
+        {
+            focusTarget = FocusTarget.Submitted;
+        }
+        else if (preferredId is { } id && pendingGroups.Any(p => p.Id == id))
+        {
+            (focusTarget, focusPendingId) = (FocusTarget.Pending, id);
+        }
+        else if (pendingGroups.Count > 0)
+        {
+            (focusTarget, focusPendingId) = (FocusTarget.Pending, pendingGroups[0].Id);
+        }
+        else
+        {
+            focusTarget = FocusTarget.Heading;
+        }
+    }
+
+    private bool CanConfirm(PendingGroupAssignment pending) =>
+        pending.StoredRuleId is not null || rulePreviews.GetValueOrDefault(pending.Id) is not null;
+
+    // Sur une carte, « Confirmer » reçoit le focus ; désactivé (aucune règle stable), c'est « Cette fois seulement ».
+    private bool TryGetFocusElement(out ElementReference element)
+    {
+        element = default;
+        switch (focusTarget)
+        {
+            case FocusTarget.Pending:
+                var pending = pendingGroups.FirstOrDefault(p => p.Id == focusPendingId);
+                var buttons = pending is not null && CanConfirm(pending) ? confirmButtons : keepOnceButtons;
+                return buttons.TryGetValue(focusPendingId, out element);
+            case FocusTarget.Heading:
+                element = unclassifiedHeading;
+                return element.Id is not null;
+            case FocusTarget.Submitted:
+                element = submittedNotice;
+                return element.Id is not null;
+            default:
+                return false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusTarget == FocusTarget.None || busy)
+            return;
+
+        var found = TryGetFocusElement(out var element);
+        focusTarget = FocusTarget.None;
+        if (!found)
+            return;
+
+        try
+        {
+            await element.FocusAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or JSException or JSDisconnectedException)
+        {
+            // Élément disparu ou circuit fermé : pas de focus.
+        }
     }
 
     private async Task RunAsync(Func<Task> action)
@@ -525,6 +714,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Week action failed");
+            await LoadAsync();
             Fail($"L'opération a échoué : {ex.Message}");
         }
         finally

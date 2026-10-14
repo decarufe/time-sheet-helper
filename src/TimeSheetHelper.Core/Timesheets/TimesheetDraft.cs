@@ -37,6 +37,16 @@ public sealed class SlotOverride
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// Tombstone of a 15-minute slot the user deleted. The engine ignores every activity in the slot, so events
+/// brought back by a later collector sync (same ExternalId, growing segment) do not reappear.
+/// </summary>
+public sealed class RemovedSlot
+{
+    public int Id { get; set; }
+    public DateTime SlotStartUtc { get; set; }
+}
+
 /// <summary>Cached Claude classification of an activity group, keyed by a fingerprint of its metadata.</summary>
 public sealed class ClassificationCacheEntry
 {

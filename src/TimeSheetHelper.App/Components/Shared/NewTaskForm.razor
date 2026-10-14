@@ -1,34 +1,65 @@
 @using Microsoft.EntityFrameworkCore
 @using TimeSheetHelper.Forecast
 @using TimeSheetHelper.Storage
+@implements IDisposable
 @inject ForecastTaskImporter Importer
 @inject ForecastTaskCatalog Catalog
+@inject IForecastLookup Lookup
+@inject ILogger<NewTaskForm> Logger
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 
 <form class="new-task" @onsubmit="SubmitAsync" @onsubmit:preventDefault>
     <h3>@(EditTaskId is null ? "Nouvelle tâche" : "Modifier la tâche")</h3>
 
     <label for="@projectId">Projet</label>
-    <input id="@projectId" @ref="projectInput" type="text" list="@listId" autocomplete="off" placeholder="Choisir ou saisir un projet"
-           @bind="project" @bind:event="oninput" />
-    <datalist id="@listId">
-        @foreach (var name in projects)
-        {
-            <option value="@name"></option>
-        }
-    </datalist>
+    <SuggestInput @ref="projectBox" Id="@projectId" Label="Suggestions de projets" Placeholder="Nom du projet (suggestions Forecast)"
+                  Value="@state.Project" ValueChanged="OnProjectChanged"
+                  Search="SearchProjectNamesAsync" OnSelected="OnSuggestionPicked" />
 
     <label for="@taskId">Tâche</label>
-    <input id="@taskId" type="text" autocomplete="off" placeholder="Nom de la tâche" @bind="task" @bind:event="oninput" />
+    <SuggestInput Id="@taskId" Label="Suggestions de tâches" Placeholder="Nom de la tâche (suggestions Forecast)"
+                  Value="@state.Task" ValueChanged="OnTaskChanged"
+                  Search="SearchTaskNamesAsync" OnSelected="OnSuggestionPicked" />
 
-    <details open="@(EditTaskId is not null && (projectCode.Length > 0 || taskCode.Length > 0))">
-        <summary>Codes Forecast (facultatif)</summary>
-        <div class="codes">
-            <label>Code du projet <input type="text" placeholder="P1078" @bind="projectCode" /></label>
-            <label>Code de la tâche <input type="text" placeholder="T35647" @bind="taskCode" /></label>
+    <div class="numbers">
+        <div>
+            <label for="@projectCodeId">Numéro de projet <span class="optional">(facultatif)</span></label>
+            <SuggestInput Id="@projectCodeId" Label="Projets correspondant au numéro" Placeholder="P1078 ou 1078"
+                          Value="@state.ProjectCode" ValueChanged="OnProjectCodeChanged"
+                          Search="SearchProjectNumbersAsync" OnSelected="OnSuggestionPicked" OnCommit="OnProjectNumberCommitAsync" />
         </div>
-        <p class="hint">Sans code, la tâche est repérée par « projet / tâche » (temps interne). Un projet déjà connu garde son code.</p>
-    </details>
+        <div>
+            <label for="@taskCodeId">Numéro de tâche <span class="optional">(facultatif)</span></label>
+            <SuggestInput Id="@taskCodeId" Label="Tâches correspondant au numéro" Placeholder="T35647 ou 35647"
+                          Value="@state.TaskCode" ValueChanged="OnTaskCodeChanged"
+                          Search="SearchTaskNumbersAsync" OnSelected="OnSuggestionPicked" OnCommit="OnTaskNumberCommitAsync" />
+        </div>
+    </div>
+    <p class="hint">
+        Saisissez un numéro Forecast pour remplir le reste, ou tapez quelques lettres pour obtenir des suggestions.
+        Ce que vous avez saisi vous-même n'est jamais remplacé. Sans numéro, la tâche est repérée par « projet / tâche » (temps interne) ;
+        un projet déjà connu garde son numéro.
+    </p>
+
+    @if (autoFilling)
+    {
+        <p class="note" role="status"><span class="spinner" aria-hidden="true"></span> Recherche dans Forecast…</p>
+    }
+    @if (lookupError is not null)
+    {
+        <p class="note warn" role="status">@lookupError Vous pouvez saisir le projet et la tâche à la main.</p>
+    }
+    @if (notes.Count > 0)
+    {
+        <div role="status" aria-label="Précisions sur le remplissage">
+            <ul class="notes">
+                @foreach (var note in notes)
+                {
+                    <li>@note</li>
+                }
+            </ul>
+        </div>
+    }
 
     @if (error is not null)
     {
@@ -44,14 +75,19 @@
 @code {
     private readonly string projectId = $"nt-project-{Guid.NewGuid():N}";
     private readonly string taskId = $"nt-task-{Guid.NewGuid():N}";
-    private readonly string listId = $"nt-projects-{Guid.NewGuid():N}";
-    private ElementReference projectInput;
+    private readonly string projectCodeId = $"nt-project-code-{Guid.NewGuid():N}";
+    private readonly string taskCodeId = $"nt-task-code-{Guid.NewGuid():N}";
+    private readonly TaskFormState state = new();
+    private SuggestInput? projectBox;
     private List<string> projects = [];
-    private string project = "";
-    private string task = "";
-    private string projectCode = "";
-    private string taskCode = "";
+    private List<string> notes = [];
+    private CancellationTokenSource? autoFillCts;
+    private Task<bool>? pendingAutoFill;
+    private string? lastAutoFillKey;
+    private string? failedAutoFillKey;
+    private string? lookupError;
     private string? error;
+    private bool autoFilling;
     private bool busy;
 
     /// <summary>Pre-fills the task name (typically what was typed in a search box that found nothing).</summary>
@@ -69,7 +105,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        task = InitialTaskName?.Trim() ?? "";
+        state.Task = InitialTaskName?.Trim() ?? "";
         await using var db = await DbFactory.CreateDbContextAsync();
         projects = (await db.ForecastTasks.AsNoTracking().Select(t => t.ProjectName).Distinct().ToListAsync())
             .OrderBy(p => p, StringComparer.CurrentCultureIgnoreCase)
@@ -77,19 +113,144 @@
 
         if (EditTaskId is { } id && await Catalog.FindAsync(id) is { } existing)
         {
-            project = existing.ProjectName;
-            task = existing.TaskName;
-            projectCode = existing.ProjectCode ?? "";
-            taskCode = ForecastCodes.TaskCode.Match(existing.ExternalId) is { Success: true } m && m.Value == existing.ExternalId ? m.Value : "";
+            state.Project = existing.ProjectName;
+            state.Task = existing.TaskName;
+            state.ProjectCode = existing.ProjectCode ?? "";
+            state.TaskCode = ForecastCodes.TaskCode.Match(existing.ExternalId) is { Success: true } m && m.Value == existing.ExternalId ? m.Value : "";
+            // Saved numbers are not looked up again unless the user edits them.
+            lastAutoFillKey = state.BuildAutoFillRequest(AutoFillTrigger.Submit).Key;
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && projectBox is not null)
+            await projectBox.FocusAsync();
+    }
+
+    public void Dispose()
+    {
+        autoFillCts?.Cancel();
+        autoFillCts?.Dispose();
+        autoFillCts = null;
+    }
+
+    // Suggestions while typing
+
+    private async Task<SuggestionBatch> SearchProjectNamesAsync(string text, CancellationToken token) =>
+        ForecastSuggestions.ProjectBatch(await Lookup.SearchProjectsAsync(text, token), projects, text, numberFirst: false);
+
+    private async Task<SuggestionBatch> SearchProjectNumbersAsync(string text, CancellationToken token) =>
+        ForecastSuggestions.ProjectBatch(await Lookup.SearchProjectsAsync(text, token), [], text, numberFirst: true);
+
+    private async Task<SuggestionBatch> SearchTaskNamesAsync(string text, CancellationToken token) =>
+        ForecastSuggestions.TaskBatch(await Lookup.SearchTasksAsync(text, state.ProjectIdForSearch, token), numberFirst: false);
+
+    private async Task<SuggestionBatch> SearchTaskNumbersAsync(string text, CancellationToken token) =>
+        ForecastSuggestions.TaskBatch(await Lookup.SearchTasksAsync(text, state.ProjectIdForSearch, token), numberFirst: true);
+
+    private void OnProjectChanged(string value)
+    {
+        state.Project = value;
+        if (state.OnProjectEdited() is { } note)
+            notes = [note];
+    }
+
+    private void OnTaskChanged(string value)
+    {
+        state.Task = value;
+        if (state.OnTaskEdited() is { } note)
+            notes = [note];
+    }
+
+    private void OnProjectCodeChanged(string value) => state.ProjectCode = value;
+
+    private void OnTaskCodeChanged(string value) => state.TaskCode = value;
+
+    /// <summary>A suggestion was picked: the match carries everything needed, no further Forecast call.</summary>
+    private void OnSuggestionPicked(SuggestionOption option)
+    {
+        autoFillCts?.Cancel();
+        pendingAutoFill = null;
+        autoFilling = false;
+        lookupError = null;
+
+        var outcome = new FillOutcome(false, []);
+        switch (option.Tag)
         {
-            try { await projectInput.FocusAsync(); }
-            catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+            case ForecastProjectMatch project:
+                outcome = state.ChooseProject(project);
+                break;
+            case ForecastTaskMatch forecastTask:
+                outcome = state.ChooseTask(forecastTask);
+                break;
+            case string knownProject:
+                state.ChooseKnownProject(knownProject);
+                break;
+        }
+
+        notes = outcome.Notes.ToList();
+        lastAutoFillKey = state.BuildAutoFillRequest(AutoFillTrigger.Submit).Key;
+    }
+
+    // Auto-fill from the numbers
+
+    private Task OnProjectNumberCommitAsync(string value)
+    {
+        state.ProjectCode = TaskFormState.NormalizeProjectNumber(value);
+        return pendingAutoFill = AutoFillAsync(AutoFillTrigger.ProjectNumber);
+    }
+
+    private Task OnTaskNumberCommitAsync(string value)
+    {
+        state.TaskCode = TaskFormState.NormalizeTaskNumber(value);
+        return pendingAutoFill = AutoFillAsync(AutoFillTrigger.TaskNumber);
+    }
+
+    /// <summary>Asks Forecast for the numbers typed and fills the fields (see <see cref="TaskFormState"/> for what may be replaced). True when a field was filled.</summary>
+    private async Task<bool> AutoFillAsync(AutoFillTrigger trigger)
+    {
+        var request = state.BuildAutoFillRequest(trigger);
+        if (request.IsEmpty || request.Key == lastAutoFillKey)
+            return false;
+        if (trigger == AutoFillTrigger.Submit && request.Key == failedAutoFillKey)
+            return false;
+
+        autoFillCts?.Cancel();
+        autoFillCts?.Dispose();
+        var cts = autoFillCts = new CancellationTokenSource();
+        autoFilling = true;
+        lookupError = null;
+        notes = [];
+        try
+        {
+            var result = await ForecastLookupGuard.AutoFillAsync(Lookup, request, Logger, cts.Token);
+            if (cts.IsCancellationRequested)
+                return false;
+
+            if (!result.Succeeded)
+            {
+                failedAutoFillKey = request.Key;
+                lookupError = result.Error;
+                return false;
+            }
+
+            failedAutoFillKey = null;
+            var outcome = state.ApplyAutoFill(result);
+            notes = outcome.Notes.ToList();
+            if (outcome.Changed)
+                notes.Add("Champs remplis depuis Forecast : vérifiez-les avant d'enregistrer.");
+            lastAutoFillKey = state.BuildAutoFillRequest(AutoFillTrigger.Submit).Key;
+            return outcome.Changed;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (autoFillCts == cts)
+                autoFilling = false;
         }
     }
 
@@ -99,9 +260,16 @@
         error = null;
         try
         {
+            state.NormalizeCodes();
+
+            // Numbers typed but not looked up yet (or being looked up): fill first, and let the user check what appeared before saving.
+            var filled = pendingAutoFill is { IsCompleted: false } running ? await running : await AutoFillAsync(AutoFillTrigger.Submit);
+            if (filled)
+                return;
+
             if (EditTaskId is { } editId)
             {
-                var update = await Catalog.UpdateAsync(editId, project, task, projectCode, taskCode);
+                var update = await Catalog.UpdateAsync(editId, state.Project, state.Task, state.ProjectCode, state.TaskCode);
                 if (update.Ok)
                     await OnCreated.InvokeAsync(editId);
                 else
@@ -109,7 +277,7 @@
                 return;
             }
 
-            var result = await Importer.AddAsync(project, task, projectCode, taskCode);
+            var result = await Importer.AddAsync(state.Project, state.Task, state.ProjectCode, state.TaskCode);
             if (result.TaskId is { } id)
                 await OnCreated.InvokeAsync(id);
             else

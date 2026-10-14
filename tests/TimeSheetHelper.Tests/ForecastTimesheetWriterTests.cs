@@ -33,6 +33,75 @@ internal sealed class FakeForecastClient : IForecastToolClient
 
     public bool ConfirmFails { get; set; }
 
+    /// <summary>Warnings the plan step of a registration returns.</summary>
+    public List<string> PlanWarnings { get; } = [];
+
+    /// <summary>The answer of the confirm tool (e.g. an "ok": false outcome) and whether the registration is applied anyway.</summary>
+    public (string Json, bool Applies)? ConfirmReply { get; set; }
+
+    /// <summary>Days whose registrations are approved ("approval_status": "APPROVED"), by project and day.</summary>
+    public HashSet<(string ProjectId, DateOnly Date)> ApprovedDays { get; } = [];
+
+    /// <summary>Same for registrations submitted for approval.</summary>
+    public HashSet<(string ProjectId, DateOnly Date)> SubmittedDays { get; } = [];
+
+    /// <summary>Same for invoiced registrations.</summary>
+    public HashSet<(string ProjectId, DateOnly Date)> InvoicedDays { get; } = [];
+
+    /// <summary>Notes of the registrations of a project and day.</summary>
+    public Dictionary<(string ProjectId, DateOnly Date), string> Notes { get; } = [];
+
+    /// <summary>When set, "get_time_analysis" lists at most this many registrations and says "has_more".</summary>
+    public int? PageSize { get; set; }
+
+    /// <summary>"has_more" stays true even for one day: the read can never be completed.</summary>
+    public bool AlwaysHasMore { get; set; }
+
+    /// <summary>Called first for every tool call: a non-null result replaces the normal answer (it may also throw).</summary>
+    public Func<string, IReadOnlyDictionary<string, object?>, ForecastToolResult?>? Intercept { get; set; }
+
+    /// <summary>Tasks of "list_project_tasks" (see <see cref="AddPreflightTools"/>).</summary>
+    public List<(int Id, string Name, bool IsDone, bool Blocked, string Unit, double Estimate, double Actual)> ProjectTasks { get; } = [];
+
+    /// <summary>Offers "list_project_tasks" (and "search_projects", for the project stage).</summary>
+    public FakeForecastClient AddPreflightTools()
+    {
+        AddLookupTools();
+        Tools.Add(Tool("list_project_tasks", """{"type":"object","properties":{"project_id":{"type":"integer"}},"required":["project_id"]}"""));
+        return this;
+    }
+
+    /// <summary>Projects known to "search_projects" (see <see cref="AddLookupTools"/>).</summary>
+    public List<(int Id, string Name, string Client, string Status)> Projects { get; } =
+    [
+        (1078, "M365 - Équipe Laurence - Intranet Centre de Marque", "Équipe Laurence Inc.", "RUNNING"),
+        (1057, "M365 - ITAQ - Intranet", "Institut de technologie", "RUNNING"),
+        (1020, "M365 - BCF - Refonte Intranet", "Corporation BCF inc.", "RUNNING"),
+        (12, "Interne", "Nexus", "RUNNING"),
+    ];
+
+    /// <summary>Tasks known to "find_task" (see <see cref="AddLookupTools"/>).</summary>
+    public List<(int Id, string Name, int ProjectId)> LookupTasks { get; } =
+    [
+        (35647, "Automatisation - Nethris", 1078),
+        (35648, "Automatisation - Tests", 1057),
+        (35700, "Revue de code", 1078),
+        (35701, "Réunion d'équipe", 12),
+    ];
+
+    /// <summary>Thrown by "search_projects" and "find_task" instead of answering.</summary>
+    public Exception? LookupFailure { get; set; }
+
+    public int LookupCalls => Calls.Count(c => c.Tool is "search_projects" or "find_task");
+
+    /// <summary>Offers the two lookup tools of the real server (kept out of the default catalogue: the writer tests do not use them).</summary>
+    public FakeForecastClient AddLookupTools()
+    {
+        Tools.Add(Tool("search_projects", """{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"""));
+        Tools.Add(Tool("find_task", """{"type":"object","properties":{"name":{"type":"string"},"person_id":{"type":"string"},"project_id":{"type":"integer"}},"required":["name"]}"""));
+        return this;
+    }
+
     /// <summary>The registrations staged with the "plan" tool.</summary>
     public IEnumerable<JsonElement> Creates =>
         Calls.Where(c => c.Tool == "plan_time_registration_create").Select(c => ((JsonElement)c.Args["entries"]!)[0]);
@@ -61,6 +130,8 @@ internal sealed class FakeForecastClient : IForecastToolClient
     public Task<ForecastToolResult> CallToolAsync(string toolName, IReadOnlyDictionary<string, object?> arguments, CancellationToken cancellationToken = default)
     {
         Calls.Add((toolName, arguments));
+        if (Intercept?.Invoke(toolName, arguments) is { } intercepted)
+            return Task.FromResult(intercepted);
         switch (toolName)
         {
             case "get_person_tasks":
@@ -79,33 +150,149 @@ internal sealed class FakeForecastClient : IForecastToolClient
                     .Where(e => e.Date >= from && e.Date <= to)
                     .Select((e, i) => new
                     {
-                        entry_id = i + 1,
+                        entry_id = 54000000 + i,
                         date = e.Date.ToString("yyyy-MM-dd"),
                         person = new { id = long.Parse(e.PersonId), name = "x" },
-                        project = new { id = long.Parse(e.ProjectId), name = "p" },
+                        project = string.IsNullOrEmpty(e.ProjectId)
+                            ? (object)new { id = (long?)null, name = "Non-project time" }
+                            : new { id = (long?)long.Parse(e.ProjectId), name = "p" + e.ProjectId },
                         task_id = 15992000 + i,
                         total_hours = e.Minutes / 60.0,
-                    });
-                return Task.FromResult(Ok(JsonSerializer.Serialize(new { entries, has_more = false })));
+                        approval_status = ApprovedDays.Contains((e.ProjectId, e.Date)) ? "APPROVED" : SubmittedDays.Contains((e.ProjectId, e.Date)) ? "SUBMITTED" : "NOT_SUBMITTED",
+                        invoiced = InvoicedDays.Contains((e.ProjectId, e.Date)),
+                        notes = Notes.GetValueOrDefault((e.ProjectId, e.Date)),
+                    })
+                    .ToList();
+                var listed = PageSize is { } page ? entries.Take(page).ToList() : entries;
+                return Task.FromResult(Ok(JsonSerializer.Serialize(new
+                {
+                    entry_count = entries.Count,
+                    entries = listed,
+                    has_more = AlwaysHasMore || listed.Count < entries.Count,
+                })));
+            case "list_project_tasks":
+                return Task.FromResult(Ok(JsonSerializer.Serialize(new
+                {
+                    tool = "list_project_tasks",
+                    found = true,
+                    count = ProjectTasks.Count,
+                    project_id = Convert.ToInt32(arguments["project_id"]),
+                    tasks = ProjectTasks.Select(t => new
+                    {
+                        task_id = t.Id,
+                        task_name = t.Name,
+                        status_column_name = t.IsDone ? "Done" : "To-do",
+                        status_category = t.IsDone ? "DONE" : "TODO",
+                        is_done = t.IsDone,
+                        blocked = t.Blocked,
+                        estimation_unit = t.Unit,
+                        estimate = t.Estimate,
+                        remaining = 0,
+                        actual_hours = t.Actual,
+                    }),
+                })));
             case "plan_time_registration_create":
                 var staged = ((JsonElement)arguments["entries"]!)[0];
                 var actionId = $"a{_staged.Count + 1}";
                 _staged[actionId] = staged;
-                return Task.FromResult(Ok($$"""{"action_id":"{{actionId}}","tier":"low","affected_count":1,"warnings":[]}"""));
+                return Task.FromResult(Ok(JsonSerializer.Serialize(new { action_id = actionId, tier = "low", affected_count = 1, warnings = PlanWarnings })));
             case "confirm_time_registration_create":
                 if (ConfirmFails)
                     return Task.FromResult(new ForecastToolResult(true, "boom", null));
                 var entry = _staged[(string)arguments["action_id"]!];
-                Entries.Add((
-                    ProjectOf(entry.GetProperty("task_id").GetInt64()),
-                    DateOnly.Parse(entry.GetProperty("date").GetString()!),
-                    entry.GetProperty("minutes").GetInt32(),
-                    MyId));
-                return Task.FromResult(Ok("""{"status":"done"}"""));
+                if (ConfirmReply is not { Applies: false })
+                    Entries.Add((
+                        ProjectOf(entry.GetProperty("task_id").GetInt64()),
+                        DateOnly.Parse(entry.GetProperty("date").GetString()!),
+                        entry.GetProperty("minutes").GetInt32(),
+                        MyId));
+                return Task.FromResult(Ok(ConfirmReply?.Json ?? """{"status":"done"}"""));
+            case "search_projects":
+                cancellationToken.ThrowIfCancellationRequested();
+                if (LookupFailure is not null)
+                    throw LookupFailure;
+                return Task.FromResult(SearchProjects((string)arguments["name"]!));
+            case "find_task":
+                cancellationToken.ThrowIfCancellationRequested();
+                if (LookupFailure is not null)
+                    throw LookupFailure;
+                return Task.FromResult(FindTask(arguments));
             default:
                 throw new InvalidOperationException($"Outil inattendu : {toolName}");
         }
     }
+
+    private ForecastToolResult SearchProjects(string query)
+    {
+        var wanted = Normalize(query);
+        object Row(int id, string name, string client, string status) => new
+        {
+            id = "UHJvamVjdFR5cGU6" + id, project_id = id, custom_project_id = "P" + id, name = name + "  ", client, status,
+        };
+
+        var number = wanted.TrimStart('p', '-');
+        var exact = number.Length > 0 && number.All(char.IsDigit) ? Projects.Where(p => p.Id.ToString() == number).ToList() : [];
+        if (exact.Count == 1)
+        {
+            var p = exact[0];
+            return Ok(JsonSerializer.Serialize(new
+            {
+                found = true,
+                exact_match = true,
+                id = "UHJvamVjdFR5cGU6" + p.Id,
+                project_id = p.Id,
+                custom_project_id = "P" + p.Id,
+                name = p.Name + "  ",
+                client = p.Client,
+                status = p.Status,
+            }));
+        }
+
+        var matches = Projects.Where(p => Normalize(p.Name).Contains(wanted) || Normalize(p.Client).Contains(wanted)).ToList();
+        if (matches.Count == 0)
+            return Ok(JsonSerializer.Serialize(new
+            {
+                found = false,
+                message = "No project matching",
+                total_count = Projects.Count,
+                all_projects = Projects.Select(p => Row(p.Id, p.Name, p.Client, p.Status)),
+            }));
+        return Ok(JsonSerializer.Serialize(new
+        {
+            found = true,
+            exact_match = false,
+            needs_disambiguation = matches.Count > 1,
+            matches = matches.Select(p => Row(p.Id, p.Name, p.Client, p.Status)),
+        }));
+    }
+
+    private ForecastToolResult FindTask(IReadOnlyDictionary<string, object?> arguments)
+    {
+        var query = (string)arguments["name"]!;
+        var wanted = Normalize(query);
+        var number = wanted.TrimStart('t');
+        object Row((int Id, string Name, int ProjectId) t) => new
+        {
+            task_id = t.Id, task_name = t.Name, project_id = t.ProjectId,
+            project_name = Projects.First(p => p.Id == t.ProjectId).Name, assignee_ids = Array.Empty<int>(), estimation_unit = "hours",
+        };
+
+        List<(int Id, string Name, int ProjectId)> found;
+        if (number.Length > 0 && number.All(char.IsDigit))
+            found = LookupTasks.Where(t => t.Id.ToString() == number).ToList(); // a task number is global: the project scope is ignored
+        else
+        {
+            found = LookupTasks.Where(t => Normalize(t.Name).Contains(wanted)).ToList();
+            if (arguments.TryGetValue("project_id", out var scope) && scope is not null)
+                found = found.Where(t => t.ProjectId == Convert.ToInt32(scope)).ToList();
+        }
+
+        return found.Count == 1
+            ? Ok(JsonSerializer.Serialize(new { tool = "find_task", query, found = true, count = 1, task = Row(found[0]) }))
+            : Ok(JsonSerializer.Serialize(new { tool = "find_task", query, found = found.Count > 0, count = found.Count, tasks = found.Select(Row) }));
+    }
+
+    private static string Normalize(string text) => ForecastCodes.Normalize(text);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

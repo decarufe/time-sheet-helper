@@ -34,6 +34,21 @@ public sealed class ForecastOptions
     /// <summary>Timeout of one MCP request.</summary>
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>How many times a request refused with "429 Too Many Requests" (or a transient 5xx on a read) is retried.</summary>
+    public int RetryCount { get; set; } = 3;
+
+    /// <summary>Wait before the first retry; it doubles after each one (capped at 30 s).</summary>
+    public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>"max_results" asked of the tool that lists the time registrations (the server caps it at 200 by default).</summary>
+    public int TimeEntriesMaxResults { get; set; } = 1000;
+
+    /// <summary>Read-only checks before a simulation or a fill: task finished or blocked, project closed, estimate exceeded.</summary>
+    public bool PreflightChecks { get; set; } = true;
+
+    /// <summary>How long a project/task search of the "add task" dialog is remembered (zero disables the cache).</summary>
+    public TimeSpan LookupCacheDuration { get; set; } = TimeSpan.FromMinutes(2);
+
     /// <summary>Your Forecast person id, only needed when the server cannot tell who you are.</summary>
     public string? PersonId { get; set; }
 

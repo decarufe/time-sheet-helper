@@ -1,0 +1,84 @@
+{
+  "agents": {
+    "architect": {
+      "persistent_name": "Yoda",
+      "universe": "Star Wars",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "pm": {
+      "persistent_name": "Morpheus",
+      "universe": "The Matrix",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "frontend": {
+      "persistent_name": "Cendrillon",
+      "universe": "Cinderella",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "backend": {
+      "persistent_name": "Glados",
+      "universe": "Portal",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "tester": {
+      "persistent_name": "Inspecteur Gadget",
+      "universe": "Inspector Gadget",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "security": {
+      "persistent_name": "Mafia Boy",
+      "universe": "Real World",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "designer": {
+      "persistent_name": "Martha Stewart",
+      "universe": "Real World",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "cloud": {
+      "persistent_name": "Zeus",
+      "universe": "Greek Mythology",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "devops": {
+      "persistent_name": "R2-D2",
+      "universe": "Star Wars",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    },
+    "user": {
+      "persistent_name": "Jar Jar Binks",
+      "universe": "Star Wars",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "legacy_named": false,
+      "user_specified": true,
+      "status": "active"
+    }
+  }
+}

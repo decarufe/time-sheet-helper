@@ -14,8 +14,11 @@ public enum SlotKind
     /// <summary>The user assigned the slot to a task.</summary>
     Override,
 
-    /// <summary>The user marked the slot as not work.</summary>
+    /// <summary>The user marked the slot as not work: its activities are kept (and reassignable) but not counted.</summary>
     ExcludedByOverride,
+
+    /// <summary>The user deleted the slot: its activities are gone and ignored, even when a collector brings them back.</summary>
+    Removed,
 
     /// <summary>The slot goes to the "Ignoré" task (by rule or by the user): kept out of the timesheet.</summary>
     Ignored,

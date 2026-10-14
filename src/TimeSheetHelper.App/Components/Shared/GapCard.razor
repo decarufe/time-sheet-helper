@@ -1,0 +1,169 @@
+@using TimeSheetHelper.Forecast.Submission
+
+@* One gap of the week: what is wrong, the numbers, what Forecast already holds, what would change, and what can be done about it. *@
+<section id="@GapLabels.DomId(Gap.Id)" @ref="root" tabindex="-1"
+         class="@CardClass"
+         aria-labelledby="@titleId" aria-describedby="@messageId" aria-busy="@(Updating ? "true" : null)"
+         @onfocusin="() => OnFocused?.Invoke(Gap.Id)">
+    <header class="head">
+        <span class="sev"><span aria-hidden="true">@GapLabels.SeveritySymbol(Gap.Severity)</span> @GapLabels.Severity(Gap.Severity)</span>
+        <h4 id="@titleId">@Gap.Title</h4>
+        @if (GapLabels.Context(Gap) is { Length: > 0 } context)
+        {
+            <span class="context">@context</span>
+        }
+    </header>
+
+    <p id="@messageId" class="message">@Gap.Message</p>
+
+    @if (GapLabels.Figures(Gap) is { } figures)
+    {
+        <dl class="figures">
+            <div><dt>Forecast</dt><dd>@figures.Forecast</dd></div>
+            <div><dt>Attendu</dt><dd>@figures.Expected</dd></div>
+            <div><dt>Écart</dt><dd>@figures.Delta</dd></div>
+        </dl>
+    }
+
+    @if (Gap.ExistingEntries.Count > 0)
+    {
+        <details class="entries" open="@(Gap.ExistingEntries.Count <= 3)">
+            <summary>Saisies déjà dans Forecast (@Gap.ExistingEntries.Count)</summary>
+            <table>
+                <caption class="visually-hidden">Saisies Forecast existantes pour cet écart</caption>
+                <thead>
+                    <tr><th scope="col">Projet</th><th scope="col">Note</th><th scope="col" class="num">Heures</th><th scope="col">État</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in Gap.ExistingEntries)
+                    {
+                        <tr>
+                            <td>@(entry.ProjectName ?? "—")</td>
+                            <td>@(string.IsNullOrWhiteSpace(entry.Notes) ? "—" : entry.Notes)</td>
+                            <td class="num">@TimesheetUi.HoursLabel(entry.Hours)</td>
+                            <td>
+                                @GapLabels.Approval(entry.ApprovalStatus)@(entry.Invoiced ? (string.IsNullOrEmpty(entry.ApprovalStatus) ? "Facturée" : " · facturée") : "")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </details>
+    }
+
+    @if (Gap.Preview is { } preview)
+    {
+        <p class="preview">
+            <strong>Effet :</strong> @preview.Description —
+            @string.Join(" · ", GapLabels.PreviewParts(preview))
+        </p>
+    }
+
+    @if (Ignored)
+    {
+        <p class="ignored-note">Ignoré pour cette session : le brouillon n'est pas modifié et la saisie reste la même.</p>
+        <div class="actions">
+            <button type="button" disabled="@Busy" @onclick="() => OnRestore.InvokeAsync(Gap.Id)">Rétablir cet écart</button>
+        </div>
+    }
+    else
+    {
+        <div class="actions" role="group" aria-label="@($"Actions pour : {Gap.Title}")">
+            @foreach (var action in Actions.Where(a => a.Kind != GapActionKind.Disabled || a.IsRecommended))
+            {
+                if (action.Kind == GapActionKind.Link)
+                {
+                    <a class="button @(action.IsRecommended ? "primary" : "")" href="@action.Href">@action.Label</a>
+                }
+                else if (action.Kind == GapActionKind.Button)
+                {
+                    <button type="button" class="@(action.IsRecommended ? "primary" : "")" disabled="@Busy"
+                            aria-expanded="@(IsPanelAction(action.Resolution) ? (OpenPanel == action.Resolution ? "true" : "false") : null)"
+                            @onclick="() => OnAction.InvokeAsync(action.Resolution)">@action.Label</button>
+                }
+                else
+                {
+                    <span class="disabled-action">
+                        <button type="button" disabled aria-describedby="@ReasonId(action)">@action.Label</button>
+                        <span id="@ReasonId(action)" class="reason">@action.Reason</span>
+                    </span>
+                }
+            }
+        </div>
+
+        @if (Actions.Any(a => a.Kind == GapActionKind.Disabled && !a.IsRecommended))
+        {
+            <details class="unavailable">
+                <summary>Actions indisponibles (@Actions.Count(a => a.Kind == GapActionKind.Disabled && !a.IsRecommended))</summary>
+                <ul>
+                    @foreach (var action in Actions.Where(a => a.Kind == GapActionKind.Disabled && !a.IsRecommended))
+                    {
+                        <li><strong>@action.Label</strong> — <span class="reason">@action.Reason</span></li>
+                    }
+                </ul>
+            </details>
+        }
+
+        @ChildContent
+    }
+</section>
+
+@code {
+    private readonly string titleId = $"gap-title-{Guid.NewGuid():N}";
+    private readonly string messageId = $"gap-message-{Guid.NewGuid():N}";
+    private ElementReference root;
+    private int focusedStamp;
+
+    [Parameter, EditorRequired] public SubmissionGap Gap { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IReadOnlyList<GapActionView> Actions { get; set; } = [];
+
+    /// <summary>Another operation is running: the buttons that act are disabled.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>The data is being refreshed: the card is greyed until the new analysis replaces it.</summary>
+    [Parameter] public bool Updating { get; set; }
+
+    /// <summary>The gap is ignored for the session: the card offers to restore it instead of its actions.</summary>
+    [Parameter] public bool Ignored { get; set; }
+
+    /// <summary>The resolution whose inline panel is open (marks the button as expanded).</summary>
+    [Parameter] public SubmissionGapResolution? OpenPanel { get; set; }
+
+    /// <summary>The card takes the focus once each time this number changes (and <see cref="Focus"/> is true).</summary>
+    [Parameter] public int FocusStamp { get; set; }
+
+    [Parameter] public bool Focus { get; set; }
+
+    [Parameter] public EventCallback<SubmissionGapResolution> OnAction { get; set; }
+
+    [Parameter] public EventCallback<string> OnRestore { get; set; }
+
+    /// <summary>Told which card holds the focus (the list uses it to move on to the next one); no re-render is wanted, hence not an EventCallback.</summary>
+    [Parameter] public Action<string>? OnFocused { get; set; }
+
+    /// <summary>Inline panel of an action (search a task, edit it...), shown under the actions.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Focus && FocusStamp != focusedStamp)
+        {
+            focusedStamp = FocusStamp;
+            await FocusAsync();
+        }
+    }
+
+    public async ValueTask FocusAsync()
+    {
+        try { await root.FocusAsync(); }
+        catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+    }
+
+    private string CardClass => $"gap-card {GapLabels.SeverityClass(Gap.Severity)}{(Updating ? " updating" : "")}";
+
+    private static bool IsPanelAction(SubmissionGapResolution resolution) =>
+        resolution is SubmissionGapResolution.LinkTask or SubmissionGapResolution.CreateTask;
+
+    private string ReasonId(GapActionView action) => $"{titleId}-{action.Resolution}-reason";
+}

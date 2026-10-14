@@ -218,6 +218,23 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.ToTable("ClassificationCache");
                 });
 
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.RemovedSlot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("SlotStartUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SlotStartUtc")
+                        .IsUnique();
+
+                    b.ToTable("RemovedSlots");
+                });
+
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.SlotOverride", b =>
                 {
                     b.Property<int>("Id")

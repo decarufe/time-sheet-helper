@@ -1,0 +1,28 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "user-specified (multi-universe)",
+      "assigned_at": "2026-09-01T08:31:58-04:00"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "slim-2026-09-01": {
+      "assignment_id": "slim-2026-09-01",
+      "created_at": "2026-09-01T08:31:58-04:00",
+      "universe": "user-specified (multi-universe)",
+      "note": "Names explicitly provided by user; single-universe casting intentionally overridden.",
+      "cast": {
+        "architect": "Yoda",
+        "pm": "Morpheus",
+        "frontend": "Cendrillon",
+        "backend": "Glados",
+        "tester": "Inspecteur Gadget",
+        "security": "Mafia Boy",
+        "designer": "Martha Stewart",
+        "cloud": "Zeus",
+        "devops": "R2-D2",
+        "user": "Jar Jar Binks"
+      }
+    }
+  }
+}

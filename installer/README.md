@@ -15,23 +15,21 @@ Dans `%LOCALAPPDATA%\Programs\TimeSheetHelper` :
 
 | Élément                       | Rôle                                                                                                                                                                                                 |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TimeSheetHelper.exe`         | l'application d'arrière-plan : icône de notification, serveur web local (`http://localhost:5178`), sources. Elle démarre avec la session Windows (clé `HKCU\…\Run`).                                 |
-| `TimeSheetHelper.Desktop.exe` | la fenêtre (WebView2) qui affiche l'application. Raccourci du menu Démarrer ; l'icône de notification l'ouvre aussi. Elle démarre l'application si elle ne tourne pas ; la fermer la laisse tourner. |
+| `TimeSheetHelper.exe`         | l'application d'arrière-plan : icône de notification, serveur web local (`http://localhost:5178`), sources. Elle démarre avec la session Windows (clé `HKCU\…\Run`). Le raccourci du menu Démarrer la lance avec `--open` : elle démarre si besoin et ouvre l'interface dans le **navigateur par défaut** (Edge, en général). L'icône de notification fait de même. |
 | `plugins\<paquet>\`           | les sources fournies (`windows-activity`, `devops`, `microsoft-365`), chargées au démarrage. Elles se désactivent depuis la page **Sources**.                                                        |
 | `vscode\*.vsix`               | l'extension VS Code (si construite), installée avec `code --install-extension` quand VS Code est présent.                                                                                            |
 
-L'application et la fenêtre communiquent en HTTP sur l'adresse `Urls` de `appsettings.json`
-(`appsettings.Local.json` l'emporte). Les deux processus restent dans la session de l'utilisateur : la
+L'interface est servie en HTTP sur l'adresse `Urls` de `appsettings.json` (`appsettings.Local.json` l'emporte) et
+ouverte dans le navigateur. L'application reste dans la session de l'utilisateur : la
 surveillance de la fenêtre active, Microsoft 365 (connexion unique Windows) et le Gestionnaire
 d'identification Windows en dépendent, ce qui exclut un service Windows en session 0.
 
 Le MSI n'installe jamais `appsettings.Local.json`, les données (`%LOCALAPPDATA%\TimeSheetHelper`) ni les
-secrets : une mise à jour ou une désinstallation n'y touche pas. L'application et la fenêtre en cours sont
-fermées pendant une mise à jour. Les plugins installés par l'utilisateur (page **Sources** ou
+secrets : une mise à jour ou une désinstallation n'y touche pas. L'application en cours est
+fermée pendant une mise à jour. Les plugins installés par l'utilisateur (page **Sources** ou
 `TimeSheetHelper plugins install`) vivent dans `%LOCALAPPDATA%\TimeSheetHelper\plugins` et survivent aussi.
 
-Prérequis sur le poste de l'utilisateur : Windows 10/11 x64 et le runtime **WebView2** (présent sur Windows 11 ;
-sur Windows 10, sans lui la fenêtre ouvre l'application dans le navigateur par défaut).
+Prérequis sur le poste de l'utilisateur : Windows 10/11 x64 et un navigateur (Edge est inclus dans Windows).
 
 ### Construire le MSI
 

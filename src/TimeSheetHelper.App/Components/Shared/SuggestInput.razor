@@ -1,0 +1,186 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* Accessible combobox (ARIA 1.2 list autocomplete): the input keeps the focus, the arrow keys move a highlight in the listbox
+   (aria-activedescendant), Enter picks it, Escape closes it. Mouse picks use click; mousedown is cancelled so the input keeps focus. *@
+<div class="suggest">
+    <input @ref="input" id="@Id" type="text" role="combobox" autocomplete="off" spellcheck="false"
+           aria-autocomplete="list" aria-haspopup="listbox"
+           aria-expanded="@(search.IsOpen ? "true" : "false")"
+           aria-controls="@(search.Options.Count > 0 ? listId : null)"
+           aria-activedescendant="@ActiveOptionId"
+           placeholder="@Placeholder" value="@Value"
+           @oninput="OnInputAsync" @onchange="OnChangeAsync" @onblur="OnBlur"
+           @onkeydown="OnKeyDownAsync" @onkeydown:stopPropagation="@search.IsOpen" />
+
+    <span class="visually-hidden" role="status" aria-live="polite">@ForecastSuggestions.StatusText(search)</span>
+
+    @if (search.IsOpen)
+    {
+        <div class="popup" @onmousedown:preventDefault>
+            @if (search.Options.Count > 0)
+            {
+                <ul id="@listId" class="options" role="listbox" aria-label="@Label">
+                    @for (var i = 0; i < search.Options.Count; i++)
+                    {
+                        var option = search.Options[i];
+                        var active = i == search.ActiveIndex;
+                        <li id="@OptionId(i)" role="option" aria-selected="@(active ? "true" : "false")" class="@(active ? "option active" : "option")"
+                            @onclick="() => SelectAsync(option)">
+                            <span class="primary">@option.Primary</span>
+                            @if (!string.IsNullOrEmpty(option.Secondary))
+                            {
+                                <span class="secondary">@option.Secondary</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (search.Status == SuggestionStatus.Loading)
+            {
+                <p class="status" aria-hidden="true"><span class="spinner"></span> Recherche dans Forecast…</p>
+            }
+            else if (search.Status == SuggestionStatus.Empty)
+            {
+                <p class="status" aria-hidden="true">Aucun résultat dans Forecast.</p>
+            }
+            else if (search.Error is { } error)
+            {
+                <p class="status warn" aria-hidden="true">@error</p>
+            }
+
+            @if (search.HasMore)
+            {
+                <p class="status" aria-hidden="true">Plus de résultats… précisez votre saisie pour affiner.</p>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private readonly string listId = $"suggest-list-{Guid.NewGuid():N}";
+    private ElementReference input;
+    private SuggestionSearch search = default!;
+    private IJSObjectReference? module;
+    private int scrolledIndex = -1;
+    private bool pickedSinceTyping;
+
+    /// <summary>The id of the input (for the &lt;label for&gt; of the caller).</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    /// <summary>Accessible name of the list of suggestions.</summary>
+    [Parameter] public string Label { get; set; } = "Suggestions";
+
+    [Parameter] public string? Placeholder { get; set; }
+
+    [Parameter] public string Value { get; set; } = "";
+
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Runs the search for the text typed (once typing paused); called with a token canceled when the text changes again.</summary>
+    [Parameter, EditorRequired] public Func<string, CancellationToken, Task<SuggestionBatch>> Search { get; set; } = default!;
+
+    /// <summary>A suggestion was picked (mouse, or Enter on the highlighted line).</summary>
+    [Parameter] public EventCallback<SuggestionOption> OnSelected { get; set; }
+
+    /// <summary>The user finished editing the text (focus left the field, or Enter): raised with the final text.</summary>
+    [Parameter] public EventCallback<string> OnCommit { get; set; }
+
+    [Parameter] public int MinLength { get; set; } = TimeSheetHelper.Forecast.ForecastLookup.MinQueryLength;
+
+    public async ValueTask FocusAsync()
+    {
+        try { await input.FocusAsync(); }
+        catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
+    }
+
+    protected override void OnInitialized()
+    {
+        search = new SuggestionSearch((text, token) => Search(text, token), MinLength);
+        search.Changed += OnSearchChanged;
+    }
+
+    private string? ActiveOptionId => search.ActiveIndex >= 0 && search.ActiveIndex < search.Options.Count ? OptionId(search.ActiveIndex) : null;
+
+    private string OptionId(int index) => $"{listId}-{index}";
+
+    private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task OnInputAsync(ChangeEventArgs e)
+    {
+        pickedSinceTyping = false;
+        var text = e.Value?.ToString() ?? "";
+        await ValueChanged.InvokeAsync(text);
+        _ = search.InputAsync(text);
+    }
+
+    // Enter on a suggestion also makes the browser raise "change" with the text typed before the pick: committing it would undo the pick.
+    private Task OnChangeAsync(ChangeEventArgs e) =>
+        pickedSinceTyping ? Task.CompletedTask : OnCommit.InvokeAsync(e.Value?.ToString() ?? "");
+
+    private void OnBlur() => search.Close();
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown" when search.IsOpen:
+                search.MoveActive(1);
+                break;
+            case "ArrowDown" when Value.Trim().Length > 0:
+                _ = search.InputAsync(Value);
+                break;
+            case "ArrowUp" when search.IsOpen:
+                search.MoveActive(-1);
+                break;
+            case "Escape" when search.IsOpen:
+                search.Close();
+                break;
+            case "Enter" when search.Active is { } option:
+                await SelectAsync(option);
+                break;
+        }
+    }
+
+    private async Task SelectAsync(SuggestionOption option)
+    {
+        pickedSinceTyping = true;
+        search.Close();
+        await OnSelected.InvokeAsync(option);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (firstRender)
+            {
+                module = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Shared/SuggestInput.razor.js");
+                await module.InvokeVoidAsync("attach", input);
+            }
+
+            if (module is not null && search.ActiveIndex != scrolledIndex)
+            {
+                scrolledIndex = search.ActiveIndex;
+                if (ActiveOptionId is { } id)
+                    await module.InvokeVoidAsync("scrollOptionIntoView", id);
+            }
+        }
+        catch (Exception)
+        {
+            // Without the script the list still works with the mouse and the keys; only the caret may move with the arrows.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        search.Changed -= OnSearchChanged;
+        search.Dispose();
+        if (module is not null)
+        {
+            try { await module.DisposeAsync(); }
+            catch (Exception) { /* circuit already gone */ }
+        }
+    }
+}

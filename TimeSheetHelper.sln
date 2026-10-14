@@ -29,8 +29,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.Plugins.Abs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.TestPlugin", "tests\TimeSheetHelper.TestPlugin\TimeSheetHelper.TestPlugin.csproj", "{2ED2B8EF-4C22-4C39-AE88-944A4A738DF6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TimeSheetHelper.Desktop", "src\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj", "{049CA7BD-01BB-4999-8042-975883B66242}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -173,18 +171,6 @@ Global
 		{2ED2B8EF-4C22-4C39-AE88-944A4A738DF6}.Release|x64.Build.0 = Release|Any CPU
 		{2ED2B8EF-4C22-4C39-AE88-944A4A738DF6}.Release|x86.ActiveCfg = Release|Any CPU
 		{2ED2B8EF-4C22-4C39-AE88-944A4A738DF6}.Release|x86.Build.0 = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|x64.Build.0 = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Debug|x86.Build.0 = Debug|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|Any CPU.Build.0 = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|x64.ActiveCfg = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|x64.Build.0 = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|x86.ActiveCfg = Release|Any CPU
-		{049CA7BD-01BB-4999-8042-975883B66242}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -201,6 +187,5 @@ Global
 		{C86C9818-FB1F-4D76-99E7-A35360098E16} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{7A530CAC-BAE5-4FF7-B906-0AAF7AB6CD85} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{2ED2B8EF-4C22-4C39-AE88-944A4A738DF6} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
-		{049CA7BD-01BB-4999-8042-975883B66242} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

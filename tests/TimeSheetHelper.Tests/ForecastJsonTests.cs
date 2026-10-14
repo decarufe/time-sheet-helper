@@ -63,6 +63,19 @@ public class ForecastJsonTests
         Assert.Equal("740", entry.ProjectId);
     }
 
+    [Theory]
+    [InlineData(0.2, 0.25)]
+    [InlineData(0.8, 0.75)]
+    [InlineData(2.2, 2.25)]
+    [InlineData(3.2, 3.25)]
+    [InlineData(1.5, 1.5)]
+    public void Hours_rounded_to_one_decimal_by_forecast_snap_back_to_the_quarter_hour(double served, double expected)
+    {
+        var entry = Assert.Single(ForecastJson.ParseTimeEntries(Json(
+            $$"""{"entries":[{"date":"2026-10-05","total_hours":{{served.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}]}""")));
+        Assert.Equal((decimal)expected, entry.Hours);
+    }
+
     [Fact]
     public void Codes_written_in_the_names_are_extracted_and_stripped()
     {
