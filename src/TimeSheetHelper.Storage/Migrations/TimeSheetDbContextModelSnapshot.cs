@@ -94,6 +94,9 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsFavorite")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("LastSeenUtc")
                         .HasColumnType("TEXT");
 
@@ -114,6 +117,25 @@ namespace TimeSheetHelper.Storage.Migrations
                         .IsUnique();
 
                     b.ToTable("ForecastTasks");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Plugins.InstalledPlugin", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("InstalledPlugins");
                 });
 
             modelBuilder.Entity("TimeSheetHelper.Core.Rules.Rule", b =>

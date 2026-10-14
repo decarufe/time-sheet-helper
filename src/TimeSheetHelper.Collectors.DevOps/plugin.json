@@ -1,0 +1,9 @@
+{
+  "id": "devops",
+  "name": "GitHub, Azure DevOps et Git local",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entryAssembly": "TimeSheetHelper.Collectors.DevOps.dll",
+  "description": "Commits, pull requests, éléments de travail et dépôts locaux.",
+  "author": "Time Sheet Helper"
+}

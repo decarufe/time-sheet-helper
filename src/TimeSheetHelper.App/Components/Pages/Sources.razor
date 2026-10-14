@@ -2,22 +2,18 @@
 @rendermode InteractiveServer
 @implements IDisposable
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using TimeSheetHelper.App.Plugins
 @using TimeSheetHelper.App.Services
 @using TimeSheetHelper.App.Sync
-@using TimeSheetHelper.Collectors.DevOps.Common
-@using TimeSheetHelper.Collectors.Microsoft365
-@using TimeSheetHelper.Collectors.Windows
-@using TimeSheetHelper.Collectors.Windows.VsCode
 @using TimeSheetHelper.Core.Collectors
 @using TimeSheetHelper.Core.Secrets
 @using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Plugins
 @using TimeSheetHelper.Storage
-@inject FocusTracker Tracker
-@inject VsCodeIngestService VsCode
+@inject PluginHost Plugins
 @inject SyncScheduler Scheduler
 @inject ISecretStore Secrets
-@inject IProcessRunner Processes
-@inject GraphAuthenticator Graph
 @inject ForecastRunner ForecastOps
 @inject IForecastConnector ForecastConnector
 @inject ForecastTaskReader TaskReader
@@ -30,10 +26,10 @@
     <header class="page-header">
         <h1>Sources</h1>
         <p class="muted">
-            D'où viennent les activités, et les accès dont l'application a besoin.
+            D'où viennent les activités. Chaque source est un plugin : vous pouvez l'activer, la régler ou la retirer sans redémarrer l'application.
             @if (Scheduler.IsRunning)
             {
-                <span class="pill running">Synchronisation en cours@(Scheduler.CurrentCollector is { } c ? $" : {UiLabels.Collector(c)}" : "")…</span>
+                <span class="pill running">Synchronisation en cours@(Scheduler.CurrentCollector is { } c ? $" : {c}" : "")…</span>
             }
             else if (Scheduler.NextRunUtc is { } next)
             {
@@ -50,262 +46,297 @@
         <OpStatus State="@Op("sync:*")" />
     </header>
 
-    <h2>Surveillance locale</h2>
+    <h2>Sources</h2>
+    <p class="muted">Les sources « synchronisées » sont interrogées pour la semaine en cours (et la précédente le lundi matin) ; les autres enregistrent en continu ou reçoivent leurs données.</p>
     <div class="cards">
-        <article class="card">
-            <header class="card-head">
-                <h3>Fenêtre active (Windows)</h3>
-                @if (Tracker.IsPaused)
-                {
-                    <span class="pill warn">En pause</span>
-                }
-                else
-                {
-                    <span class="pill ok">Active</span>
-                }
-            </header>
-            @if (Tracker.IsPaused)
-            {
-                <p>La surveillance de la fenêtre active est en pause : rien n'est enregistré.</p>
-            }
-            else if (Tracker.Current is { } current)
-            {
-                <dl>
-                    <dt>Maintenant</dt>
-                    <dd>
-                        @switch (current.State)
-                        {
-                            case FocusState.Idle:
-                                <span>Inactif (aucune saisie clavier ou souris)</span>
-                                break;
-                            case FocusState.Locked:
-                                <span>Session verrouillée</span>
-                                break;
-                            default:
-                                <strong>@current.ProcessName</strong>
-                                @if (!string.IsNullOrWhiteSpace(current.Title))
-                                {
-                                    <span class="muted"> — @current.Title</span>
-                                }
-                                break;
-                        }
-                    </dd>
-                    @if ((current.FilePath ?? current.Folder) is { } where)
-                    {
-                        <dt>Fichier / dossier</dt>
-                        <dd><code>@where</code></dd>
-                    }
-                    @if (Tracker.CurrentSinceUtc is { } since)
-                    {
-                        <dt>Depuis</dt>
-                        <dd>@since.ToLocalTime().ToString("HH:mm:ss")</dd>
-                    }
-                </dl>
-            }
-            else
-            {
-                <p class="muted">En attente du premier changement de fenêtre…</p>
-            }
-            <div class="card-actions">
-                <button @onclick="TogglePause">@(Tracker.IsPaused ? "Reprendre la surveillance" : "Mettre en pause")</button>
-                <a href="activite">Voir l'activité brute</a>
-            </div>
-        </article>
-
-        <article class="card">
-            <header class="card-head">
-                <h3>Extension VS Code</h3>
-                @if (VsCode.LastHeartbeatUtc is { } beat && Now - beat < TimeSpan.FromMinutes(5))
-                {
-                    <span class="pill ok">Connectée</span>
-                }
-                else
-                {
-                    <span class="pill muted-pill">Aucun signal récent</span>
-                }
-            </header>
-            @if (VsCode.LastHeartbeatUtc is { } lastBeat)
-            {
-                <p>Dernier signal reçu @UiLabels.Ago(lastBeat, Now) (@lastBeat.ToLocalTime().ToString("HH:mm:ss")).</p>
-            }
-            else
-            {
-                <p>Aucun signal reçu depuis le démarrage de l'application.</p>
-            }
-            <p class="hint">L'extension envoie un signal toutes les 30 secondes environ quand VS Code est ouvert. Elle lit le jeton dans <code>@IngestEndpoints.TokenFilePath</code>.</p>
-        </article>
-    </div>
-
-    <h2>Sources synchronisées</h2>
-    <p class="muted">Synchronisées automatiquement pour la semaine en cours (et la semaine précédente le lundi matin), ou à la demande.</p>
-    <div class="cards">
-        @foreach (var collector in Scheduler.Collectors)
+        @foreach (var plugin in Plugins.Plugins)
         {
-            var name = collector.Name;
-            var status = statuses.GetValueOrDefault(name);
-            var last = Scheduler.GetLastResult(name);
-            var key = "sync:" + name;
+            var id = plugin.Id;
+            var descriptor = plugin.Descriptor;
+            var status = statuses.GetValueOrDefault(id);
+            var enableKey = "enable:" + id;
             <article class="card">
                 <header class="card-head">
-                    <h3>@UiLabels.Collector(name) <span class="code-name">@name</span></h3>
-                    @if (status is null)
+                    <h3>@descriptor.DisplayName <span class="code-name">@id</span></h3>
+                    @switch (plugin.State)
                     {
-                        <span class="pill muted-pill">Vérification…</span>
-                    }
-                    else if (status.IsConfigured)
-                    {
-                        <span class="pill ok">Prête</span>
-                    }
-                    else
-                    {
-                        <span class="pill warn">À configurer</span>
+                        case PluginRunState.Running when status is null:
+                            <span class="pill muted-pill">Vérification…</span>
+                            break;
+                        case PluginRunState.Running when status!.IsConfigured:
+                            <span class="pill ok">@(status.Message ?? "Prête")</span>
+                            break;
+                        case PluginRunState.Running:
+                            <span class="pill warn">À configurer</span>
+                            break;
+                        case PluginRunState.Failed:
+                            <span class="pill warn">Erreur</span>
+                            break;
+                        case PluginRunState.Unsupported:
+                            <span class="pill muted-pill">Non disponible</span>
+                            break;
+                        default:
+                            <span class="pill muted-pill">Désactivée</span>
+                            break;
                     }
                 </header>
-                @if (status is { IsConfigured: false })
+                @if (descriptor.Description is { Length: > 0 } description)
                 {
-                    <p class="warn-text">@status.Message</p>
+                    <p class="hint">@description</p>
                 }
-                else if (status?.Message is { } info)
-                {
-                    <p>@info</p>
-                }
+                <p class="hint">@ModeLabel(descriptor.Mode) · @(string.Join(", ", descriptor.Emits.Select(e => e.Traits.DisplayName)))</p>
 
-                @if (last is null)
+                @if (plugin.Error is { } error)
                 {
-                    <p class="muted">Pas encore synchronisée depuis le démarrage.</p>
+                    <p class="@(plugin.State == PluginRunState.Failed ? "error-text" : "muted")">@error</p>
                 }
-                else
+                @if (plugin.State == PluginRunState.Running && status is not null)
                 {
-                    <p>
-                        @switch (last.Outcome)
-                        {
-                            case CollectorSyncOutcome.Succeeded:
-                                <span>Dernière synchronisation @UiLabels.Ago(last.FinishedUtc, Now) : <strong>@last.EventCount</strong> événement(s).</span>
-                                break;
-                            case CollectorSyncOutcome.NotConfigured:
-                                <span>Ignorée @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
-                                break;
-                            default:
-                                <span class="error-text">Échec @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
-                                break;
-                        }
-                    </p>
-                    @if (last.Warnings.Count > 0)
+                    @if (!status.IsConfigured && status.Message is { } problem)
                     {
-                        <ul class="warnings">
-                            @foreach (var warning in last.Warnings.Take(5))
+                        <p class="warn-text">@problem</p>
+                    }
+                    @if (status.Details is { Count: > 0 } details)
+                    {
+                        <dl>
+                            @foreach (var detail in details)
                             {
-                                <li>@warning</li>
+                                <dt>@detail.Label</dt>
+                                <dd>@detail.Value</dd>
                             }
-                            @if (last.Warnings.Count > 5)
-                            {
-                                <li class="muted">… et @(last.Warnings.Count - 5) autre(s).</li>
-                            }
-                        </ul>
+                        </dl>
                     }
                 }
+
+                @if (plugin.State == PluginRunState.Running)
+                {
+                    @foreach (var collector in plugin.Collectors)
+                    {
+                        var name = collector.Name;
+                        var last = Scheduler.GetLastResult(name);
+                        var key = "sync:" + name;
+                        <div class="collector">
+                            <strong>@name</strong>
+                            @if (last is null)
+                            {
+                                <span class="muted"> — pas encore synchronisée depuis le démarrage.</span>
+                            }
+                            else
+                            {
+                                @switch (last.Outcome)
+                                {
+                                    case CollectorSyncOutcome.Succeeded:
+                                        <span> — @UiLabels.Ago(last.FinishedUtc, Now) : <strong>@last.EventCount</strong> événement(s).</span>
+                                        break;
+                                    case CollectorSyncOutcome.NotConfigured:
+                                        <span> — ignorée @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
+                                        break;
+                                    default:
+                                        <span class="error-text"> — échec @UiLabels.Ago(last.FinishedUtc, Now) : @last.Message</span>
+                                        break;
+                                }
+                                @if (last.Warnings.Count > 0)
+                                {
+                                    <ul class="warnings">
+                                        @foreach (var warning in last.Warnings.Take(5))
+                                        {
+                                            <li>@warning</li>
+                                        }
+                                        @if (last.Warnings.Count > 5)
+                                        {
+                                            <li class="muted">… et @(last.Warnings.Count - 5) autre(s).</li>
+                                        }
+                                    </ul>
+                                }
+                            }
+                            <div class="card-actions">
+                                <button disabled="@(IsBusy(key) || IsBusy("sync:*"))" @onclick="() => SyncAsync(name)">
+                                    @(IsBusy(key) ? "Synchronisation…" : "Synchroniser cette semaine")
+                                </button>
+                            </div>
+                            <OpStatus State="@Op(key)" />
+                        </div>
+                    }
+
+                    @if (descriptor.PushRoute is { } route)
+                    {
+                        <p class="hint">
+                            Reçoit sur <code>/ingest/@route</code>. L'extension lit le jeton dans <code>@IngestEndpoints.TokenFilePath</code>.
+                        </p>
+                    }
+                }
+
+                @if (status?.Actions is { Count: > 0 } actions && plugin.State == PluginRunState.Running)
+                {
+                    var actionKey = "action:" + id;
+                    <div class="card-actions">
+                        @foreach (var action in actions)
+                        {
+                            <button class="@(action.Primary ? "primary" : null)" disabled="@IsBusy(actionKey)"
+                                    @onclick="() => RunActionAsync(plugin, action)">@action.Label</button>
+                        }
+                    </div>
+                    <OpStatus State="@Op(actionKey)" />
+                }
+
+                @if (descriptor.Config.Count > 0)
+                {
+                    <details class="settings" open="@(plugin.State == PluginRunState.Running && status is { IsConfigured: false })">
+                        <summary>Réglages</summary>
+                        @{ var form = EditsOf(plugin); }
+                        @foreach (var field in descriptor.Config)
+                        {
+                            var inputId = $"cfg-{id}-{field.Key}";
+                            <div class="field">
+                                <label for="@inputId">@field.Label@(field.Required ? " *" : "")</label>
+                                @switch (field.Type)
+                                {
+                                    case ConfigFieldType.Boolean:
+                                        <input id="@inputId" type="checkbox" checked="@IsTrue(form.GetValueOrDefault(field.Key))"
+                                               @onchange="e => SetBool(id, field.Key, (bool)e.Value!)" />
+                                        break;
+                                    case ConfigFieldType.TextList:
+                                        <textarea id="@inputId" rows="4" spellcheck="false" placeholder="@field.Placeholder"
+                                                  @oninput="e => SetEdit(id, field.Key, e.Value?.ToString())">@form.GetValueOrDefault(field.Key)</textarea>
+                                        break;
+                                    default:
+                                        <input id="@inputId" type="@(field.Type == ConfigFieldType.Number ? "number" : "text")" placeholder="@field.Placeholder"
+                                               value="@form.GetValueOrDefault(field.Key)"
+                                               @oninput="e => SetEdit(id, field.Key, e.Value?.ToString())" />
+                                        break;
+                                }
+                                @if (field.Help is { Length: > 0 } help)
+                                {
+                                    <span class="hint">@help</span>
+                                }
+                            </div>
+                        }
+                        <div class="card-actions">
+                            <button class="primary" disabled="@(IsBusy("cfg:" + id) || !HasChanges(id))" @onclick="() => SaveConfigAsync(plugin)">Enregistrer les réglages</button>
+                        </div>
+                        <OpStatus State="@Op("cfg:" + id)" />
+                    </details>
+                }
+
+                @foreach (var secret in descriptor.Secrets)
+                {
+                    var configured = secretStates.GetValueOrDefault(secret.Name);
+                    var key = "secret:" + secret.Name;
+                    <div class="secret">
+                        <p>
+                            <strong>@secret.Label@(secret.Required ? " *" : "")</strong>
+                            <span class="pill @(configured ? "ok" : "muted-pill")">@(configured ? "Configuré" : "Absent")</span>
+                        </p>
+                        @if (secret.Help is { Length: > 0 } secretHelp)
+                        {
+                            <p class="hint">@secretHelp</p>
+                        }
+                        <div class="secret-row">
+                            <label class="visually-hidden" for="@("in-" + secret.Name)">@secret.Label</label>
+                            <input id="@("in-" + secret.Name)" type="password" autocomplete="off" spellcheck="false"
+                                   placeholder="@(configured ? "Nouvelle valeur pour remplacer" : "Coller la valeur")"
+                                   value="@secretInputs.GetValueOrDefault(secret.Name)"
+                                   @oninput="e => secretInputs[secret.Name] = e.Value?.ToString()" />
+                            <button class="primary" disabled="@(IsBusy(key) || string.IsNullOrWhiteSpace(secretInputs.GetValueOrDefault(secret.Name)))"
+                                    @onclick="() => SaveSecretAsync(plugin, secret)">
+                                @(configured ? "Remplacer" : "Enregistrer")
+                            </button>
+                        </div>
+                        @if (configured)
+                        {
+                            <div class="card-actions">
+                                @if (confirmDeleteSecret == secret.Name)
+                                {
+                                    <span class="confirm">
+                                        Supprimer ce jeton ?
+                                        <button class="danger" @onclick="() => DeleteSecretAsync(plugin, secret)">Confirmer</button>
+                                        <button @onclick="() => confirmDeleteSecret = null">Annuler</button>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <button class="danger-outline" @onclick="() => confirmDeleteSecret = secret.Name">Supprimer</button>
+                                }
+                            </div>
+                        }
+                        <OpStatus State="@Op(key)" />
+                    </div>
+                }
+
                 <div class="card-actions">
-                    <button disabled="@(IsBusy(key) || IsBusy("sync:*"))" @onclick="() => SyncAsync(name)">
-                        @(IsBusy(key) ? "Synchronisation…" : "Synchroniser cette semaine")
-                    </button>
+                    @if (plugin.State != PluginRunState.Unsupported)
+                    {
+                        <button class="@(plugin.Enabled ? null : "primary")" disabled="@IsBusy(enableKey)" @onclick="() => SetEnabledAsync(plugin, !plugin.Enabled)">
+                            @(plugin.Enabled ? "Désactiver" : "Activer")
+                        </button>
+                    }
+                    @if (plugin.Descriptor.Id == "focus-tracker")
+                    {
+                        <a href="activite">Voir l'activité brute</a>
+                    }
                 </div>
-                <OpStatus State="@Op(key)" />
+                <OpStatus State="@Op(enableKey)" />
             </article>
         }
     </div>
 
-    <h2>Accès et identifiants</h2>
-    <p class="muted">Les jetons sont conservés dans le Gestionnaire d'identification Windows. Ils ne sont jamais affichés.</p>
+    <h2>Paquets de plugins</h2>
+    <p class="muted">Un paquet est un dossier (ou un fichier .zip) contenant <code>plugin.json</code> et un ou plusieurs plugins de source. Les paquets fournis avec l'application ne peuvent être que désactivés.</p>
     <div class="cards">
-        @foreach (var secret in SecretDefinitions)
+        @foreach (var package in Plugins.Packages.OrderBy(p => p.Manifest.Name, StringComparer.CurrentCultureIgnoreCase))
         {
-            var configured = secretStates.GetValueOrDefault(secret.Name);
-            var key = "secret:" + secret.Name;
+            var manifest = package.Manifest;
+            var key = "package:" + manifest.Id;
             <article class="card">
                 <header class="card-head">
-                    <h3>@secret.Label</h3>
-                    @if (configured)
-                    {
-                        <span class="pill ok">Configuré</span>
-                    }
-                    else
-                    {
-                        <span class="pill muted-pill">Absent</span>
-                    }
+                    <h3>@manifest.Name <span class="code-name">@manifest.Id @manifest.Version</span></h3>
+                    <span class="pill @(package.IsBundled ? "muted-pill" : "ok")">@(package.IsBundled ? "Fourni" : "Installé")</span>
                 </header>
-                <p class="hint">@secret.Help</p>
-                <div class="secret-row">
-                    <label class="visually-hidden" for="@("in-" + secret.Name)">@secret.Label</label>
-                    <input id="@("in-" + secret.Name)" type="password" autocomplete="off" spellcheck="false"
-                           placeholder="@(configured ? "Nouvelle valeur pour remplacer" : "Coller la valeur")"
-                           value="@secretInputs.GetValueOrDefault(secret.Name)"
-                           @oninput="e => secretInputs[secret.Name] = e.Value?.ToString()" />
-                    <button class="primary" disabled="@(IsBusy(key) || string.IsNullOrWhiteSpace(secretInputs.GetValueOrDefault(secret.Name)))"
-                            @onclick="() => SaveSecretAsync(secret)">
-                        @(configured ? "Remplacer" : "Enregistrer")
-                    </button>
-                </div>
-                <div class="card-actions">
-                    @if (secret.Name == SecretNames.GitHubToken)
-                    {
-                        <button disabled="@IsBusy(key)" @onclick="UseGhTokenAsync">Utiliser gh auth token</button>
-                    }
-                    @if (configured)
-                    {
-                        @if (confirmDeleteSecret == secret.Name)
+                @if (manifest.Description is { Length: > 0 } packageDescription)
+                {
+                    <p class="hint">@packageDescription</p>
+                }
+                <p class="hint">Sources : @string.Join(", ", Plugins.Plugins.Where(p => p.Package.Id == manifest.Id).Select(p => p.Descriptor.DisplayName))</p>
+                @if (!package.IsBundled)
+                {
+                    <div class="card-actions">
+                        @if (confirmUninstall == manifest.Id)
                         {
                             <span class="confirm">
-                                Supprimer ce jeton ?
-                                <button class="danger" @onclick="() => DeleteSecretAsync(secret)">Confirmer</button>
-                                <button @onclick="() => confirmDeleteSecret = null">Annuler</button>
+                                Désinstaller ce paquet ?
+                                <button class="danger" @onclick="() => UninstallAsync(manifest.Id)">Confirmer</button>
+                                <button @onclick="() => confirmUninstall = null">Annuler</button>
                             </span>
                         }
                         else
                         {
-                            <button class="danger-outline" @onclick="() => confirmDeleteSecret = secret.Name">Supprimer</button>
+                            <button class="danger-outline" disabled="@IsBusy(key)" @onclick="() => confirmUninstall = manifest.Id">Désinstaller</button>
                         }
-                    }
-                </div>
+                    </div>
+                }
                 <OpStatus State="@Op(key)" />
             </article>
         }
-
-        <article class="card">
-            <header class="card-head">
-                <h3>Microsoft 365</h3>
-                @if (!Graph.IsConfigured)
-                {
-                    <span class="pill warn">À configurer</span>
-                }
-                else if (m365SignedIn is null)
-                {
-                    <span class="pill muted-pill">Vérification…</span>
-                }
-                else if (m365SignedIn == true)
-                {
-                    <span class="pill ok">Connecté</span>
-                }
-                else
-                {
-                    <span class="pill warn">Non connecté</span>
-                }
-            </header>
-            <p class="hint">Calendrier, courriels envoyés et conversations Teams (métadonnées seulement) via Microsoft Graph.</p>
-            @if (!Graph.IsConfigured)
-            {
-                <p class="warn-text">Inscription d'application manquante : renseignez <code>Microsoft365:TenantId</code> et <code>Microsoft365:ClientId</code> dans <code>appsettings.Local.json</code>.</p>
-            }
-            else
-            {
-                <div class="card-actions">
-                    <button class="primary" disabled="@IsBusy("m365")" @onclick="SignInM365Async">Se connecter</button>
-                    <button disabled="@(IsBusy("m365") || m365SignedIn != true)" @onclick="SignOutM365Async">Se déconnecter</button>
-                </div>
-                <p class="hint">La connexion ouvre une fenêtre Windows (ou le navigateur) pour choisir le compte.</p>
-            }
-            <OpStatus State="@Op("m365")" />
-        </article>
     </div>
+    @foreach (var issue in Plugins.Issues)
+    {
+        <p class="warn-text">⚠ @issue.Directory : @issue.Message</p>
+    }
+
+    <article class="card wide">
+        <header class="card-head"><h3>Installer un plugin</h3></header>
+        <p class="hint">Indiquez le chemin d'un dossier de plugin ou d'un fichier .zip, ou envoyez un .zip. Un paquet du même identifiant est remplacé. N'installez que des plugins de confiance : ils s'exécutent avec vos droits.</p>
+        <div class="secret-row">
+            <label class="visually-hidden" for="install-path">Chemin du plugin</label>
+            <input id="install-path" type="text" placeholder="C:\plugins\mon-plugin ou C:\plugins\mon-plugin.zip" spellcheck="false"
+                   value="@installPath" @oninput="e => installPath = e.Value?.ToString()" />
+            <button class="primary" disabled="@(IsBusy("install") || string.IsNullOrWhiteSpace(installPath))" @onclick="InstallFromPathAsync">Installer</button>
+        </div>
+        <div class="card-actions">
+            <label class="upload">Ou envoyer un .zip : <InputFile OnChange="InstallFromUploadAsync" accept=".zip" disabled="@IsBusy("install")" /></label>
+        </div>
+        <OpStatus State="@Op("install")" />
+    </article>
 
     <h2>Forecast</h2>
     <article class="card wide">
@@ -336,24 +367,17 @@
 </div>
 
 @code {
-    private sealed record SecretDefinition(string Name, string Label, string Help);
+    private const long MaxUploadBytes = 200L * 1024 * 1024;
 
-    private static readonly SecretDefinition[] SecretDefinitions =
-    [
-        new(SecretNames.GitHubToken, "Jeton GitHub",
-            "Jeton personnel (lecture seule : repo, read:org). Sans jeton, la session de GitHub CLI (gh) est utilisée si elle existe."),
-        new(SecretNames.AzureDevOpsPat, "Jeton d'accès Azure DevOps (PAT)",
-            "Portées en lecture : Code, Work Items, Build. Les organisations sont configurées dans AzureDevOps:Organizations."),
-        new(SecretNames.AnthropicApiKey, "Clé d'API Anthropic",
-            "Utilisée pour classer les activités avec Claude, uniquement si Engine:Claude:Enabled est activé."),
-    ];
-
-    private readonly Dictionary<string, CollectorStatus?> statuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SourceStatus?> statuses = [];
+    private readonly Dictionary<string, Dictionary<string, string?>> original = [];
+    private readonly Dictionary<string, Dictionary<string, string?>> edits = [];
     private readonly Dictionary<string, bool> secretStates = [];
     private readonly Dictionary<string, string?> secretInputs = [];
     private readonly Dictionary<string, OpState> ops = [];
     private string? confirmDeleteSecret;
-    private bool? m365SignedIn;
+    private string? confirmUninstall;
+    private string? installPath;
     private int activeTasks;
     private DateTime? lastTaskSeenUtc;
     private bool forecastHasCredentials;
@@ -374,18 +398,26 @@
         if (!firstRender)
             return;
 
-        Scheduler.Changed += OnSchedulerChanged;
-        refreshTimer = new System.Threading.Timer(_ => Refresh(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        Scheduler.Changed += OnChanged;
+        Plugins.Changed += OnPluginsChanged;
+        refreshTimer = new System.Threading.Timer(_ => _ = RefreshLiveAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
 
         // Status checks can be slow (gh, MSAL): run them after the first render, in parallel.
-        var checks = Scheduler.Collectors.Select(RefreshStatusAsync).ToList();
-        checks.Add(RefreshM365Async());
-        await Task.WhenAll(checks);
+        await RefreshStatusesAsync(Plugins.Plugins);
     }
 
     private OpState Op(string key) => ops.TryGetValue(key, out var state) ? state : OpState.Idle;
 
     private bool IsBusy(string key) => Op(key).Busy;
+
+    private static string ModeLabel(SourceExecutionMode mode) => mode switch
+    {
+        SourceExecutionMode.Pull => "Synchronisée",
+        SourceExecutionMode.Continuous => "En continu",
+        _ => "Reçoit des données",
+    };
+
+    private static bool IsTrue(string? value) => string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Runs a long operation without blocking the circuit; the returned text is shown as success.</summary>
     private async Task RunOpAsync(string key, string busyText, Func<Task<string?>> action)
@@ -407,35 +439,100 @@
             StateHasChanged();
     }
 
-    private async Task RefreshStatusAsync(ICollector collector)
+    private async Task RefreshStatusesAsync(IEnumerable<PluginState> plugins)
     {
-        try
+        var running = plugins.Where(p => p.State == PluginRunState.Running).ToList();
+        await Task.WhenAll(running.Select(async p =>
         {
-            statuses[collector.Name] = await collector.GetStatusAsync();
-        }
-        catch (Exception ex)
-        {
-            statuses[collector.Name] = new CollectorStatus(false, $"État indisponible : {ex.Message}");
-        }
+            statuses[p.Id] = await Plugins.GetStatusAsync(p.Id);
+            await InvokeAsync(StateHasChanged);
+        }));
+    }
+
+    /// <summary>Cheap, frequent refresh: continuous and push sources report live details; pull sources only on demand.</summary>
+    private async Task RefreshLiveAsync()
+    {
+        if (disposed)
+            return;
+        await RefreshStatusesAsync(Plugins.Plugins.Where(p => p.Descriptor.Mode != SourceExecutionMode.Pull));
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task RefreshM365Async()
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnPluginsChanged()
     {
-        try
+        if (disposed)
+            return;
+
+        // A source that was switched, reconfigured or installed: its old status and form values are stale.
+        foreach (var id in statuses.Keys.Except(Plugins.Plugins.Where(p => p.State == PluginRunState.Running).Select(p => p.Id)).ToList())
+            statuses.Remove(id);
+        RefreshSecretStates();
+        _ = InvokeAsync(async () =>
         {
-            m365SignedIn = Graph.IsConfigured && await Graph.IsSignedInAsync();
-        }
-        catch
-        {
-            m365SignedIn = false;
-        }
-        await InvokeAsync(StateHasChanged);
+            StateHasChanged();
+            await RefreshStatusesAsync(Plugins.Plugins);
+        });
     }
+
+    private Dictionary<string, string?> EditsOf(PluginState plugin)
+    {
+        if (!edits.TryGetValue(plugin.Id, out var current))
+        {
+            original[plugin.Id] = new Dictionary<string, string?>(Plugins.GetConfigValues(plugin.Id), StringComparer.OrdinalIgnoreCase);
+            edits[plugin.Id] = current = new Dictionary<string, string?>(original[plugin.Id], StringComparer.OrdinalIgnoreCase);
+        }
+
+        return current;
+    }
+
+    private void SetEdit(string pluginId, string key, string? value) => edits[pluginId][key] = value;
+
+    private void SetBool(string pluginId, string key, bool value) => SetEdit(pluginId, key, value ? "true" : "false");
+
+    private bool HasChanges(string pluginId) =>
+        edits.TryGetValue(pluginId, out var current) && original.TryGetValue(pluginId, out var before)
+        && current.Any(kv => !string.Equals(Normalize(kv.Value), Normalize(before.GetValueOrDefault(kv.Key)), StringComparison.Ordinal));
+
+    private static string Normalize(string? value) => (value ?? "").ReplaceLineEndings("\n").Trim();
+
+    private Task SaveConfigAsync(PluginState plugin) =>
+        RunOpAsync("cfg:" + plugin.Id, "Enregistrement…", async () =>
+        {
+            var before = original[plugin.Id];
+            var changed = edits[plugin.Id]
+                .Where(kv => !string.Equals(Normalize(kv.Value), Normalize(before.GetValueOrDefault(kv.Key)), StringComparison.Ordinal))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            await Plugins.SaveConfigAsync(plugin.Id, changed);
+            edits.Remove(plugin.Id);
+            original.Remove(plugin.Id);
+            return plugin.Enabled ? "Réglages enregistrés ; la source a été redémarrée." : "Réglages enregistrés.";
+        });
+
+    private Task SetEnabledAsync(PluginState plugin, bool enabled) =>
+        RunOpAsync("enable:" + plugin.Id, enabled ? "Activation…" : "Désactivation…", async () =>
+        {
+            await Plugins.SetEnabledAsync(plugin.Id, enabled);
+            return plugin.State switch
+            {
+                PluginRunState.Failed => throw new InvalidOperationException(plugin.Error ?? "La source n'a pas pu démarrer."),
+                PluginRunState.Unsupported => plugin.Error,
+                _ => enabled ? "Activée." : "Désactivée.",
+            };
+        });
+
+    private Task RunActionAsync(PluginState plugin, SourceAction action) =>
+        RunOpAsync("action:" + plugin.Id, action.Label + "… terminez l'opération dans la fenêtre ouverte le cas échéant.", async () =>
+        {
+            var result = await Plugins.ExecuteActionAsync(plugin.Id, action.Id);
+            statuses[plugin.Id] = await Plugins.GetStatusAsync(plugin.Id);
+            return result.Ok ? result.Message ?? "Terminé." : throw new InvalidOperationException(result.Message ?? "Échec.");
+        });
 
     private void RefreshSecretStates()
     {
-        foreach (var secret in SecretDefinitions)
+        foreach (var secret in Plugins.Plugins.SelectMany(p => p.Descriptor.Secrets))
         {
             try
             {
@@ -455,14 +552,11 @@
         lastTaskSeenUtc = await db.ForecastTasks.MaxAsync(t => (DateTime?)t.LastSeenUtc);
     }
 
-    private void TogglePause() => Tracker.SetPaused(!Tracker.IsPaused);
-
     private Task SyncAsync(string? collectorName) =>
         RunOpAsync(collectorName is null ? "sync:*" : "sync:" + collectorName, "Synchronisation en cours…", async () =>
         {
             var results = await Scheduler.RunNowAsync(collectorName);
-            foreach (var collector in Scheduler.Collectors.Where(c => collectorName is null || c.Name == collectorName))
-                _ = RefreshStatusAsync(collector);
+            await RefreshStatusesAsync(Plugins.Plugins);
             var count = results.Sum(r => r.EventCount);
             var failed = results.Count(r => r.Outcome == CollectorSyncOutcome.Failed);
             return failed > 0
@@ -470,8 +564,8 @@
                 : $"Terminé : {count} événement(s).";
         });
 
-    private Task SaveSecretAsync(SecretDefinition secret) =>
-        RunOpAsync("secret:" + secret.Name, "Enregistrement…", () =>
+    private Task SaveSecretAsync(PluginState plugin, SecretRequirement secret) =>
+        RunOpAsync("secret:" + secret.Name, "Enregistrement…", async () =>
         {
             var value = secretInputs.GetValueOrDefault(secret.Name)?.Trim();
             if (string.IsNullOrEmpty(value))
@@ -479,66 +573,56 @@
             Secrets.Set(secret.Name, value);
             secretInputs[secret.Name] = null;
             RefreshSecretStates();
-            RefreshRelatedStatus(secret.Name);
-            return Task.FromResult<string?>("Enregistré.");
+            await RefreshStatusesAsync([plugin]);
+            return "Enregistré.";
         });
 
-    private Task DeleteSecretAsync(SecretDefinition secret)
+    private Task DeleteSecretAsync(PluginState plugin, SecretRequirement secret)
     {
         confirmDeleteSecret = null;
-        return RunOpAsync("secret:" + secret.Name, "Suppression…", () =>
+        return RunOpAsync("secret:" + secret.Name, "Suppression…", async () =>
         {
             Secrets.Delete(secret.Name);
             RefreshSecretStates();
-            RefreshRelatedStatus(secret.Name);
-            return Task.FromResult<string?>("Supprimé.");
+            await RefreshStatusesAsync([plugin]);
+            return "Supprimé.";
         });
     }
 
-    private Task UseGhTokenAsync() =>
-        RunOpAsync("secret:" + SecretNames.GitHubToken, "Lecture du jeton de GitHub CLI…", async () =>
+    private Task InstallFromPathAsync() =>
+        RunOpAsync("install", "Installation…", async () =>
         {
-            var result = await Processes.RunAsync("gh", ["auth", "token"]);
-            if (result is null)
-                throw new InvalidOperationException("GitHub CLI (gh) introuvable : installez-le ou ajoutez-le au PATH.");
-            var token = result.StandardOutput.Trim();
-            if (!result.Succeeded || token.Length == 0)
-                throw new InvalidOperationException("Aucune session gh : exécutez « gh auth login » dans un terminal.");
-            Secrets.Set(SecretNames.GitHubToken, token);
-            RefreshSecretStates();
-            RefreshRelatedStatus(SecretNames.GitHubToken);
-            return "Jeton de la session gh enregistré.";
+            var result = await Plugins.InstallAsync(installPath!.Trim().Trim('"'));
+            installPath = null;
+            return result.Message;
         });
 
-    private void RefreshRelatedStatus(string secretName)
+    private Task InstallFromUploadAsync(InputFileChangeEventArgs e) =>
+        RunOpAsync("install", "Envoi et installation…", async () =>
+        {
+            var temp = Path.Combine(Path.GetTempPath(), $"tsh-plugin-{Guid.NewGuid():N}.zip");
+            try
+            {
+                await using (var input = e.File.OpenReadStream(MaxUploadBytes))
+                await using (var output = File.Create(temp))
+                    await input.CopyToAsync(output);
+                return (await Plugins.InstallAsync(temp)).Message;
+            }
+            finally
+            {
+                File.Delete(temp);
+            }
+        });
+
+    private Task UninstallAsync(string packageId)
     {
-        var collectorName = secretName switch
+        confirmUninstall = null;
+        return RunOpAsync("package:" + packageId, "Désinstallation…", async () =>
         {
-            SecretNames.GitHubToken => "github",
-            SecretNames.AzureDevOpsPat => "azuredevops",
-            _ => null,
-        };
-        if (Scheduler.Collectors.FirstOrDefault(c => c.Name == collectorName) is { } collector)
-            _ = RefreshStatusAsync(collector);
+            await Plugins.UninstallAsync(packageId);
+            return "Désinstallé.";
+        });
     }
-
-    private Task SignInM365Async() =>
-        RunOpAsync("m365", "Connexion à Microsoft 365… terminez la connexion dans la fenêtre ouverte.", async () =>
-        {
-            var user = await Graph.SignInAsync();
-            await RefreshM365Async();
-            foreach (var collector in Scheduler.Collectors.Where(c => c.Name is "calendar" or "email" or "teams"))
-                _ = RefreshStatusAsync(collector);
-            return user is null ? "Connecté." : $"Connecté en tant que {user}.";
-        });
-
-    private Task SignOutM365Async() =>
-        RunOpAsync("m365", "Déconnexion…", async () =>
-        {
-            await Graph.SignOutAsync();
-            await RefreshM365Async();
-            return "Déconnecté.";
-        });
 
     private Task ForecastLoginAsync() =>
         RunOpAsync("forecast", "Connexion à Forecast… terminez l'autorisation dans la fenêtre du navigateur.", () =>
@@ -566,19 +650,11 @@
             return result.Warning is not null ? throw new InvalidOperationException(result.Warning) : result.Summary;
         });
 
-    private void OnSchedulerChanged() => Refresh();
-
-    private void Refresh()
-    {
-        if (disposed)
-            return;
-        _ = InvokeAsync(StateHasChanged);
-    }
-
     public void Dispose()
     {
         disposed = true;
-        Scheduler.Changed -= OnSchedulerChanged;
+        Scheduler.Changed -= OnChanged;
+        Plugins.Changed -= OnPluginsChanged;
         refreshTimer?.Dispose();
     }
 }

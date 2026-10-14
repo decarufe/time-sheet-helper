@@ -24,7 +24,6 @@ public static class ServiceCollectionExtensions
         services.Configure<LocalGitOptions>(configuration.GetSection(LocalGitOptions.SectionName));
 
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();
-        services.TryAddSingleton<IActivityHistory, ActivityStoreHistory>();
         services.AddSingleton<GitHubTokenProvider>();
 
         services.AddHttpClient<GitHubApiClient>((sp, http) =>

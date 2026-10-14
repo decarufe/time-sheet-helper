@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using TimeSheetHelper.Core.Activities;
 using TimeSheetHelper.Core.Forecast;
+using TimeSheetHelper.Core.Plugins;
 using TimeSheetHelper.Core.Rules;
 using TimeSheetHelper.Core.Timesheets;
 
@@ -15,6 +16,7 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
     public DbSet<TimesheetEntry> TimesheetEntries => Set<TimesheetEntry>();
     public DbSet<SlotOverride> SlotOverrides => Set<SlotOverride>();
     public DbSet<ClassificationCacheEntry> ClassificationCache => Set<ClassificationCacheEntry>();
+    public DbSet<InstalledPlugin> InstalledPlugins => Set<InstalledPlugin>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -27,7 +29,7 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
     {
         var activity = modelBuilder.Entity<ActivityEvent>();
         activity.ToTable("Activities");
-        activity.Property(a => a.Source).HasConversion<string>().HasMaxLength(32);
+        activity.Property(a => a.Source).HasConversion(s => s.Id, id => new ActivitySource(id)).HasMaxLength(32);
         activity.Ignore(a => a.Duration);
         activity.HasIndex(a => a.StartUtc);
         activity.HasIndex(a => new { a.Source, a.ExternalId }).IsUnique().HasFilter("ExternalId IS NOT NULL");
@@ -51,5 +53,6 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
 
         modelBuilder.Entity<SlotOverride>().HasIndex(s => s.SlotStartUtc).IsUnique();
         modelBuilder.Entity<ClassificationCacheEntry>().HasIndex(c => c.Fingerprint).IsUnique();
+        modelBuilder.Entity<InstalledPlugin>().HasKey(p => p.Id);
     }
 }

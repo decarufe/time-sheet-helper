@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Broker;
 using Microsoft.Identity.Client.Extensions.Msal;
-using TimeSheetHelper.Storage;
+using TimeSheetHelper.Core;
 
 namespace TimeSheetHelper.Collectors.Microsoft365;
 

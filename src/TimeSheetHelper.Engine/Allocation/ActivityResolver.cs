@@ -35,8 +35,10 @@ public readonly record struct Candidate(int? TaskId, string? GroupKey)
 public sealed record ResolvedActivity(ActivityEvent Activity, ActivityRole Role, Interval Window, Candidate? Candidate, int? RuleId = null);
 
 /// <summary>Applies rules, group keys, evidence windows and meeting filters to raw activities.</summary>
-public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilder groupKeys, IOptions<EngineOptions> options)
+public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilder groupKeys, IOptions<EngineOptions> options, ISourceCatalog? catalog = null)
 {
+    private readonly ISourceCatalog _catalog = catalog ?? SourceCatalog.Default;
+
     public const string CommitKind = "commit";
 
     /// <param name="activities">Activities, ideally including some before the range so commit windows can find the previous commit.</param>
@@ -82,15 +84,15 @@ public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilde
         var o = options.Value;
         var isPoint = activity.EndUtc is null || activity.EndUtc <= activity.StartUtc;
 
-        switch (activity.Source)
+        switch (_catalog.Get(activity.Source).Behavior)
         {
-            case ActivitySource.Idle or ActivitySource.Locked:
+            case SourceBehavior.NonWork:
                 return isPoint ? null : ActivityRole.Mask;
 
-            case ActivitySource.Focus or ActivitySource.VsCode or ActivitySource.ClaudeCode:
+            case SourceBehavior.Presence:
                 return isPoint ? ActivityRole.Evidence : ActivityRole.Active;
 
-            case ActivitySource.Calendar:
+            case SourceBehavior.Meeting:
                 if (isPoint || o.IsIgnoredCalendarKind(activity.Kind) || activity.Duration > o.MaxMeetingDuration)
                     return null;
                 return ActivityRole.Meeting;
@@ -114,10 +116,11 @@ public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilde
         foreach (var activity in sortedActivities)
         {
             var isPoint = activity.EndUtc is null || activity.EndUtc <= activity.StartUtc;
-            if (!isPoint || activity.Source is ActivitySource.Idle or ActivitySource.Locked or ActivitySource.Calendar)
+            var traits = _catalog.Get(activity.Source);
+            if (!isPoint || traits.Behavior is SourceBehavior.NonWork or SourceBehavior.Meeting)
                 continue;
 
-            var start = activity.StartUtc - o.GetEvidenceWindow(activity.Source, activity.Kind);
+            var start = activity.StartUtc - o.GetEvidenceWindow(activity.Source, activity.Kind, traits);
 
             if (string.Equals(activity.Kind, CommitKind, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(activity.Repo))
             {

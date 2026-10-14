@@ -1,4 +1,4 @@
-namespace TimeSheetHelper.Storage;
+namespace TimeSheetHelper.Core;
 
 public static class DataPaths
 {

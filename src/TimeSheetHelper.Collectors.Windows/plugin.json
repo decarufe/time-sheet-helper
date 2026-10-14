@@ -1,0 +1,9 @@
+{
+  "id": "windows-activity",
+  "name": "Activité Windows",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entryAssembly": "TimeSheetHelper.Collectors.Windows.dll",
+  "description": "Fenêtre active, extension VS Code et sessions Claude Code.",
+  "author": "Time Sheet Helper"
+}

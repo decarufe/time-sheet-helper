@@ -14,8 +14,8 @@ public class EvidenceWindowTests
         return new ActivityResolver(new RuleEvaluator(options), new GroupKeyBuilder(options), options);
     }
 
-    private static ActivityEvent Commit(DateTime at, string repo, ActivitySource source = ActivitySource.GitHub) =>
-        Fx.Act(source, at, null, a => { a.Kind = "commit"; a.Repo = repo; });
+    private static ActivityEvent Commit(DateTime at, string repo, ActivitySource? source = null) =>
+        Fx.Act(source ?? ActivitySource.GitHub, at, null, a => { a.Kind = "commit"; a.Repo = repo; });
 
     private static Interval WindowOf(ActivityResolver sut, ActivityEvent target, params ActivityEvent[] all) =>
         sut.ComputeEvidenceWindows(all.OrderBy(a => a.StartUtc).ToList())[target];
@@ -54,13 +54,14 @@ public class EvidenceWindowTests
     }
 
     [Theory]
-    [InlineData(ActivitySource.Email, "sent", 10)]
-    [InlineData(ActivitySource.Teams, "chat-message", 5)]
-    [InlineData(ActivitySource.GitHub, "pr-review", 20)]
-    [InlineData(ActivitySource.AzureDevOps, "workitem-update", 10)]
-    [InlineData(ActivitySource.AzureDevOps, "unknown-kind", 5)]
-    public void Default_windows_per_source_and_kind(ActivitySource source, string kind, int minutes)
+    [InlineData("Email", "sent", 10)]
+    [InlineData("Teams", "chat-message", 5)]
+    [InlineData("GitHub", "pr-review", 20)]
+    [InlineData("AzureDevOps", "workitem-update", 10)]
+    [InlineData("AzureDevOps", "unknown-kind", 5)]
+    public void Default_windows_per_source_and_kind(string sourceId, string kind, int minutes)
     {
+        var source = new ActivitySource(sourceId);
         var e = Fx.Act(source, Fx.Mon(11), Fx.Mon(11), a => a.Kind = kind); // End == Start is a point event too
         Assert.Equal(TimeSpan.FromMinutes(minutes), WindowOf(Create(), e, e).Length);
     }

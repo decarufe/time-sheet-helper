@@ -1,21 +1,24 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using TimeSheetHelper.Collectors.Windows.VsCode;
+using TimeSheetHelper.App.Plugins;
+using TimeSheetHelper.Core;
 using TimeSheetHelper.Core.Secrets;
-using TimeSheetHelper.Storage;
 
 // Same namespace as Program.cs so wiring it up takes a single line.
 namespace TimeSheetHelper.App;
 
 /// <summary>
-/// Local HTTP endpoints fed by editor extensions. Protected by a random token shared through the
-/// Credential Manager (source of truth) and a file in %LOCALAPPDATA%\TimeSheetHelper that the extensions read.
+/// Local HTTP endpoint fed by editor extensions: <c>POST /ingest/{route}</c> goes to the running push source that
+/// declares that route. Protected by a random token shared through the Credential Manager (source of truth) and a
+/// file in %LOCALAPPDATA%\TimeSheetHelper that the extensions read.
 /// </summary>
 public static class IngestEndpoints
 {
     public const string TokenHeader = "X-TimeSheet-Token";
     public const string TokenFileName = "ingest-token";
+
+    /// <summary>Largest accepted body: a heartbeat is a few hundred bytes.</summary>
+    public const int MaxBodyBytes = 256 * 1024;
 
     public static string TokenFilePath => Path.Combine(DataPaths.Root, TokenFileName);
 
@@ -24,26 +27,29 @@ public static class IngestEndpoints
         var token = EnsureToken(app.Services.GetRequiredService<ISecretStore>(), app.Logger);
         var expected = Encoding.UTF8.GetBytes(token);
 
-        app.MapPost("/ingest/vscode", async (HttpContext context, VsCodeIngestService ingest, CancellationToken cancellationToken) =>
+        app.MapPost("/ingest/{route}", async (string route, HttpContext context, PluginHost plugins, CancellationToken cancellationToken) =>
             {
-                // Check the token before touching the body, so anonymous callers never reach the JSON parser.
+                // Check the token before touching the body, so anonymous callers never reach a plugin's parser.
                 if (!IsAuthorized(context.Request, expected))
                     return Results.Unauthorized();
 
-                VsCodeHeartbeat? heartbeat;
-                try
-                {
-                    heartbeat = await context.Request.ReadFromJsonAsync<VsCodeHeartbeat>(cancellationToken);
-                }
-                catch (Exception ex) when (ex is JsonException or InvalidOperationException)
-                {
-                    return Results.BadRequest();
-                }
-                if (heartbeat is null)
-                    return Results.BadRequest();
+                var receiver = plugins.FindPushReceiver(route);
+                if (receiver is null)
+                    return Results.NotFound();
 
-                await ingest.IngestAsync(heartbeat, cancellationToken);
-                return Results.NoContent();
+                if (context.Request.ContentLength > MaxBodyBytes)
+                    return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                using var body = new MemoryStream();
+                var buffer = new byte[8192];
+                int read;
+                while ((read = await context.Request.Body.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    if (body.Length + read > MaxBodyBytes)
+                        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                    body.Write(buffer, 0, read);
+                }
+
+                return await receiver.ReceiveAsync(body.ToArray(), cancellationToken) ? Results.NoContent() : Results.BadRequest();
             })
             .DisableAntiforgery();
 

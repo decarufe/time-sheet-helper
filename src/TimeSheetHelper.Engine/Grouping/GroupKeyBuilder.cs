@@ -58,8 +58,10 @@ public readonly record struct GroupKey(GroupKind Kind, string Value)
 /// Puts activities that no rule classifies into groups sharing the most specific stable key:
 /// repository, else folder, else meeting subject, else e-mail domains / participants, else process + title stem.
 /// </summary>
-public sealed partial class GroupKeyBuilder(IOptions<EngineOptions> options)
+public sealed partial class GroupKeyBuilder(IOptions<EngineOptions> options, ISourceCatalog? catalog = null)
 {
+    private readonly ISourceCatalog _catalog = catalog ?? SourceCatalog.Default;
+
     private const int MaxStemLength = 60;
 
     public string Build(ActivityEvent activity) => BuildKey(activity).ToString();
@@ -72,7 +74,7 @@ public sealed partial class GroupKeyBuilder(IOptions<EngineOptions> options)
         if (!string.IsNullOrWhiteSpace(activity.Folder))
             return new(GroupKind.Folder, NormalizeFolder(activity.Folder));
 
-        if (activity.Source == ActivitySource.Calendar && NormalizeSubject(activity.Subject) is { Length: > 0 } subject)
+        if (_catalog.Get(activity.Source).Behavior == SourceBehavior.Meeting && NormalizeSubject(activity.Subject) is { Length: > 0 } subject)
             return new(GroupKind.Meeting, subject);
 
         if (!string.IsNullOrWhiteSpace(activity.Participants))

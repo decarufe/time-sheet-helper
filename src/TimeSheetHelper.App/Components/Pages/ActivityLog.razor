@@ -1,10 +1,11 @@
 @page "/activite"
 @rendermode InteractiveServer
-@using TimeSheetHelper.Collectors.Windows
+@using TimeSheetHelper.App.Plugins
 @using TimeSheetHelper.Core.Activities
+@using TimeSheetHelper.Plugins
 @using TimeSheetHelper.Storage
 @inject ActivityStore Store
-@inject FocusTracker Tracker
+@inject PluginHost Plugins
 
 <PageTitle>Time Sheet Helper</PageTitle>
 
@@ -14,23 +15,29 @@
     <input type="date" @bind="day" @bind:after="LoadAsync" />
     <button @onclick="() => ChangeDay(1)" aria-label="Jour suivant">›</button>
     <button @onclick="LoadAsync">Rafraîchir</button>
-    <button @onclick="TogglePause">@(Tracker.IsPaused ? "Reprendre" : "Pause")</button>
+    @if (PauseAction is { } pause)
+    {
+        <button @onclick="TogglePause">@pause.Label</button>
+    }
 </header>
 
 <section class="status">
-    @if (Tracker.IsPaused)
+    @if (tracking is null)
+    {
+        <span class="badge paused">Surveillance de la fenêtre active désactivée</span>
+    }
+    else if (tracking.Message == "En pause")
     {
         <span class="badge paused">Surveillance en pause</span>
     }
-    else if (Tracker.Current is { } current)
+    else
     {
         <span class="badge live">En cours</span>
-        <span>@current.ProcessName — @current.Title</span>
-        @if ((current.FilePath ?? current.Folder) is { } where)
+        @foreach (var detail in tracking.Details ?? [])
         {
-            <code>@where</code>
+            <span class="muted">@detail.Label :</span>
+            <span>@detail.Value</span>
         }
-        <span class="muted">depuis @Tracker.CurrentSinceUtc?.ToLocalTime().ToString("HH:mm:ss")</span>
     }
 </section>
 
@@ -73,11 +80,19 @@
     private IReadOnlyList<ActivityEvent> activities = [];
     private List<(string Process, string? Folder, TimeSpan Duration)> totals = [];
     private TimeSpan totalActive;
+    private SourceStatus? tracking;
+
+    // Window tracking is a plugin: its state and its pause button come from the plugin's own status.
+    private const string FocusTrackerId = "focus-tracker";
+    private const string TogglePauseAction = "toggle-pause";
+
+    private SourceAction? PauseAction => tracking?.Actions?.FirstOrDefault(a => a.Id == TogglePauseAction);
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
+        tracking = await Plugins.GetStatusAsync(FocusTrackerId);
         var from = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local).ToUniversalTime();
         activities = await Store.GetRangeAsync(from, from.AddDays(1));
 
@@ -96,7 +111,11 @@
         return LoadAsync();
     }
 
-    private void TogglePause() => Tracker.SetPaused(!Tracker.IsPaused);
+    private async Task TogglePause()
+    {
+        await Plugins.ExecuteActionAsync(FocusTrackerId, TogglePauseAction);
+        tracking = await Plugins.GetStatusAsync(FocusTrackerId);
+    }
 
     private static string Format(TimeSpan d) => d.TotalHours >= 1 ? $"{(int)d.TotalHours} h {d.Minutes:00}" : $"{d.Minutes} min {d.Seconds:00}";
 }

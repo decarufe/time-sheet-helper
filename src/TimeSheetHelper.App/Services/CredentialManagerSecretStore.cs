@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using TimeSheetHelper.Core.Secrets;
 
-namespace TimeSheetHelper.Collectors.Windows;
+namespace TimeSheetHelper.App.Services;
 
 /// <summary>Generic credentials in the Windows Credential Manager, scoped to the current user.</summary>
 public sealed class CredentialManagerSecretStore : ISecretStore

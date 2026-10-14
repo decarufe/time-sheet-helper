@@ -1,7 +1,12 @@
+using Microsoft.Extensions.Options;
 using TimeSheetHelper.App;
 using TimeSheetHelper.App.Components;
+using TimeSheetHelper.App.Components.Shared;
+using TimeSheetHelper.App.Plugins;
 using TimeSheetHelper.App.Services;
 using TimeSheetHelper.App.Sync;
+using TimeSheetHelper.Core;
+using TimeSheetHelper.Core.Activities;
 using TimeSheetHelper.Storage;
 
 if (Cli.IsCommand(args))
@@ -20,7 +25,14 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddTimeSheetHelper(builder.Configuration);
 builder.Services.Configure<SyncOptions>(builder.Configuration.GetSection(SyncOptions.SectionName));
-builder.Services.AddSingleton<SyncScheduler>();
+// Plugins first: they must be running before the scheduler asks them for collectors and before the tray reads their state.
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PluginHost>());
+// Built by hand: the class has a second constructor (a fixed list of collectors) that would make injection ambiguous.
+builder.Services.AddSingleton(sp => new SyncScheduler(
+    sp.GetRequiredService<ICollectorSource>(),
+    sp.GetRequiredService<IOptions<SyncOptions>>(),
+    sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<ILogger<SyncScheduler>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncScheduler>());
 builder.Services.AddSingleton<ForecastRunner>();
 builder.Services.AddSingleton<TrayIcon>();
@@ -29,6 +41,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 var app = builder.Build();
 
 await AppServices.MigrateDatabaseAsync(app.Services);
+TimesheetUi.Sources = app.Services.GetRequiredService<ISourceCatalog>();
 
 if (!app.Environment.IsDevelopment())
 {

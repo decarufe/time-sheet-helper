@@ -2,10 +2,11 @@
 @using TimeSheetHelper.Forecast
 @using TimeSheetHelper.Storage
 @inject ForecastTaskImporter Importer
+@inject ForecastTaskCatalog Catalog
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 
-<form class="new-task" @onsubmit="CreateAsync" @onsubmit:preventDefault>
-    <h3>Nouvelle tâche</h3>
+<form class="new-task" @onsubmit="SubmitAsync" @onsubmit:preventDefault>
+    <h3>@(EditTaskId is null ? "Nouvelle tâche" : "Modifier la tâche")</h3>
 
     <label for="@projectId">Projet</label>
     <input id="@projectId" @ref="projectInput" type="text" list="@listId" autocomplete="off" placeholder="Choisir ou saisir un projet"
@@ -20,7 +21,7 @@
     <label for="@taskId">Tâche</label>
     <input id="@taskId" type="text" autocomplete="off" placeholder="Nom de la tâche" @bind="task" @bind:event="oninput" />
 
-    <details>
+    <details open="@(EditTaskId is not null && (projectCode.Length > 0 || taskCode.Length > 0))">
         <summary>Codes Forecast (facultatif)</summary>
         <div class="codes">
             <label>Code du projet <input type="text" placeholder="P1078" @bind="projectCode" /></label>
@@ -35,7 +36,7 @@
     }
 
     <div class="buttons">
-        <button type="submit" class="primary" disabled="@busy">@(busy ? "Création…" : SubmitLabel)</button>
+        <button type="submit" class="primary" disabled="@busy">@(busy ? "Enregistrement…" : SubmitLabel)</button>
         <button type="button" disabled="@busy" @onclick="() => OnCancel.InvokeAsync()">Annuler</button>
     </div>
 </form>
@@ -58,7 +59,10 @@
 
     [Parameter] public string SubmitLabel { get; set; } = "Créer et choisir";
 
-    /// <summary>Raised with the id of the task that was created (or found again and reactivated).</summary>
+    /// <summary>When set, the form edits this task instead of creating one.</summary>
+    [Parameter] public int? EditTaskId { get; set; }
+
+    /// <summary>Raised with the id of the task that was created (or found again and reactivated) or updated.</summary>
     [Parameter] public EventCallback<int> OnCreated { get; set; }
 
     [Parameter] public EventCallback OnCancel { get; set; }
@@ -70,6 +74,14 @@
         projects = (await db.ForecastTasks.AsNoTracking().Select(t => t.ProjectName).Distinct().ToListAsync())
             .OrderBy(p => p, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
+
+        if (EditTaskId is { } id && await Catalog.FindAsync(id) is { } existing)
+        {
+            project = existing.ProjectName;
+            task = existing.TaskName;
+            projectCode = existing.ProjectCode ?? "";
+            taskCode = ForecastCodes.TaskCode.Match(existing.ExternalId) is { Success: true } m && m.Value == existing.ExternalId ? m.Value : "";
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -81,12 +93,22 @@
         }
     }
 
-    private async Task CreateAsync()
+    private async Task SubmitAsync()
     {
         busy = true;
         error = null;
         try
         {
+            if (EditTaskId is { } editId)
+            {
+                var update = await Catalog.UpdateAsync(editId, project, task, projectCode, taskCode);
+                if (update.Ok)
+                    await OnCreated.InvokeAsync(editId);
+                else
+                    error = update.Error;
+                return;
+            }
+
             var result = await Importer.AddAsync(project, task, projectCode, taskCode);
             if (result.TaskId is { } id)
                 await OnCreated.InvokeAsync(id);

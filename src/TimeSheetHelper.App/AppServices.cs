@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using TimeSheetHelper.Collectors.DevOps;
-using TimeSheetHelper.Collectors.Microsoft365;
-using TimeSheetHelper.Collectors.Windows;
+using TimeSheetHelper.App.Plugins;
+using TimeSheetHelper.App.Services;
+using TimeSheetHelper.App.Sync;
+using TimeSheetHelper.Core;
+using TimeSheetHelper.Core.Activities;
+using TimeSheetHelper.Core.Secrets;
 using TimeSheetHelper.Engine;
 using TimeSheetHelper.Forecast;
 using TimeSheetHelper.Storage;
@@ -18,11 +21,27 @@ public static class AppServices
     public static IServiceCollection AddTimeSheetHelper(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddTimeSheetStorage(DataPaths.DatabaseConnectionString);
-        services.AddWindowsCollectors(configuration);
-        services.AddMicrosoft365Collectors(configuration);
-        services.AddDevOpsCollectors(configuration);
+        services.AddSingleton<ISecretStore, CredentialManagerSecretStore>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSourcePlugins();
         services.AddForecast(configuration);
         services.AddTimesheetEngine(configuration);
+        return services;
+    }
+
+    /// <summary>
+    /// Sources are plugins: <see cref="PluginHost"/> finds the packages, starts the ones switched on and feeds the
+    /// catalog the engine reads the traits of the sources from. Registered before the engine so its catalog wins.
+    /// </summary>
+    public static IServiceCollection AddSourcePlugins(this IServiceCollection services)
+    {
+        services.AddSingleton(SourceCatalog.CreateDefault());
+        services.AddSingleton<ISourceCatalog>(sp => sp.GetRequiredService<SourceCatalog>());
+        services.AddSingleton(new PluginRoots(
+            Path.Combine(AppContext.BaseDirectory, "plugins"),
+            Path.Combine(DataPaths.Root, "plugins")));
+        services.AddSingleton<PluginHost>();
+        services.AddSingleton<ICollectorSource>(sp => sp.GetRequiredService<PluginHost>());
         return services;
     }
 

@@ -1,0 +1,21 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Per-user install: components live under %LOCALAPPDATA% and use HKCU, which these ICE rules flag by design (ICE60: native files without a language). -->
+    <SuppressIces>ICE38;ICE43;ICE60;ICE64;ICE91</SuppressIces>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0</ProductVersion>
+    <OutputName Condition="'$(OutputName)' == ''">TimeSheetHelper-$(ProductVersion)</OutputName>
+    <!-- Folder produced by build-msi.ps1 (dotnet publish of the application and of the window, plus plugins). -->
+    <AppSourceDir Condition="'$(AppSourceDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\publish</AppSourceDir>
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);AppSourceDir=$(AppSourceDir)</DefineConstants>
+    <!-- Optional VS Code extension, installed with the code command line when VS Code is present. -->
+    <DefineConstants Condition="'$(VsixPath)' != ''">$(DefineConstants);VsixPath=$(VsixPath);VsixName=$(VsixName);ExtensionId=$(ExtensionId)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+</Project>

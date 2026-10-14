@@ -2,12 +2,26 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TimeSheetHelper.Core\TimeSheetHelper.Core.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.Plugins.Abstractions\TimeSheetHelper.Plugins.Abstractions.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
-    <ProjectReference Include="..\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" />
-    <ProjectReference Include="..\TimeSheetHelper.Collectors.Microsoft365\TimeSheetHelper.Collectors.Microsoft365.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.Forecast\TimeSheetHelper.Forecast.csproj" />
-    <ProjectReference Include="..\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" />
     <ProjectReference Include="..\TimeSheetHelper.Engine\TimeSheetHelper.Engine.csproj" />
+  </ItemGroup>
+
+  <!-- Source plugins shipped with the application: loaded from plugins\<PackageDir>\ at run time, never referenced. -->
+  <ItemGroup>
+    <BundledPlugin Include="..\TimeSheetHelper.Collectors.Windows\TimeSheetHelper.Collectors.Windows.csproj" PackageDir="windows-activity" />
+    <BundledPlugin Include="..\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" PackageDir="devops" />
+    <BundledPlugin Include="..\TimeSheetHelper.Collectors.Microsoft365\TimeSheetHelper.Collectors.Microsoft365.csproj" PackageDir="microsoft-365" />
+  </ItemGroup>
+
+  <!--
+    Referenced without their output so that a restore of the application also restores them (the targets below build and
+    publish them), and so that they are built before it.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="@(BundledPlugin)" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +38,55 @@
     <AssemblyName>TimeSheetHelper</AssemblyName>
     <RootNamespace>TimeSheetHelper.App</RootNamespace>
   </PropertyGroup>
+
+  <!--
+    Publishes each bundled plugin (framework-dependent, whatever the application's own runtime identifier) next to the
+    executable. A plugin package is a folder with its plugin.json, its assembly and its dependencies.
+  -->
+  <Target Name="StageBundledPlugins" AfterTargets="Build" Condition="'@(BundledPlugin)' != ''">
+    <PropertyGroup>
+      <_PluginStageRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(OutDir)', 'plugins'))</_PluginStageRoot>
+    </PropertyGroup>
+    <MSBuild Projects="@(BundledPlugin)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_PluginStageRoot)%(BundledPlugin.PackageDir)\;SelfContained=false;PublishSingleFile=false;PublishTrimmed=false"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishReadyToRun;PublishTrimmed" />
+    <!-- The manifest sits in the plugin project but is not part of its output (it would collide between plugins). -->
+    <Copy SourceFiles="%(BundledPlugin.RootDir)%(BundledPlugin.Directory)plugin.json"
+          DestinationFolder="$(_PluginStageRoot)%(BundledPlugin.PackageDir)\" />
+  </Target>
+
+  <Target Name="CopyBundledPluginsToPublish" AfterTargets="Publish" DependsOnTargets="StageBundledPlugins">
+    <ItemGroup>
+      <_StagedPluginFile Include="$(OutDir)plugins\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_StagedPluginFile)"
+          DestinationFiles="@(_StagedPluginFile->'$(PublishDir)plugins\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!--
+    The window that shows the application (WebView2) is a separate executable placed next to this one, so the tray
+    icon can open it. It inherits the runtime identifier and self-contained settings of this build: a self-contained
+    publish of the application gives a self-contained window.
+  -->
+  <Target Name="StageDesktopShell" AfterTargets="Build">
+    <PropertyGroup>
+      <_DesktopStageDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(OutDir)'))</_DesktopStageDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_DesktopStageDir)" />
+  </Target>
+
+  <Target Name="PublishDesktopShell" AfterTargets="Publish">
+    <PropertyGroup>
+      <_DesktopPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(PublishDir)'))</_DesktopPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_DesktopPublishDir)" />
+  </Target>
 
   <!--
     Microsoft.AspNetCore.App.Internal.Assets only publishes _framework/blazor.web.js when OutputType is "Exe"

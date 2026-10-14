@@ -42,25 +42,40 @@ public sealed record CollectorSyncResult(
 /// <summary>UTC range of a local week (Monday 00:00 to next Monday 00:00).</summary>
 public sealed record SyncWeek(DateOnly WeekStart, DateTime FromUtc, DateTime ToUtc);
 
+/// <summary>Where the scheduler finds the collectors to run; changes while sources are switched on and off.</summary>
+public interface ICollectorSource
+{
+    IReadOnlyList<ICollector> Collectors { get; }
+}
+
 /// <summary>
 /// Periodically syncs every configured <see cref="ICollector"/> for the current week (and the previous week on
 /// Monday mornings, to catch Friday evening activity). Runs never overlap: the timer skips a tick while a run is in
 /// progress, and <see cref="RunNowAsync"/> waits for it. A failing collector never stops the others.
 /// </summary>
 public sealed class SyncScheduler(
-    IEnumerable<ICollector> collectors,
+    ICollectorSource collectorSource,
     IOptions<SyncOptions> options,
     TimeProvider timeProvider,
     ILogger<SyncScheduler> logger) : BackgroundService
 {
-    private readonly IReadOnlyList<ICollector> _collectors = collectors.ToList();
     private readonly SemaphoreSlim _runGate = new(1, 1);
     private readonly ConcurrentDictionary<string, CollectorSyncResult> _lastResults = new(StringComparer.OrdinalIgnoreCase);
+
+    public SyncScheduler(IEnumerable<ICollector> collectors, IOptions<SyncOptions> options, TimeProvider timeProvider, ILogger<SyncScheduler> logger)
+        : this(new FixedCollectors(collectors.ToList()), options, timeProvider, logger)
+    {
+    }
+
+    private sealed class FixedCollectors(IReadOnlyList<ICollector> collectors) : ICollectorSource
+    {
+        public IReadOnlyList<ICollector> Collectors => collectors;
+    }
 
     /// <summary>Raised (from any thread) when a run starts, a collector finishes or a run ends.</summary>
     public event Action? Changed;
 
-    public IReadOnlyList<ICollector> Collectors => _collectors;
+    public IReadOnlyList<ICollector> Collectors => collectorSource.Collectors;
 
     public bool IsRunning { get; private set; }
 
@@ -164,7 +179,7 @@ public sealed class SyncScheduler(
 
     private async Task<IReadOnlyList<CollectorSyncResult>> RunCoreAsync(string? collectorName, CancellationToken cancellationToken)
     {
-        var selected = _collectors
+        var selected = Collectors
             .Where(c => collectorName is null || c.Name.Equals(collectorName, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (collectorName is not null && selected.Count == 0)

@@ -1,10 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Comes with the desktop shell's WebView2 package (see TimeSheetHelper.Desktop.csproj). -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,10 +29,29 @@
     <ProjectReference Include="..\..\src\TimeSheetHelper.Collectors.DevOps\TimeSheetHelper.Collectors.DevOps.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.Engine\TimeSheetHelper.Engine.csproj" />
     <ProjectReference Include="..\..\src\TimeSheetHelper.App\TimeSheetHelper.App.csproj" />
+    <ProjectReference Include="..\..\src\TimeSheetHelper.Desktop\TimeSheetHelper.Desktop.csproj" />
+    <ProjectReference Include="..\..\src\TimeSheetHelper.Plugins.Abstractions\TimeSheetHelper.Plugins.Abstractions.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.TestPlugin\TimeSheetHelper.TestPlugin.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- The plugins bundled with the application are staged in the application's own output: bring them next to the tests. -->
+  <Target Name="CopyBundledPluginsForTests" AfterTargets="Build">
+    <ItemGroup>
+      <_AppReference Include="@(ReferencePath)" Condition="'%(Filename)' == 'TimeSheetHelper'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_AppOutDir>@(_AppReference->'%(RootDir)%(Directory)')</_AppOutDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BundledPluginFile Include="$(_AppOutDir)plugins\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BundledPluginFile)"
+          DestinationFiles="@(_BundledPluginFile->'$(OutDir)plugins\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

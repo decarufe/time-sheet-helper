@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
-using TimeSheetHelper.Core.Collectors;
+using TimeSheetHelper.App.Plugins;
 using TimeSheetHelper.Forecast;
 
 namespace TimeSheetHelper.App;
@@ -25,6 +25,11 @@ public static class Cli
           TimeSheetHelper forecast export-tasks             affiche la liste locale au même format
           TimeSheetHelper sync [--week AAAA-MM-JJ] [--source nom]
                                                             collecte les sources à la demande pour une semaine
+          TimeSheetHelper plugins list                      liste les paquets et les sources (plugins) installés
+          TimeSheetHelper plugins enable <source>           active une source
+          TimeSheetHelper plugins disable <source>          désactive une source
+          TimeSheetHelper plugins install <dossier|.zip>    installe un paquet de plugin
+          TimeSheetHelper plugins uninstall <paquet>        désinstalle un paquet de plugin
         """;
 
     public static bool IsCommand(string[] args) => args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal);
@@ -57,6 +62,7 @@ public static class Cli
             ["forecast", "import-tasks", var file, .. var importOptions] => await ImportTasksAsync(host.Services, file, importOptions, cts.Token),
             ["forecast", "export-tasks"] => await ExportTasksAsync(host.Services, cts.Token),
             ["sync", .. var options] => await SyncAsync(host.Services, options, cts.Token),
+            ["plugins", .. var pluginArgs] => await PluginsAsync(host.Services, pluginArgs, cts.Token),
             _ => PrintUsage(),
         };
     }
@@ -82,12 +88,15 @@ public static class Cli
 
         var fromUtc = monday.ToDateTime(TimeOnly.MinValue, DateTimeKind.Local).ToUniversalTime();
         var toUtc = monday.AddDays(7).ToDateTime(TimeOnly.MinValue, DateTimeKind.Local).ToUniversalTime();
-        var collectors = services.GetServices<ICollector>()
+        var plugins = services.GetRequiredService<PluginHost>();
+        await plugins.StartForCommandLineAsync(cancellationToken);
+        var all = plugins.Collectors;
+        var collectors = all
             .Where(c => source is null || c.Name.Equals(source, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (collectors.Count == 0)
         {
-            Console.Error.WriteLine($"Source inconnue : {source}. Sources : {string.Join(", ", services.GetServices<ICollector>().Select(c => c.Name))}");
+            Console.Error.WriteLine($"Source inconnue : {source}. Sources : {string.Join(", ", all.Select(c => c.Name))}");
             return 1;
         }
 
@@ -115,6 +124,52 @@ public static class Cli
             }
         }
         return exitCode;
+    }
+
+    private static async Task<int> PluginsAsync(IServiceProvider services, string[] args, CancellationToken cancellationToken)
+    {
+        var plugins = services.GetRequiredService<PluginHost>();
+        await plugins.StartForCommandLineAsync(cancellationToken);
+        try
+        {
+            switch (args)
+            {
+                case ["list"]:
+                    foreach (var package in plugins.Packages)
+                        Console.WriteLine($"{package.Manifest.Id,-20} {package.Manifest.Version,-8} {(package.IsBundled ? "fourni" : "installé"),-8} {package.Manifest.Name}");
+                    foreach (var plugin in plugins.Plugins)
+                        Console.WriteLine($"  {plugin.Id,-18} {(plugin.Enabled ? "actif" : "inactif"),-8} {plugin.Descriptor.DisplayName} ({plugin.Descriptor.Mode})");
+                    foreach (var issue in plugins.Issues)
+                        Console.WriteLine($"  ⚠ {issue.Directory} : {issue.Message}");
+                    return 0;
+                case ["enable", var id]:
+                    await plugins.SetEnabledAsync(id, true, cancellationToken);
+                    Console.WriteLine($"{id} : activé.");
+                    return 0;
+                case ["disable", var id]:
+                    await plugins.SetEnabledAsync(id, false, cancellationToken);
+                    Console.WriteLine($"{id} : désactivé.");
+                    return 0;
+                case ["install", var path]:
+                    Console.WriteLine((await plugins.InstallAsync(Path.GetFullPath(path), cancellationToken)).Message);
+                    return 0;
+                case ["uninstall", var id]:
+                    await plugins.UninstallAsync(id, cancellationToken);
+                    Console.WriteLine($"{id} : désinstallé.");
+                    return 0;
+                default:
+                    return PrintUsage();
+            }
+        }
+        catch (Exception ex) when (ex is PluginException or ArgumentException)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+        finally
+        {
+            await plugins.StopAsync(CancellationToken.None);
+        }
     }
 
     private static async Task<int> ImportTasksAsync(IServiceProvider services, string file, string[] options, CancellationToken cancellationToken)

@@ -1,0 +1,9 @@
+{
+  "id": "microsoft-365",
+  "name": "Microsoft 365",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entryAssembly": "TimeSheetHelper.Collectors.Microsoft365.dll",
+  "description": "Calendrier, courriels envoyés et conversations Teams via Microsoft Graph.",
+  "author": "Time Sheet Helper"
+}

@@ -34,7 +34,7 @@ public sealed class EngineOptions
     /// <summary>Calendar <see cref="ActivityEvent.Kind"/> values that are not attended meetings.</summary>
     public List<string> IgnoredCalendarKinds { get; set; } = [];
 
-    /// <summary>Weight per second of overlap for interval sources (Focus, VsCode, ClaudeCode). Key is the source name.</summary>
+    /// <summary>Weight per second of overlap for presence sources (Focus, VsCode, ...). Key is the source name; overrides the source's own default.</summary>
     public Dictionary<string, double> SourceWeights { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Weight per second of overlap for point-event evidence windows (commit, email, ...): a bonus, not a proof of work.</summary>
@@ -55,13 +55,6 @@ public sealed class EngineOptions
     public List<string> OwnDomains { get; set; } = [];
 
     public ClaudeOptions Claude { get; set; } = new();
-
-    internal static readonly IReadOnlyDictionary<string, double> DefaultSourceWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-    {
-        [nameof(ActivitySource.Focus)] = 1.0,
-        [nameof(ActivitySource.VsCode)] = 1.5,
-        [nameof(ActivitySource.ClaudeCode)] = 1.2,
-    };
 
     internal static readonly IReadOnlyDictionary<string, TimeSpan> DefaultEvidenceWindows = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase)
     {
@@ -85,12 +78,11 @@ public sealed class EngineOptions
     internal static readonly IReadOnlyList<string> DefaultIgnoredCalendarKinds =
         ["declined", "tentative", "cancelled", "free", "meeting-declined", "meeting-tentative", "meeting-cancelled", "all-day"];
 
-    public double GetSourceWeight(ActivitySource source) =>
+    public double GetSourceWeight(ActivitySource source, SourceTraits? traits = null) =>
         SourceWeights.TryGetValue(source.ToString(), out var weight) ? weight
-        : DefaultSourceWeights.TryGetValue(source.ToString(), out weight) ? weight
-        : 1.0;
+        : (traits ?? SourceCatalog.Default.Get(source)).DefaultWeight ?? 1.0;
 
-    public TimeSpan GetEvidenceWindow(ActivitySource source, string? kind)
+    public TimeSpan GetEvidenceWindow(ActivitySource source, string? kind, SourceTraits? traits = null)
     {
         if (kind is not null)
         {
@@ -103,7 +95,7 @@ public sealed class EngineOptions
         if (EvidenceWindows.TryGetValue(general, out var g) || DefaultEvidenceWindows.TryGetValue(general, out g))
             return g;
 
-        return DefaultEvidenceWindow;
+        return (traits ?? SourceCatalog.Default.Get(source)).DefaultEvidenceWindow ?? DefaultEvidenceWindow;
     }
 
     public bool IsIgnoredCalendarKind(string? kind) =>

@@ -8,8 +8,10 @@ namespace TimeSheetHelper.Engine.Allocation;
 /// Splits a local day into 15-minute slots and picks, for each one, the candidate (task or unclassified group)
 /// with the most weight. Overrides from the user win over everything.
 /// </summary>
-public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider timeProvider)
+public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider timeProvider, ISourceCatalog? catalog = null)
 {
+    private readonly ISourceCatalog _catalog = catalog ?? SourceCatalog.Default;
+
     public TimeZoneInfo TimeZone => options.Value.ResolveTimeZone(timeProvider);
 
     /// <summary>UTC bounds of a local calendar day (23 or 25 hours on DST changes).</summary>
@@ -64,7 +66,7 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         var meetings = here.Where(a => a.Role == ActivityRole.Meeting).ToList();
 
         var editing = Interval.TotalLength(activeParts
-            .Where(p => p.Activity.Activity.Source == ActivitySource.VsCode)
+            .Where(p => _catalog.Get(p.Activity.Activity.Source).IsEditing)
             .SelectMany(p => p.Parts));
         var meetingOverrides = editing <= o.MeetingYieldsToEditingAbove;
 
@@ -89,7 +91,7 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         foreach (var (activity, parts) in activeParts)
         {
             var seconds = parts.Sum(p => p.Length.TotalSeconds);
-            Add(activity, seconds * o.GetSourceWeight(activity.Activity.Source));
+            Add(activity, seconds * o.GetSourceWeight(activity.Activity.Source, _catalog.Get(activity.Activity.Source)));
         }
 
         foreach (var meeting in meetings)

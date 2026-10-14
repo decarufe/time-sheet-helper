@@ -42,18 +42,6 @@ public static class UiLabels
         _ => origin,
     };
 
-    public static string Collector(string name) => name.ToLowerInvariant() switch
-    {
-        "github" => "GitHub",
-        "azuredevops" => "Azure DevOps",
-        "localgit" => "Git local",
-        "calendar" => "Calendrier Outlook",
-        "email" => "Courriels envoyés",
-        "teams" => "Microsoft Teams",
-        "claudecode" => "Sessions Claude Code",
-        _ => name,
-    };
-
     public static string CellStatus(ForecastCellStatus status) => status switch
     {
         ForecastCellStatus.Planned => "Prévu",

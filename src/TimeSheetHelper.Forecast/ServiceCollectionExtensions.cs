@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ForecastTaskReader>();
         services.AddSingleton<ForecastTaskLinker>();
         services.AddSingleton<ForecastTaskImporter>();
+        services.AddSingleton<ForecastTaskCatalog>();
         services.AddSingleton<ForecastTimesheetWriter>();
         services.AddSingleton<ForecastCommands>();
         return services;

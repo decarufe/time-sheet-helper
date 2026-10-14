@@ -14,8 +14,10 @@ public sealed record RuleProposal(RuleField Field, RuleOperator Operator, string
 /// Turns a user correction (these activities belong to that task) into a rule on the most specific stable field:
 /// Repo, then Folder prefix, then Project, then Subject regex, then Participants.
 /// </summary>
-public sealed class CorrectionLearner(IDbContextFactory<TimeSheetDbContext> dbFactory, GroupKeyBuilder groupKeys, TimeProvider timeProvider)
+public sealed class CorrectionLearner(IDbContextFactory<TimeSheetDbContext> dbFactory, GroupKeyBuilder groupKeys, TimeProvider timeProvider, ISourceCatalog? catalog = null)
 {
+    private readonly ISourceCatalog _catalog = catalog ?? SourceCatalog.Default;
+
     public const string CorrectionOrigin = "correction";
     public const string ClaudeOrigin = "claude";
 
@@ -28,7 +30,7 @@ public sealed class CorrectionLearner(IDbContextFactory<TimeSheetDbContext> dbFa
     public RuleProposal? Propose(IEnumerable<ActivityEvent> activities, int forecastTaskId)
     {
         var items = activities
-            .Where(a => a.Source is not (ActivitySource.Idle or ActivitySource.Locked))
+            .Where(a => _catalog.Get(a.Source).Behavior != SourceBehavior.NonWork)
             .Select(a => (Activity: a, Weight: Math.Max(a.Duration.TotalSeconds, MinWeight.TotalSeconds)))
             .ToList();
         if (items.Count == 0)

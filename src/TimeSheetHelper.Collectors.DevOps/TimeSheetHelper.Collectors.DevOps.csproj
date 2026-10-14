@@ -2,7 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TimeSheetHelper.Core\TimeSheetHelper.Core.csproj" />
-    <ProjectReference Include="..\TimeSheetHelper.Storage\TimeSheetHelper.Storage.csproj" />
+    <ProjectReference Include="..\TimeSheetHelper.Plugins.Abstractions\TimeSheetHelper.Plugins.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

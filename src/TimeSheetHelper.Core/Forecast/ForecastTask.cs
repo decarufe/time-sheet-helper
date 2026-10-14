@@ -13,6 +13,10 @@ public sealed class ForecastTask
     public string? ClientName { get; set; }
     public required string TaskName { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Starred by the user: listed first in the task picker. Never touched by a Forecast sync.</summary>
+    public bool IsFavorite { get; set; }
+
     public DateTime LastSeenUtc { get; set; }
 
     /// <summary>ExternalId of the built-in task that removes slots or meetings from the timesheet.</summary>

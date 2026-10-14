@@ -76,14 +76,38 @@
         }
         else
         {
+            var favorites = query.Trim().Length == 0
+                ? Filtered().Where(t => t.IsFavorite).OrderBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase).ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase).ToList()
+                : [];
+            var favoriteIds = favorites.Select(t => t.Id).ToHashSet();
             var groups = Filtered()
+                .Where(t => !favoriteIds.Contains(t.Id))
                 .GroupBy(t => (Client: t.ClientName ?? t.ProjectName, t.ProjectName))
                 .OrderBy(g => g.Key.Client, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(g => g.Key.ProjectName, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
-            if (groups.Count == 0)
+            if (groups.Count == 0 && favorites.Count == 0)
             {
                 <p class="muted">Aucune tâche ne correspond à « @query ».</p>
+            }
+            @if (favorites.Count > 0)
+            {
+                <section>
+                    <h3>★ Favoris</h3>
+                    <ul>
+                        @foreach (var task in favorites)
+                        {
+                            <li>
+                                <button type="button" class="@(task.Id == SelectedTaskId ? "task current" : "task")"
+                                        style="@TimesheetUi.TaskStyle(task.Id)" @onclick="() => SelectAsync(task.Id)">
+                                    <span class="swatch" aria-hidden="true"></span>
+                                    <span class="name">@task.TaskName</span>
+                                    <span class="code">@task.ProjectName</span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </section>
             }
             @foreach (var group in groups)
             {

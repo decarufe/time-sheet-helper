@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using TimeSheetHelper.Core.Activities;
 using TimeSheetHelper.Engine.Allocation;
 using TimeSheetHelper.Engine.Classification;
 using TimeSheetHelper.Engine.Grouping;
@@ -17,6 +18,7 @@ public static class ServiceCollectionExtensions
     {
         services.Configure<EngineOptions>(configuration.GetSection(EngineOptions.SectionName));
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<ISourceCatalog>(SourceCatalog.Default);
         services.AddLogging();
 
         services.AddSingleton<RuleEvaluator>();

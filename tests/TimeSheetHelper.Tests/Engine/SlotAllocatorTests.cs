@@ -36,8 +36,8 @@ public class SlotAllocatorTests
         return slots.Single(s => s.SlotStartUtc == slotStartUtc);
     }
 
-    private static ActivityEvent Focus(DateTime start, DateTime end, string repo, ActivitySource source = ActivitySource.Focus) =>
-        Fx.Act(source, start, end, a => { a.Repo = repo; a.ProcessName = "Code"; });
+    private static ActivityEvent Focus(DateTime start, DateTime end, string repo, ActivitySource? source = null) =>
+        Fx.Act(source ?? ActivitySource.Focus, start, end, a => { a.Repo = repo; a.ProcessName = "Code"; });
 
     private static ActivityEvent Meeting(DateTime start, DateTime end, string subject = "Daily standup", string? kind = "meeting") =>
         Fx.Act(ActivitySource.Calendar, start, end, a => { a.Subject = subject; a.Kind = kind; });

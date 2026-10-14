@@ -1,11 +1,11 @@
 @page "/taches"
 @rendermode InteractiveServer
-@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Web.Virtualization
+@using TimeSheetHelper.App.Components.Shared
 @using TimeSheetHelper.Core.Forecast
 @using TimeSheetHelper.Forecast
-@using TimeSheetHelper.Storage
-@inject ForecastTaskImporter Importer
-@inject IDbContextFactory<TimeSheetDbContext> DbFactory
+@implements IDisposable
+@inject ForecastTaskCatalog Catalog
 
 <PageTitle>Tâches Forecast — Time Sheet Helper</PageTitle>
 
@@ -13,56 +13,58 @@
     <header class="page-header">
         <h1>Tâches Forecast</h1>
         <p class="muted">
-            La liste des projets et des tâches proposés pour associer votre temps (sélecteur de tâche, règles, saisie dans Forecast).
-            Modifiez-la ici à la main, ou collez un tableau copié depuis Excel ou Forecast.
+            Les projets et les tâches proposés pour associer votre temps (sélecteur de tâche, règles, saisie dans Forecast).
+            Ajoutez, modifiez ou retirez-les ici ; les favoris passent en tête du sélecteur.
         </p>
     </header>
 
     <section class="card">
-        <h2>Modifier la liste</h2>
-        <p class="hint">
-            Une ligne par tâche : <code>projet</code>, une tabulation, puis <code>tâche</code>.
-            Le code est optionnel : <code>P1078-Nom du projet</code> et <code>T35647-Nom de la tâche</code>.
-            Sans code (temps interne), écrivez <code>-Internal Time</code> et <code>-Sport</code>.
-            Une ligne d'en-tête (« Projet / Task ») est ignorée.
-        </p>
-        <label class="visually-hidden" for="task-text">Liste des projets et des tâches</label>
-        <textarea id="task-text" class="mono" rows="14" spellcheck="false" wrap="off"
-                  placeholder="P1078-M365 - Équipe Laurence - Intranet Centre de Marque&#9;T35647-Automatisation - Nethris"
-                  value="@text" @oninput="OnTextInput"></textarea>
+        <div class="section-head">
+            <h2>Tâches enregistrées</h2>
+            <div class="head-actions">
+                <span class="muted">@counts.Active active(s) sur @counts.Total · @counts.Favorites favorite(s)</span>
+                <button class="primary" @onclick="OpenAdd">Ajouter une tâche</button>
+            </div>
+        </div>
 
-        @if (parsed is not null)
+        <div class="filters">
+            <label class="visually-hidden" for="task-filter">Rechercher</label>
+            <input id="task-filter" type="text" placeholder="Rechercher par projet, client, tâche ou code…"
+                   value="@search" @oninput="OnSearchInput" />
+
+            <label>État
+                <select @bind="status" @bind:after="RefreshAsync">
+                    <option value="@ForecastTaskStatusFilter.Active">Actives</option>
+                    <option value="@ForecastTaskStatusFilter.Inactive">Désactivées</option>
+                    <option value="@ForecastTaskStatusFilter.All">Toutes</option>
+                </select>
+            </label>
+
+            <label>Grouper par
+                <select @bind="grouping" @bind:after="RefreshAsync">
+                    <option value="@ForecastTaskGrouping.None">Aucun</option>
+                    <option value="@ForecastTaskGrouping.Project">Projet</option>
+                    <option value="@ForecastTaskGrouping.Client">Client</option>
+                    <option value="@ForecastTaskGrouping.Status">État</option>
+                </select>
+            </label>
+
+            <label class="checkbox"><input type="checkbox" @bind="favoritesOnly" @bind:after="RefreshAsync" /> Favoris seulement</label>
+        </div>
+
+        @if (selected.Count > 0)
         {
-            <p class="preview-stats">
-                <strong>@parsed.Tasks.Count</strong> tâche(s) reconnue(s) dans @parsed.Tasks.Select(t => t.ProjectName).Distinct(StringComparer.Ordinal).Count() projet(s).
-            </p>
-            @if (parsed.Warnings.Count > 0)
-            {
-                <ul class="warnings">
-                    @foreach (var warning in parsed.Warnings.Take(8))
-                    {
-                        <li class="warn-text">@warning</li>
-                    }
-                    @if (parsed.Warnings.Count > 8)
-                    {
-                        <li class="muted">… et @(parsed.Warnings.Count - 8) autre(s).</li>
-                    }
-                </ul>
-            }
+            <div class="bulk" role="toolbar" aria-label="Actions sur la sélection">
+                <strong>@selected.Count sélectionnée(s)</strong>
+                <button disabled="@busy" @onclick="() => SetActiveAsync(true)">Activer</button>
+                <button disabled="@busy" @onclick="() => SetActiveAsync(false)">Désactiver</button>
+                <button disabled="@busy" @onclick="() => SetFavoriteAsync(true)">★ Ajouter aux favoris</button>
+                <button disabled="@busy" @onclick="() => SetFavoriteAsync(false)">☆ Retirer des favoris</button>
+                <button class="danger" disabled="@busy" @onclick="() => AskDelete(selected.ToList())">Supprimer</button>
+                <button class="link" @onclick="ClearSelection">Tout désélectionner</button>
+            </div>
         }
 
-        <label class="checkbox">
-            <input type="checkbox" @bind="deactivateMissing" />
-            Désactiver les tâches actives qui ne sont plus dans ce texte
-        </label>
-        <p class="hint">Rien n'est supprimé : une tâche désactivée disparaît des sélecteurs, mais les règles et les feuilles de temps qui l'utilisent restent intactes. Vous pouvez la réactiver plus bas.</p>
-
-        <div class="buttons">
-            <button class="primary" disabled="@(busy || parsed is not { Tasks.Count: > 0 })" @onclick="ApplyAsync">
-                @(busy ? "Enregistrement…" : "Enregistrer la liste")
-            </button>
-            <button disabled="@busy" @onclick="ReloadTextAsync">Recharger la liste actuelle</button>
-        </div>
         @if (error is not null)
         {
             <div class="alert error" role="alert">@error</div>
@@ -71,112 +73,295 @@
         {
             <p class="ok-text" role="status">@message</p>
         }
-    </section>
-
-    <section class="card">
-        <div class="section-head">
-            <h2>Tâches enregistrées</h2>
-            <span class="muted">@tasks.Count(t => t.IsActive) active(s) sur @tasks.Count</span>
-        </div>
-        <div class="filters">
-            <label class="visually-hidden" for="task-filter">Filtrer</label>
-            <input id="task-filter" type="text" placeholder="Filtrer par projet, tâche ou code…" @bind="filter" @bind:event="oninput" />
-            <label class="checkbox"><input type="checkbox" @bind="showInactive" /> Afficher les tâches désactivées</label>
-        </div>
-
-        @if (!visible.Any())
+        @if (blocked.Count > 0)
         {
-            <p class="empty muted">Aucune tâche à afficher.</p>
+            <div class="alert warn" role="status">
+                <p>Conservée(s) car utilisée(s) par des règles ou des feuilles de temps :</p>
+                <ul>
+                    @foreach (var item in blocked)
+                    {
+                        <li>@item.Name <span class="muted">(@item.References utilisation(s))</span></li>
+                    }
+                </ul>
+                <button disabled="@busy" @onclick="DeactivateBlockedAsync">Les désactiver plutôt</button>
+            </div>
         }
-        else
-        {
-            <div class="table-wrap">
-                <table class="tasks">
-                    <thead>
-                        <tr><th>Projet</th><th>Tâche</th><th>Vue le</th><th class="actions-col"><span class="visually-hidden">Actions</span></th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var task in visible)
-                        {
-                            <tr class="@(task.IsActive ? null : "disabled")">
-                                <td>@if (task.ProjectCode is { } pc) { <code>@pc</code> } @task.ProjectName</td>
-                                <td>@if (ForecastCodes.TaskCode.IsMatch(task.ExternalId)) { <code>@task.ExternalId</code> } @task.TaskName</td>
-                                <td class="nowrap muted">@(task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
+
+        <p class="muted result-count" aria-live="polite">@total résultat(s)</p>
+
+        <div class="table-wrap">
+            <table class="tasks">
+                <thead>
+                    <tr>
+                        <th class="select-col">
+                            <input type="checkbox" aria-label="Tout sélectionner" checked="@(total > 0 && selected.Count == total)"
+                                   disabled="@(total == 0)" @onchange="e => ToggleAllAsync((bool)e.Value!)" />
+                        </th>
+                        <th class="star-col"><span class="visually-hidden">Favori</span></th>
+                        <th><button class="sort" @onclick="() => SetSortAsync(ForecastTaskSort.Project)">Projet@(SortMark(ForecastTaskSort.Project))</button></th>
+                        <th><button class="sort" @onclick="() => SetSortAsync(ForecastTaskSort.Task)">Tâche@(SortMark(ForecastTaskSort.Task))</button></th>
+                        <th><button class="sort" @onclick="() => SetSortAsync(ForecastTaskSort.LastSeen)">Vue le@(SortMark(ForecastTaskSort.LastSeen))</button></th>
+                        <th class="actions-col"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <Virtualize @ref="grid" TItem="ForecastTaskRow" ItemsProvider="LoadRowsAsync" ItemSize="37" OverscanCount="15" SpacerElement="tr">
+                        <ItemContent Context="row">
+                            @if (row.GroupHeader is not null)
+                            {
+                                <tr class="group"><th colspan="6">@row.GroupHeader</th></tr>
+                            }
+                            <tr class="@(row.Task.IsActive ? null : "disabled")">
+                                <td class="select-col">
+                                    <input type="checkbox" aria-label="Sélectionner @row.Task.TaskName"
+                                           checked="@selected.Contains(row.Task.Id)"
+                                           @onchange="e => ToggleSelect(row.Task.Id, (bool)e.Value!)" />
+                                </td>
+                                <td class="star-col">
+                                    <button class="star @(row.Task.IsFavorite ? "on" : null)" disabled="@busy"
+                                            aria-pressed="@row.Task.IsFavorite"
+                                            title="@(row.Task.IsFavorite ? "Retirer des favoris" : "Ajouter aux favoris")"
+                                            @onclick="() => ToggleFavoriteAsync(row.Task)">@(row.Task.IsFavorite ? "★" : "☆")</button>
+                                </td>
+                                <td>@if (row.Task.ProjectCode is { } pc) { <code>@pc</code> } @row.Task.ProjectName</td>
+                                <td>@if (IsTaskCode(row.Task.ExternalId)) { <code>@row.Task.ExternalId</code> } @row.Task.TaskName</td>
+                                <td class="nowrap muted">@(row.Task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
                                 <td class="actions">
-                                    <button @onclick="() => ToggleAsync(task)">@(task.IsActive ? "Désactiver" : "Réactiver")</button>
+                                    <button disabled="@busy" @onclick="() => OpenEdit(row.Task.Id)">Modifier</button>
+                                    <button disabled="@busy" @onclick="() => ToggleActiveAsync(row.Task)">@(row.Task.IsActive ? "Désactiver" : "Réactiver")</button>
+                                    <button class="danger" disabled="@busy" @onclick="() => AskDelete([row.Task.Id])">Supprimer</button>
                                 </td>
                             </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+                        </ItemContent>
+                        <Placeholder>
+                            <tr class="placeholder"><td colspan="6" class="muted">Chargement…</td></tr>
+                        </Placeholder>
+                    </Virtualize>
+                </tbody>
+            </table>
+        </div>
+        @if (total == 0)
+        {
+            <p class="empty muted">Aucune tâche à afficher.</p>
         }
     </section>
 </div>
 
+@if (dialog == Dialog.Form)
+{
+    <div class="backdrop" @onclick="CloseDialog">
+        <div class="dialog" role="dialog" aria-modal="true" @onclick:stopPropagation>
+            <NewTaskForm EditTaskId="editId" SubmitLabel="@(editId is null ? "Ajouter" : "Enregistrer")"
+                         OnCreated="OnSaved" OnCancel="CloseDialog" />
+        </div>
+    </div>
+}
+else if (dialog == Dialog.ConfirmDelete)
+{
+    <div class="backdrop" @onclick="CloseDialog">
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" @onclick:stopPropagation>
+            <h3 id="delete-title">Supprimer @(deleteIds.Count == 1 ? "cette tâche" : $"ces {deleteIds.Count} tâches") ?</h3>
+            <p class="hint">
+                La suppression est définitive. Une tâche utilisée par une règle ou une feuille de temps est conservée :
+                vous pourrez alors la désactiver à la place.
+            </p>
+            <div class="buttons">
+                <button class="danger" disabled="@busy" @onclick="ConfirmDeleteAsync">@(busy ? "Suppression…" : "Supprimer")</button>
+                <button disabled="@busy" @onclick="CloseDialog">Annuler</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
-    private string text = "";
-    private ForecastTaskListParseResult? parsed;
-    private bool deactivateMissing = true;
+    private enum Dialog { None, Form, ConfirmDelete }
+
+    private Virtualize<ForecastTaskRow>? grid;
+    private CancellationTokenSource? searchDebounce;
+    private readonly HashSet<int> selected = [];
+    private List<ForecastTaskBlocked> blocked = [];
+    private List<int> deleteIds = [];
+    private ForecastTaskCounts counts = new(0, 0, 0);
+    private Dialog dialog;
+    private int? editId;
+    private int total;
     private bool busy;
     private string? message;
     private string? error;
-    private string filter = "";
-    private bool showInactive;
-    private List<ForecastTask> tasks = [];
 
-    private IEnumerable<ForecastTask> visible =>
-        tasks
-            .Where(t => showInactive || t.IsActive)
-            .Where(t => string.IsNullOrWhiteSpace(filter)
-                || $"{t.ProjectCode} {t.ProjectName} {t.ExternalId} {t.TaskName}".Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase))
-            .OrderBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase);
+    private string search = "";
+    private ForecastTaskStatusFilter status = ForecastTaskStatusFilter.Active;
+    private ForecastTaskGrouping grouping = ForecastTaskGrouping.None;
+    private bool favoritesOnly;
+    private ForecastTaskSort sort = ForecastTaskSort.Project;
+    private bool descending;
+
+    private ForecastTaskQuery Query => new(search, status, favoritesOnly, sort, descending, grouping);
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadTasksAsync();
-        await ReloadTextAsync();
+        counts = await Catalog.CountsAsync();
+        total = (await Catalog.QueryAsync(Query, 0, 0)).Total;
     }
 
-    private void OnTextInput(ChangeEventArgs e)
+    public void Dispose() => searchDebounce?.Cancel();
+
+    private async ValueTask<ItemsProviderResult<ForecastTaskRow>> LoadRowsAsync(ItemsProviderRequest request)
     {
-        text = e.Value?.ToString() ?? "";
-        parsed = ForecastTaskListImport.Parse(text);
-        message = null;
-        error = null;
+        var page = await Catalog.QueryAsync(Query, request.StartIndex, request.Count, request.CancellationToken);
+        return new ItemsProviderResult<ForecastTaskRow>(page.Items, page.Total);
     }
 
-    private async Task ReloadTextAsync()
+    private async Task RefreshAsync() => await ReloadAsync(clearSelection: true);
+
+    private async Task ReloadAsync(bool clearSelection)
     {
-        text = await Importer.ExportAsync();
-        parsed = ForecastTaskListImport.Parse(text);
-        message = null;
-        error = null;
+        if (clearSelection)
+            selected.Clear();
+        counts = await Catalog.CountsAsync();
+        total = (await Catalog.QueryAsync(Query, 0, 0)).Total;
+        if (grid is not null)
+            await grid.RefreshDataAsync();
     }
 
-    private async Task LoadTasksAsync()
+    private async Task OnSearchInput(ChangeEventArgs e)
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        tasks = await db.ForecastTasks.AsNoTracking().Where(t => t.ExternalId != ForecastTask.IgnoredExternalId).ToListAsync();
-    }
-
-    private async Task ApplyAsync()
-    {
-        busy = true;
-        message = error = null;
+        search = e.Value?.ToString() ?? "";
+        searchDebounce?.Cancel();
+        var cts = searchDebounce = new CancellationTokenSource();
         try
         {
-            var result = await Importer.ImportAsync(text, deactivateMissing);
-            await LoadTasksAsync();
-            if (result.Sync.Warning is not null)
-                error = result.Sync.Warning;
-            else
-            {
-                message = result.Summary;
-                await ReloadTextAsync();
-                message = result.Summary;
-            }
+            await Task.Delay(250, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    private async Task SetSortAsync(ForecastTaskSort column)
+    {
+        descending = sort == column && !descending;
+        sort = column;
+        await RefreshAsync();
+    }
+
+    private string SortMark(ForecastTaskSort column) => sort != column ? "" : descending ? " ▼" : " ▲";
+
+    private static bool IsTaskCode(string externalId) =>
+        ForecastCodes.TaskCode.Match(externalId) is { Success: true } m && m.Value == externalId;
+
+    private void ToggleSelect(int id, bool on)
+    {
+        if (on)
+            selected.Add(id);
+        else
+            selected.Remove(id);
+    }
+
+    private async Task ToggleAllAsync(bool on)
+    {
+        selected.Clear();
+        if (on)
+            foreach (var id in await Catalog.QueryIdsAsync(Query))
+                selected.Add(id);
+        if (grid is not null)
+            await grid.RefreshDataAsync();
+    }
+
+    private async Task ClearSelection()
+    {
+        selected.Clear();
+        if (grid is not null)
+            await grid.RefreshDataAsync();
+    }
+
+    private void OpenAdd()
+    {
+        editId = null;
+        dialog = Dialog.Form;
+    }
+
+    private void OpenEdit(int id)
+    {
+        editId = id;
+        dialog = Dialog.Form;
+    }
+
+    private void CloseDialog()
+    {
+        if (!busy)
+            dialog = Dialog.None;
+    }
+
+    private async Task OnSaved(int id)
+    {
+        message = editId is null ? "Tâche ajoutée." : "Tâche modifiée.";
+        error = null;
+        blocked = [];
+        dialog = Dialog.None;
+        await ReloadAsync(clearSelection: false);
+    }
+
+    private void AskDelete(List<int> ids)
+    {
+        if (ids.Count == 0)
+            return;
+        deleteIds = ids;
+        dialog = Dialog.ConfirmDelete;
+    }
+
+    private async Task ConfirmDeleteAsync() => await RunAsync(async () =>
+    {
+        var report = await Catalog.DeleteAsync(deleteIds);
+        selected.ExceptWith(deleteIds);
+        blocked = report.Blocked.ToList();
+        message = report.Summary;
+        dialog = Dialog.None;
+    });
+
+    private async Task DeactivateBlockedAsync() => await RunAsync(async () =>
+    {
+        var changed = await Catalog.SetActiveAsync(blocked.Select(b => b.TaskId).ToList(), false);
+        message = $"{changed} tâche(s) désactivée(s).";
+        blocked = [];
+    });
+
+    private async Task SetActiveAsync(bool active) => await RunAsync(async () =>
+    {
+        var changed = await Catalog.SetActiveAsync(selected.ToList(), active);
+        message = active ? $"{changed} tâche(s) activée(s)." : $"{changed} tâche(s) désactivée(s).";
+    });
+
+    private async Task SetFavoriteAsync(bool favorite) => await RunAsync(async () =>
+    {
+        var changed = await Catalog.SetFavoriteAsync(selected.ToList(), favorite);
+        message = favorite ? $"{changed} tâche(s) ajoutée(s) aux favoris." : $"{changed} tâche(s) retirée(s) des favoris.";
+    });
+
+    private async Task ToggleFavoriteAsync(ForecastTask task) => await RunAsync(async () =>
+    {
+        await Catalog.SetFavoriteAsync([task.Id], !task.IsFavorite);
+        message = null;
+    });
+
+    private async Task ToggleActiveAsync(ForecastTask task) => await RunAsync(async () =>
+    {
+        await Catalog.SetActiveAsync([task.Id], !task.IsActive);
+        message = null;
+    });
+
+    /// <summary>Runs a change, then reloads the list; the selection survives (only deletions prune it).</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            await action();
+            await ReloadAsync(clearSelection: false);
         }
         catch (Exception ex)
         {
@@ -185,25 +370,6 @@
         finally
         {
             busy = false;
-        }
-    }
-
-    private async Task ToggleAsync(ForecastTask task)
-    {
-        try
-        {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var entity = await db.ForecastTasks.FindAsync(task.Id);
-            if (entity is null)
-                return;
-            entity.IsActive = !entity.IsActive;
-            await db.SaveChangesAsync();
-            await LoadTasksAsync();
-            await ReloadTextAsync();
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
         }
     }
 }

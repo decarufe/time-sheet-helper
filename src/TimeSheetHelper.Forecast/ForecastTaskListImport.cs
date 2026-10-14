@@ -166,9 +166,9 @@ public sealed class ForecastTaskImporter(IDbContextFactory<TimeSheetDbContext> d
         return new ForecastTaskAddResult(id, null);
     }
 
-    private const string InvalidCode = "\0invalid";
+    internal const string InvalidCode = "\0invalid";
 
-    private static string? NormalizeCode(string? code, System.Text.RegularExpressions.Regex pattern)
+    internal static string? NormalizeCode(string? code, System.Text.RegularExpressions.Regex pattern)
     {
         code = code?.Trim().ToUpperInvariant();
         if (string.IsNullOrEmpty(code))

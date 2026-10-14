@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContextFactory<TimeSheetDbContext>(o => o.UseSqlite(connectionString));
         services.AddSingleton<ActivityStore>();
         services.AddSingleton<IActivitySink>(sp => sp.GetRequiredService<ActivityStore>());
+        services.AddSingleton<IActivityHistory, ActivityStoreHistory>();
         return services;
     }
 }

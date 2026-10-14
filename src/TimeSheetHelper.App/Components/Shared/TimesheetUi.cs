@@ -67,19 +67,8 @@ public static class TimesheetUi
         _ => "Vide",
     };
 
-    public static string SourceLabel(ActivitySource source) => source switch
-    {
-        ActivitySource.Focus => "Fenêtre active",
-        ActivitySource.Idle => "Inactif",
-        ActivitySource.Locked => "Verrouillé",
-        ActivitySource.VsCode => "VS Code",
-        ActivitySource.ClaudeCode => "Claude Code",
-        ActivitySource.GitHub => "GitHub",
-        ActivitySource.AzureDevOps => "Azure DevOps",
-        ActivitySource.LocalGit => "Git local",
-        ActivitySource.Calendar => "Calendrier",
-        ActivitySource.Email => "Courriel",
-        ActivitySource.Teams => "Teams",
-        _ => source.ToString(),
-    };
+    /// <summary>Traits of the sources, set at startup from the plugin catalog; the built-in ones until then.</summary>
+    public static ISourceCatalog Sources { get; set; } = SourceCatalog.Default;
+
+    public static string SourceLabel(ActivitySource source) => Sources.Get(source).DisplayName;
 }
