@@ -1,9 +1,11 @@
 @page "/jour"
 @page "/jour/{Date}"
 @rendermode InteractiveServer
+@implements IDisposable
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.Options
 @using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Services
 @using TimeSheetHelper.Core.Activities
 @using TimeSheetHelper.Engine
 @using TimeSheetHelper.Engine.Allocation
@@ -15,22 +17,25 @@
 @inject IOptions<EngineOptions> EngineOptionsAccessor
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Nav
+@inject ShellState Shell
+@inject INavSummaryService NavSummaries
 @inject ILogger<Day> Logger
 
 <PageTitle>Jour — Time Sheet Helper</PageTitle>
 
 <div class="day @(selection is null ? null : "has-selection")">
-    <header class="toolbar">
-        <nav class="day-nav" aria-label="Navigation par jour">
-            <button type="button" @onclick="() => GoTo(day.AddDays(-1))" aria-label="Jour précédent">‹</button>
-            <button type="button" @onclick="() => GoTo(Today)" disabled="@(day == Today)">Aujourd'hui</button>
-            <button type="button" @onclick="() => GoTo(day.AddDays(1))" aria-label="Jour suivant">›</button>
-            <DatePickerButton Value="day" Label="Choisir un jour dans le calendrier" OnPicked="GoTo" />
-        </nav>
-        <h1>@TimesheetUi.Capitalize(day.ToString("dddd d MMMM yyyy", TimesheetUi.French))</h1>
-        <span class="spacer"></span>
-        <a class="button" href="@WeekHref">Voir la semaine</a>
-    </header>
+    @* The shell header shows the week (ShellWeekSync); the day navigation and the link to the week sit on its right. *@
+    <PageHeader Title="@TimesheetUi.Capitalize(day.ToString("dddd d MMMM yyyy", TimesheetUi.French))">
+        <Actions>
+            <nav class="day-nav" aria-label="Navigation par jour">
+                <button type="button" @onclick="() => GoTo(day.AddDays(-1))" aria-label="Jour précédent">‹</button>
+                <button type="button" @onclick="() => GoTo(Today)" disabled="@(day == Today)">Aujourd'hui</button>
+                <button type="button" @onclick="() => GoTo(day.AddDays(1))" aria-label="Jour suivant">›</button>
+                <DatePickerButton Value="day" Label="Choisir un jour dans le calendrier" OnPicked="GoTo" />
+            </nav>
+            <a class="button" href="@WeekHref">Voir la semaine</a>
+        </Actions>
+    </PageHeader>
 
     @if (message is not null)
     {
@@ -299,6 +304,7 @@
     [Parameter] public string? Date { get; set; }
 
     private DateOnly day = DateOnly.FromDateTime(DateTime.Today);
+    private ShellWeekSync weekSync = default!;
     private DayTimeline? timeline;
     private List<VisibleSlot> visible = [];
     private List<(int TaskId, decimal Hours)> taskHours = [];
@@ -343,9 +349,18 @@
 
     private bool SelectionHasOverride => SelectedSlots().Any(s => s.Kind is SlotKind.Override or SlotKind.ExcludedByOverride or SlotKind.Ignored);
 
+    // A week chosen in the shell header opens the same weekday of that week.
+    protected override void OnInitialized() =>
+        weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() =>
+        {
+            if (weekSync.IsPending && weekSync.Shown is { } shown)
+                GoTo(day.AddDays(week.DayNumber - shown.DayNumber));
+        }));
+
     protected override async Task OnParametersSetAsync()
     {
         var requested = TimesheetUi.TryParseIsoDate(Date, out var parsed) ? parsed : Today;
+        weekSync.Show(requested);
         if (timeline is not null && requested == day)
             return;
 
@@ -452,7 +467,13 @@
 
     private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
 
-    private void GoTo(DateOnly target) => Nav.NavigateTo($"jour/{TimesheetUi.IsoDate(target)}");
+    private void GoTo(DateOnly target)
+    {
+        weekSync.Show(target);
+        Nav.NavigateTo($"jour/{TimesheetUi.IsoDate(target)}");
+    }
+
+    public void Dispose() => weekSync?.Dispose();
 
     // Selection
 
@@ -691,6 +712,7 @@
         busy = true;
         message = null;
         lastCorrection = null;
+        var changedDay = day;
         try
         {
             await action();
@@ -703,6 +725,7 @@
         finally
         {
             busy = false;
+            NavSummaries.Invalidate(changedDay);
         }
     }
 

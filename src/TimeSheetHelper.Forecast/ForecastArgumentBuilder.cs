@@ -14,6 +14,9 @@ public sealed record ForecastArgumentValues
     public decimal? Hours { get; init; }
     public string? Notes { get; init; }
     public int? MaxResults { get; init; }
+
+    /// <summary>Id of an existing registration (to change or remove it).</summary>
+    public string? EntryId { get; init; }
 }
 
 public sealed record ForecastArguments(IReadOnlyDictionary<string, object?> Values, IReadOnlyList<string> MissingRequired)
@@ -51,7 +54,46 @@ public static class ForecastArgumentBuilder
     public static bool AcceptsDateRange(ForecastToolInfo tool) =>
         tool.ParameterNames.Select(Normalize).Any(n => Role(n) == ParameterRole.From);
 
-    private enum ParameterRole { None, From, To, Date, Person, Task, Hours, Notes, Limit }
+    /// <summary>True when the tool names the registration it acts on (an entry id), directly or in the items of a list parameter.</summary>
+    public static bool IdentifiesEntry(ForecastToolInfo tool) => DeepParameters(tool.InputSchema).Any(p => Role(Normalize(p.Name)) == ParameterRole.Entry);
+
+    /// <summary>True when the tool takes a duration (hours, minutes…), directly or in the items of a list parameter.</summary>
+    public static bool TakesDuration(ForecastToolInfo tool) => DeepParameters(tool.InputSchema).Any(p => Role(Normalize(p.Name)) == ParameterRole.Hours);
+
+    /// <summary>
+    /// Arguments of a write on one registration. A tool that takes its registrations as a list of objects (the "plan_…" tools of
+    /// forecast-mcp) receives a list holding one item built from the schema of the items; any other tool is built as <see cref="Build"/>.
+    /// </summary>
+    public static ForecastArguments BuildWrite(ForecastToolInfo tool, ForecastArgumentValues values)
+    {
+        if (ItemList(tool.InputSchema) is not { } list)
+            return Build(tool, values);
+
+        var item = Build(new ForecastToolInfo(tool.Name, null, list.Items), values);
+        var top = Build(tool, values);
+        var args = new Dictionary<string, object?>(top.Values) { [list.Name] = JsonSerializer.SerializeToElement(new[] { item.Values }) };
+        return new ForecastArguments(args, top.MissingRequired.Where(m => m != list.Name).Concat(item.MissingRequired).ToList());
+    }
+
+    private static (string Name, JsonElement Items)? ItemList(JsonElement schema)
+    {
+        foreach (var (name, definition) in Properties(schema))
+        {
+            if (Type(definition) == "array" && definition.TryGetProperty("items", out var items) && Properties(items).Any())
+                return (name, items);
+        }
+        return null;
+    }
+
+    private static IEnumerable<(string Name, JsonElement Definition)> Properties(JsonElement schema) =>
+        schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object
+            ? props.EnumerateObject().Select(p => (p.Name, p.Value)).ToList()
+            : [];
+
+    private static IEnumerable<(string Name, JsonElement Definition)> DeepParameters(JsonElement schema) =>
+        Properties(schema).Concat(ItemList(schema) is { } list ? Properties(list.Items) : []);
+
+    private enum ParameterRole { None, From, To, Date, Person, Task, Hours, Notes, Limit, Entry }
 
     private static object? Value(string name, JsonElement definition, ForecastArgumentValues v)
     {
@@ -74,6 +116,8 @@ public static class ForecastArgumentBuilder
                 return Type(definition) == "string" ? max.ToString(CultureInfo.InvariantCulture) : max;
             case ParameterRole.Hours when v.Hours is { } hours:
                 return Duration(hours, normalized, definition);
+            case ParameterRole.Entry:
+                return Id(v.EntryId, definition);
             default:
                 return null;
         }
@@ -101,6 +145,8 @@ public static class ForecastArgumentBuilder
             return ParameterRole.Notes;
         if (n is "maxresults" or "limit" or "pagesize" or "maxitems")
             return ParameterRole.Limit;
+        if (n is "id" or "entryid" or "timeentryid" or "timeregistrationid" or "registrationid" or "timeregid" or "worklogid" or "timelogid")
+            return ParameterRole.Entry;
         return ParameterRole.None;
     }
 

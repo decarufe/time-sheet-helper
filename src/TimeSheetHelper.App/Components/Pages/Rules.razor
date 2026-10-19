@@ -18,13 +18,11 @@
 <PageTitle>Règles — Time Sheet Helper</PageTitle>
 
 <div class="page">
-    <header class="page-header">
-        <h1>Règles</h1>
-        <p class="muted">
-            Une règle associe les activités qui remplissent une condition à une tâche Forecast.
-            Les règles sont essayées dans l'ordre : la première qui correspond l'emporte.
-        </p>
-    </header>
+    <PageHeader Title="Règles" />
+    <p class="muted page-intro">
+        Une règle associe les activités qui remplissent une condition à une tâche Forecast.
+        Les règles sont essayées dans l'ordre : la première qui correspond l'emporte.
+    </p>
 
     @if (loadError is not null)
     {

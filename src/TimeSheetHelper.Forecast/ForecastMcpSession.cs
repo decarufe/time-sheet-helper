@@ -95,17 +95,13 @@ public sealed partial class ForecastMcpSession(
         if (ForecastToolResolver.Resolve(tools, role, options.Tools) is { } tool)
             return tool;
 
-        var configKey = role switch
-        {
-            ForecastToolRole.ListTasks => "ListTasks",
-            ForecastToolRole.ListTimeEntries => "ListTimeEntries",
-            ForecastToolRole.CreateTimeEntry => "CreateTimeEntry",
-            _ => "CurrentUser",
-        };
         throw new ForecastToolException(
             $"Aucun outil du serveur Forecast MCP ne correspond à « {role} ». Lancez « TimeSheetHelper forecast tools » pour voir ceux qu'il offre, "
-            + $"puis indiquez le bon dans la configuration (Forecast:Tools:{configKey}).");
+            + $"puis indiquez le bon dans la configuration (Forecast:Tools:{ForecastToolResolver.ConfigKey(role)}).");
     }
+
+    /// <summary>True when the server offers a tool for this job (configured or recognised); never throws.</summary>
+    public bool Has(ForecastToolRole role) => ForecastToolResolver.Resolve(tools, role, options.Tools) is not null;
 
     public async Task<IReadOnlyList<ForecastRemoteTask>> ListTasksAsync(CancellationToken cancellationToken = default)
     {
@@ -222,6 +218,83 @@ public sealed partial class ForecastMcpSession(
             result.Json is { } json ? ForecastJson.ParseTimeEntries(json) : [];
     }
 
+    /// <summary>The registrations of one day (<see cref="ReadTimeEntriesAsync"/> on that day alone).</summary>
+    public Task<ForecastEntryRead> ReadDayAsync(DateOnly date, CancellationToken cancellationToken = default) =>
+        ReadTimeEntriesAsync(date, date, cancellationToken);
+
+    /// <summary>Sets the duration of the registration <paramref name="entryId"/> to <paramref name="hours"/>.</summary>
+    /// <exception cref="ForecastToolException">The server has no tool for it.</exception>
+    /// <exception cref="ForecastWriteException">The change was refused, failed, or its outcome is unknown.</exception>
+    public Task UpdateTimeEntryAsync(string entryId, decimal hours, CancellationToken cancellationToken = default) =>
+        WriteEntryAsync(Require(ForecastToolRole.UpdateTimeEntry), new ForecastArgumentValues { EntryId = entryId, Hours = hours }, Wording.Update, cancellationToken);
+
+    /// <summary>Removes the registration <paramref name="entryId"/>.</summary>
+    /// <exception cref="ForecastToolException">The server has no tool for it.</exception>
+    /// <exception cref="ForecastWriteException">The removal was refused, failed, or its outcome is unknown.</exception>
+    public Task DeleteTimeEntryAsync(string entryId, CancellationToken cancellationToken = default) =>
+        WriteEntryAsync(Require(ForecastToolRole.DeleteTimeEntry), new ForecastArgumentValues { EntryId = entryId }, Wording.Delete, cancellationToken);
+
+    /// <summary>How a write is named in the messages: "a refusé {Noun}", "{Noun} a peut-être été {Applied}", "rien n'a été {Done}".</summary>
+    private sealed record Wording(string Noun, string Applied, string Done)
+    {
+        public static readonly Wording Create = new("l'enregistrement", "appliqué", "enregistré");
+        public static readonly Wording Update = new("la modification", "appliquée", "modifié");
+        public static readonly Wording Delete = new("la suppression", "appliquée", "supprimé");
+    }
+
+    /// <summary>One write on an existing registration; never retried after a transport failure (it may have been applied).</summary>
+    private async Task WriteEntryAsync(ForecastToolInfo tool, ForecastArgumentValues values, Wording wording, CancellationToken cancellationToken)
+    {
+        var args = ForecastArgumentBuilder.BuildWrite(tool, values);
+        if (!args.IsComplete)
+            throw new ForecastWriteException(
+                $"L'outil « {tool.Name} » exige le(s) paramètre(s) {string.Join(", ", args.MissingRequired.Select(m => $"« {m} »"))} "
+                + $"que je ne sais pas renseigner : rien n'a été {wording.Done}.", ForecastWriteOutcome.Failed);
+
+        if (tool.Name.StartsWith("plan_", StringComparison.OrdinalIgnoreCase))
+        {
+            var confirmName = "confirm_" + tool.Name["plan_".Length..];
+            if (tools.FirstOrDefault(t => string.Equals(t.Name, confirmName, StringComparison.OrdinalIgnoreCase)) is not { } confirm)
+                throw new ForecastWriteException(
+                    $"Le serveur Forecast offre « {tool.Name} » mais pas « {confirmName} » : rien n'a été {wording.Done}.", ForecastWriteOutcome.Failed);
+            await StageAndConfirmAsync(tool, confirm, args.Values, wording, cancellationToken);
+            return;
+        }
+
+        ForecastToolResult result;
+        try
+        {
+            result = await CallAsync(tool, args.Values, cancellationToken, retryTransient: false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or HttpRequestException or McpException or IOException)
+        {
+            throw new ForecastWriteException(
+                $"« {tool.Name} » n'a pas répondu ({ex.Message}) : {wording.Noun} a peut-être été {wording.Applied}.", ForecastWriteOutcome.Unknown, transportFailure: true);
+        }
+        catch (ForecastToolException ex) when (ex is not ForecastWriteException)
+        {
+            throw new ForecastWriteException(ex.Message, ForecastWriteOutcome.Failed);
+        }
+
+        var outcome = ForecastJson.ParseOutcome(result.Json);
+        if (!outcome.Ok)
+        {
+            var kind = outcome.Outcome switch
+            {
+                "refused" => ForecastWriteOutcome.Refused,
+                "unknown" => ForecastWriteOutcome.Unknown,
+                _ => ForecastWriteOutcome.Failed,
+            };
+            var verb = kind switch
+            {
+                ForecastWriteOutcome.Refused => $"a refusé {wording.Noun}",
+                ForecastWriteOutcome.Unknown => $"ne sait pas si {wording.Noun} a été {wording.Applied}",
+                _ => "a échoué",
+            };
+            throw new ForecastWriteException($"« {tool.Name} » {verb}{(outcome.Message is null ? "." : " : " + outcome.Message)}", kind);
+        }
+    }
+
     /// <exception cref="ForecastWriteException">The registration was refused, failed, or its outcome is unknown (see <see cref="ForecastWriteOutcome"/>).</exception>
     public async Task<ForecastCreateResult> CreateTimeEntryAsync(string remoteTaskId, DateOnly date, decimal hours, string? notes, CancellationToken cancellationToken = default)
     {
@@ -253,11 +326,18 @@ public sealed partial class ForecastMcpSession(
         if (!string.IsNullOrWhiteSpace(notes))
             entry["notes"] = notes;
 
+        return await StageAndConfirmAsync(
+            plan, confirm, new Dictionary<string, object?> { ["entries"] = JsonSerializer.SerializeToElement(new[] { entry }) }, Wording.Create, cancellationToken);
+    }
+
+    /// <summary>Calls the "plan_…" tool with these arguments, then the "confirm_…" tool with the action id it staged.</summary>
+    private async Task<ForecastCreateResult> StageAndConfirmAsync(
+        ForecastToolInfo plan, ForecastToolInfo confirm, IReadOnlyDictionary<string, object?> arguments, Wording wording, CancellationToken cancellationToken)
+    {
         ForecastToolResult staged;
         try
         {
-            staged = await CallAsync(
-                plan, new Dictionary<string, object?> { ["entries"] = JsonSerializer.SerializeToElement(new[] { entry }) }, cancellationToken);
+            staged = await CallAsync(plan, arguments, cancellationToken);
         }
         catch (ForecastToolException ex)
         {
@@ -270,7 +350,7 @@ public sealed partial class ForecastMcpSession(
         {
             var refused = planOutcome.Outcome == "refused";
             throw new ForecastWriteException(
-                $"« {plan.Name} » {(refused ? "a refusé l'enregistrement" : "a échoué")}{(planOutcome.Message is null ? "." : " : " + planOutcome.Message)}",
+                $"« {plan.Name} » {(refused ? $"a refusé {wording.Noun}" : "a échoué")}{(planOutcome.Message is null ? "." : " : " + planOutcome.Message)}",
                 refused ? ForecastWriteOutcome.Refused : ForecastWriteOutcome.Failed);
         }
 
@@ -291,7 +371,7 @@ public sealed partial class ForecastMcpSession(
         catch (Exception ex) when (ex is TimeoutException or HttpRequestException or McpException or IOException)
         {
             throw new ForecastWriteException(
-                $"« {confirm.Name} » n'a pas répondu ({ex.Message}) : l'enregistrement a peut-être été appliqué.", ForecastWriteOutcome.Unknown, transportFailure: true);
+                $"« {confirm.Name} » n'a pas répondu ({ex.Message}) : {wording.Noun} a peut-être été {wording.Applied}.", ForecastWriteOutcome.Unknown, transportFailure: true);
         }
         catch (ForecastToolException ex)
         {
@@ -309,8 +389,8 @@ public sealed partial class ForecastMcpSession(
             };
             var verb = kind switch
             {
-                ForecastWriteOutcome.Refused => "a refusé l'enregistrement",
-                ForecastWriteOutcome.Unknown => "ne sait pas si l'enregistrement a été appliqué",
+                ForecastWriteOutcome.Refused => $"a refusé {wording.Noun}",
+                ForecastWriteOutcome.Unknown => $"ne sait pas si {wording.Noun} a été {wording.Applied}",
                 _ => "a échoué",
             };
             throw new ForecastWriteException($"« {confirm.Name} » {verb}{(outcome.Message is null ? "." : " : " + outcome.Message)}", kind);

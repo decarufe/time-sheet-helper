@@ -1,8 +1,10 @@
 @page "/"
 @rendermode InteractiveServer
+@implements IDisposable
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.JSInterop
 @using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Services
 @using TimeSheetHelper.Core.Forecast
 @using TimeSheetHelper.Engine
 @using TimeSheetHelper.Engine.Allocation
@@ -14,26 +16,23 @@
 @inject SlotAllocator Allocator
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Nav
+@inject ShellState Shell
+@inject INavSummaryService NavSummaries
 @inject ILogger<Week> Logger
 
 <PageTitle>Semaine — Time Sheet Helper</PageTitle>
 
 <div class="week">
-    <header class="toolbar">
-        <nav class="week-nav" aria-label="Navigation par semaine">
-            <button type="button" @onclick="() => GoToWeek(monday.AddDays(-7))" aria-label="Semaine précédente">‹</button>
-            <button type="button" @onclick="() => GoToWeek(Today)" disabled="@(monday == TimesheetUi.WeekStartOf(Today))">Cette semaine</button>
-            <button type="button" @onclick="() => GoToWeek(monday.AddDays(7))" aria-label="Semaine suivante">›</button>
-            <DatePickerButton Value="monday" Label="Choisir une semaine dans le calendrier" OnPicked="GoToWeek" />
-        </nav>
-        <h1>@WeekTitle(monday)</h1>
-        <span class="spacer"></span>
-        @if (!IsSubmitted)
-        {
-            <button type="button" @onclick="RebuildAsync" disabled="@busy" title="Recalcule la semaine et met à jour le brouillon à soumettre">Recalculer</button>
-        }
-        <a class="button primary" href="soumettre">Soumettre…</a>
-    </header>
+    @* The week is chosen in the shell header (ShellWeekSync), which also shows its dates; the actions sit on its right. *@
+    <PageHeader Title="Semaine">
+        <Actions>
+            @if (!IsSubmitted)
+            {
+                <button type="button" @onclick="RebuildAsync" disabled="@busy" title="Recalcule la semaine et met à jour le brouillon à soumettre">Recalculer</button>
+            }
+            <a class="button primary" href="soumettre">Soumettre…</a>
+        </Actions>
+    </PageHeader>
 
     @if (message is not null)
     {
@@ -360,6 +359,7 @@
     public string? WeekParameter { get; set; }
 
     private DateOnly monday = TimesheetUi.WeekStartOf(DateOnly.FromDateTime(DateTime.Today));
+    private ShellWeekSync weekSync = default!;
     private List<DateOnly> days = [];
     private WeekProposal? proposal;
     private DateTime? submittedUtc;
@@ -396,10 +396,19 @@
 
     private DayFlag WeekFlag => WeekTotal < WeekTarget ? DayFlag.UnderTarget : WeekTotal > WeekTarget ? DayFlag.OverTarget : DayFlag.Ok;
 
+    protected override void OnInitialized() =>
+        weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() =>
+        {
+            if (weekSync.IsPending)
+                GoToWeek(week);
+        }));
+
     protected override async Task OnParametersSetAsync()
     {
-        var requested = TimesheetUi.TryParseIsoDate(WeekParameter, out var day) ? day : Today;
+        // Without ?semaine= the page shows the week of the shell (the current week on arrival).
+        var requested = TimesheetUi.TryParseIsoDate(WeekParameter, out var day) ? day : Shell.WeekStart;
         var week = TimesheetUi.WeekStartOf(requested);
+        weekSync.Show(week);
         if (proposal is not null && week == monday)
             return;
 
@@ -500,10 +509,21 @@
     private SlotRange WeekRange() =>
         new(Allocator.DayBounds(monday).StartUtc, Allocator.DayBounds(monday.AddDays(6)).EndUtc);
 
-    private void GoToWeek(DateOnly day) =>
-        Nav.NavigateTo(TimesheetUi.WeekStartOf(day) == TimesheetUi.WeekStartOf(Today)
-            ? Nav.GetUriWithQueryParameter("semaine", (string?)null)
-            : Nav.GetUriWithQueryParameter("semaine", TimesheetUi.IsoDate(TimesheetUi.WeekStartOf(day))));
+    private void GoToWeek(DateOnly day)
+    {
+        // The shell follows first: without ?semaine= the page reads the week of the shell.
+        weekSync.Show(day);
+        Nav.NavigateTo(WeekUri(Nav, day));
+    }
+
+    /// <summary>
+    /// Always names the week: without ?semaine= the page shows the week of the shell, so "/" may already be the
+    /// current URL while another week is shown and navigating to it would not reload the page.
+    /// </summary>
+    public static string WeekUri(NavigationManager nav, DateOnly day) =>
+        nav.GetUriWithQueryParameter("semaine", TimesheetUi.IsoDate(TimesheetUi.WeekStartOf(day)));
+
+    public void Dispose() => weekSync?.Dispose();
 
     private async Task RebuildAsync()
     {
@@ -708,6 +728,7 @@
             return;
         busy = true;
         message = null;
+        var week = monday;
         try
         {
             await action();
@@ -721,6 +742,7 @@
         finally
         {
             busy = false;
+            NavSummaries.Invalidate(week);
         }
     }
 
@@ -759,15 +781,4 @@
 
     private static string Samples(IReadOnlyList<string> values) =>
         values.Count <= 3 ? string.Join(" · ", values) : $"{string.Join(" · ", values.Take(3))} · +{values.Count - 3}";
-
-    private static string WeekTitle(DateOnly monday)
-    {
-        var sunday = monday.AddDays(6);
-        var f = TimesheetUi.French;
-        if (monday.Year != sunday.Year)
-            return $"Semaine du {monday.ToString("d MMMM yyyy", f)} au {sunday.ToString("d MMMM yyyy", f)}";
-        if (monday.Month != sunday.Month)
-            return $"Semaine du {monday.ToString("d MMMM", f)} au {sunday.ToString("d MMMM yyyy", f)}";
-        return $"Semaine du {monday.Day} au {sunday.ToString("d MMMM yyyy", f)}";
-    }
 }

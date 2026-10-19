@@ -2,22 +2,6 @@
   max-width: 1200px;
 }
 
-.page-header h1 {
-  font-size: 1.4rem;
-  margin: 0 0 8px;
-}
-
-.week-picker {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.week-title {
-  margin-left: 8px;
-  font-weight: 600;
-}
-
 .notice {
   margin: 14px 0;
   padding: 8px 14px;

@@ -22,22 +22,15 @@
 @inject GroupAssignmentService Assignments
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Navigation
+@inject ShellState Shell
+@inject INavSummaryService NavSummaries
 @inject ILogger<Submit> Logger
 
 <PageTitle>Soumettre — Time Sheet Helper</PageTitle>
 
 <div class="page">
-    <header class="page-header">
-        <h1>Soumettre à Forecast</h1>
-        <div class="week-picker">
-            <button type="button" class="icon" aria-label="Semaine précédente" disabled="@AnyBusy" @onclick="() => GoToWeek(monday.AddDays(-7))">‹</button>
-            <label class="visually-hidden" for="week-day">Semaine</label>
-            <input id="week-day" type="date" value="@TimesheetUi.IsoDate(monday)" disabled="@AnyBusy" @onchange="OnDatePicked" />
-            <button type="button" class="icon" aria-label="Semaine suivante" disabled="@AnyBusy" @onclick="() => GoToWeek(monday.AddDays(7))">›</button>
-            <button type="button" disabled="@AnyBusy" @onclick="() => GoToWeek(UiLabels.MondayOf(DateOnly.FromDateTime(DateTime.Today)))">Cette semaine</button>
-            <span class="week-title">@UiLabels.WeekTitle(monday)</span>
-        </div>
-    </header>
+    @* The week is chosen in the shell header (ShellWeekSync); the page title is its single h1. *@
+    <PageHeader Title="Soumettre à Forecast" />
 
     <details class="notice">
         <summary>Comment ça marche</summary>
@@ -377,6 +370,7 @@
     private readonly AnalysisSequencer analyses = new();
     private readonly SemaphoreSlim simulationGate = new(1, 1);
     private DebouncedAction debounce = default!;
+    private ShellWeekSync weekSync = default!;
     private bool disposed;
 
     private GapFilter filter = GapFilter.None;
@@ -422,16 +416,22 @@
 
     private string TableWrapClass => draftRefreshing ? "table-wrap updating" : "table-wrap";
 
-    protected override void OnInitialized() =>
+    protected override void OnInitialized()
+    {
         debounce = new DebouncedAction(
             TimeSpan.FromMilliseconds(AutoRunDelayMs),
             ct => InvokeAsync(() => SimulateAsync(auto: true, ct)),
             ex => Logger.LogWarning("Automatic re-simulation failed ({ExceptionType}).", ex.GetType().Name));
+        weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() => OnShellWeekRequested(week)));
+    }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (DateOnly.TryParseExact(Semaine, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
-            monday = UiLabels.MondayOf(day);
+        // Without ?semaine= the page shows the week of the shell (the current week on arrival).
+        monday = DateOnly.TryParseExact(Semaine, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+            ? UiLabels.MondayOf(day)
+            : Shell.WeekStart;
+        weekSync.Show(monday);
 
         // Days of another week never stay selected, whatever happens to the load below.
         selectedDays = DaySelection.Prune(selectedDays, monday);
@@ -462,6 +462,7 @@
     public void Dispose()
     {
         disposed = true;
+        weekSync?.Dispose();
         debounce.Dispose();
         simulations.Dispose();
         analyses.Dispose();
@@ -478,10 +479,18 @@
     private void GoToWeek(DateOnly day) =>
         Navigation.NavigateTo($"soumettre?semaine={TimesheetUi.IsoDate(UiLabels.MondayOf(day))}", replace: true);
 
-    private void OnDatePicked(ChangeEventArgs e)
+    /// <summary>
+    /// The header asks for another week. While an operation runs the page keeps its week (the former week buttons
+    /// were disabled then): the header goes back to it.
+    /// </summary>
+    private void OnShellWeekRequested(DateOnly week)
     {
-        if (TimesheetUi.TryParseIsoDate(e.Value?.ToString(), out var day))
-            GoToWeek(day);
+        if (disposed || !weekSync.IsPending)
+            return;
+        if (AnyBusy)
+            weekSync.Show(monday);
+        else
+            GoToWeek(week);
     }
 
     /// <summary>Everything the page knows about a week: dropped when the week changes or the draft is reopened.</summary>
@@ -947,6 +956,7 @@
                 stored.SubmittedUtc = DateTime.UtcNow;
                 await db.SaveChangesAsync();
                 current.SubmittedUtc = stored.SubmittedUtc;
+                NavSummaries.Invalidate(week);
             }
 
             if (!FillGuard.ResultApplies(week, monday, disposed))
@@ -993,6 +1003,7 @@
             await db.TimesheetDrafts.Where(d => d.Id == draft.Id)
                 .ExecuteUpdateAsync(s => s.SetProperty(d => d.SubmittedUtc, (DateTime?)null));
         }
+        NavSummaries.Invalidate(draft.WeekStart);
 
         ResetWeekState();
         await LoadAsync();
@@ -1095,9 +1106,11 @@
         actionBusy = true;
         actionOp = new OpState(true, message, null);
         Refresh();
+        var week = monday;
         try
         {
             actionOp = new OpState(false, await action(), null);
+            NavSummaries.Invalidate(week);
         }
         catch (ForecastAuthRequiredException ex)
         {

@@ -251,6 +251,205 @@ public sealed class ForecastTimesheetWriter(
         throw new NotImplementedException(
             "TODO: soumission pour approbation non implémentée : à faire à la main dans Forecast.");
 
+    /// <summary>
+    /// The writes the server offers: creating a registration, changing its hours, removing it. A server that cannot be reached
+    /// gives <see cref="ForecastCapabilities.Unknown"/> with the reason; an authentication to renew propagates.
+    /// </summary>
+    public async Task<ForecastCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var session = await api.OpenAsync(cancellationToken);
+            return CapabilitiesOf(session);
+        }
+        catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
+        {
+            logger.LogWarning(ex, "Capacités de Forecast illisibles.");
+            return ForecastCapabilities.Unknown with { UnavailableReason = $"Capacités de Forecast inconnues : {ex.Message}" };
+        }
+    }
+
+    internal static ForecastCapabilities CapabilitiesOf(ForecastMcpSession session)
+    {
+        var reasons = new List<string>();
+        ForecastCapability Check(ForecastToolRole role, string what)
+        {
+            if (session.Has(role))
+                return ForecastCapability.Available;
+            reasons.Add($"Le serveur Forecast ne propose pas {what} d'une saisie.");
+            return ForecastCapability.Unavailable;
+        }
+
+        var create = Check(ForecastToolRole.CreateTimeEntry, "la création");
+        var update = Check(ForecastToolRole.UpdateTimeEntry, "la modification");
+        var delete = Check(ForecastToolRole.DeleteTimeEntry, "la suppression");
+        return new ForecastCapabilities(create, update, delete, reasons.Count == 0 ? null : string.Join(" ", reasons));
+    }
+
+    /// <summary>The registrations of the signed-in person on one day, and whether the list is whole.</summary>
+    public async Task<ForecastEntryRead> ReadDayAsync(DateOnly date, CancellationToken cancellationToken = default)
+    {
+        await using var session = await api.OpenAsync(cancellationToken);
+        return await session.ReadDayAsync(date, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the registration <paramref name="entryId"/> of <paramref name="date"/> to <paramref name="newHours"/>. The day is read again
+    /// first: nothing is written when the read is incomplete, when the registration no longer holds <paramref name="expectedForecastHours"/>
+    /// (it changed since it was shown), when the day is approved or invoiced, or when the server has no tool for it. A registration that
+    /// already holds <paramref name="newHours"/> is <see cref="ForecastCellStatus.Skipped"/>, so replaying the change is harmless.
+    /// A change whose outcome is unknown (timeout, cancellation during the call) is settled by reading the day back.
+    /// </summary>
+    public Task<ForecastCellResult> UpdateCellAsync(
+        DateOnly date, int forecastTaskId, string entryId, decimal expectedForecastHours, decimal newHours, CancellationToken cancellationToken = default) =>
+        ChangeEntryAsync(delete: false, date, forecastTaskId, entryId, expectedForecastHours, newHours, cancellationToken);
+
+    /// <summary>
+    /// Removes the registration <paramref name="entryId"/> of <paramref name="date"/>, on the same conditions as <see cref="UpdateCellAsync"/>.
+    /// A registration that is already gone is <see cref="ForecastCellStatus.Skipped"/>.
+    /// </summary>
+    public Task<ForecastCellResult> DeleteCellAsync(
+        DateOnly date, int forecastTaskId, string entryId, decimal expectedForecastHours, CancellationToken cancellationToken = default) =>
+        ChangeEntryAsync(delete: true, date, forecastTaskId, entryId, expectedForecastHours, 0m, cancellationToken);
+
+    private async Task<ForecastCellResult> ChangeEntryAsync(
+        bool delete, DateOnly date, int forecastTaskId, string entryId, decimal expected, decimal newHours, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var role = delete ? ForecastToolRole.DeleteTimeEntry : ForecastToolRole.UpdateTimeEntry;
+        var (displayName, localCode) = await LabelAsync(forecastTaskId, cancellationToken);
+
+        ForecastCellResult Cell(ForecastCellStatus status, decimal? actual, string message, ForecastEntryState state, ForecastCellIssue issue = ForecastCellIssue.None) =>
+            new(forecastTaskId, displayName, date, newHours, actual, status, message) { Issue = issue, EntryState = state };
+
+        ForecastMcpSession session;
+        try
+        {
+            session = await api.OpenAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
+        {
+            logger.LogWarning(ex, "Connexion à Forecast impossible.");
+            return Cell(ForecastCellStatus.Error, null, ex.Message, ForecastEntryState.NotApplicable);
+        }
+
+        await using var scope = session;
+
+        if (!session.Has(role))
+            return Cell(ForecastCellStatus.Error, null,
+                delete
+                    ? "Le serveur Forecast ne propose pas la suppression d'une saisie : rien n'a été supprimé. Supprimez-la dans Forecast."
+                    : "Le serveur Forecast ne propose pas la modification d'une saisie : rien n'a été modifié. Corrigez-la dans Forecast.",
+                ForecastEntryState.NotApplicable, ForecastCellIssue.WriteRefused);
+
+        ForecastEntryRead before;
+        try
+        {
+            before = await session.ReadDayAsync(date, cancellationToken);
+        }
+        catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
+        {
+            return Cell(ForecastCellStatus.Unknown, null, $"Lecture de Forecast impossible ({ex.Message}) : rien n'est modifié.",
+                ForecastEntryState.Unknown, ForecastCellIssue.ReadIncomplete);
+        }
+
+        if (!before.IsComplete)
+            return Cell(ForecastCellStatus.Unknown, null,
+                $"Lecture incomplète des saisies du {date:yyyy-MM-dd} ({before.Detail ?? "liste tronquée"}) : rien n'est modifié.",
+                ForecastEntryState.Unknown, ForecastCellIssue.ReadIncomplete);
+
+        var entry = Find(before.Entries, entryId);
+        if (entry is null)
+            return delete
+                ? Cell(ForecastCellStatus.Skipped, 0m, "La saisie n'est plus dans Forecast : rien à supprimer.", ForecastEntryState.NotEntered)
+                : Cell(ForecastCellStatus.Mismatch, null, $"La saisie {entryId} est introuvable dans Forecast le {date:yyyy-MM-dd} : rien n'est modifié.",
+                    ForecastEntryState.NotApplicable);
+
+        if (entry.TaskCode is { } remoteCode && localCode is not null && !string.Equals(remoteCode, localCode, StringComparison.OrdinalIgnoreCase))
+            return Cell(ForecastCellStatus.Mismatch, entry.Hours,
+                $"La saisie {entryId} est sur la tâche {remoteCode}, pas sur {localCode} : rien n'est modifié.", ForecastEntryState.NotApplicable);
+
+        if (before.Entries.Any(e => e.IsLocked))
+            return Cell(ForecastCellStatus.Locked, entry.Hours,
+                $"Le {date:yyyy-MM-dd} contient des saisies approuvées ou facturées dans Forecast : rien n'est modifié.", ForecastEntryState.NotApplicable);
+
+        if (!delete && Math.Abs(entry.Hours - newHours) <= ForecastFillPlanner.Tolerance)
+            return Cell(ForecastCellStatus.Skipped, entry.Hours, $"Forecast contient déjà {entry.Hours:0.##} h : rien à modifier.", ForecastEntryState.Entered);
+
+        if (Math.Abs(entry.Hours - expected) > ForecastFillPlanner.Tolerance)
+            return Cell(ForecastCellStatus.Mismatch, entry.Hours,
+                $"Forecast contient {entry.Hours:0.##} h, pas les {expected:0.##} h attendues : la saisie a changé, rien n'est modifié.",
+                ForecastEntryState.NotApplicable);
+
+        string? unknownOutcome = null;
+        try
+        {
+            if (delete)
+                await session.DeleteTimeEntryAsync(entryId, cancellationToken);
+            else
+                await session.UpdateTimeEntryAsync(entryId, newHours, cancellationToken);
+        }
+        catch (ForecastWriteException ex) when (ex.Outcome == ForecastWriteOutcome.Unknown)
+        {
+            unknownOutcome = ex.Message;
+        }
+        catch (ForecastToolException ex)
+        {
+            var refused = ex is ForecastWriteException { Outcome: ForecastWriteOutcome.Refused };
+            return Cell(ForecastCellStatus.Error, entry.Hours, ex.Message, ForecastEntryState.NotApplicable,
+                refused ? ForecastCellIssue.WriteRefused : ForecastCellIssue.WriteFailed);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException || ForecastErrors.IsRecoverable(ex, cancellationToken))
+        {
+            // The request left: it may have been applied. Reading back settles it, even when the caller cancelled.
+            unknownOutcome = ex.Message;
+        }
+
+        var verifyToken = cancellationToken.IsCancellationRequested ? CancellationToken.None : cancellationToken;
+        ForecastEntryRead after;
+        try
+        {
+            after = await session.ReadDayAsync(date, verifyToken);
+        }
+        catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, verifyToken))
+        {
+            return Cell(ForecastCellStatus.Unknown, null, $"Relecture de Forecast impossible ({ex.Message}) : vérifiez la saisie dans Forecast.",
+                ForecastEntryState.Unknown, ForecastCellIssue.OutcomeUnknown);
+        }
+
+        if (!after.IsComplete)
+            return Cell(ForecastCellStatus.Unknown, null,
+                $"Relecture incomplète des saisies du {date:yyyy-MM-dd} ({after.Detail ?? "liste tronquée"}) : vérifiez la saisie dans Forecast.",
+                ForecastEntryState.Unknown, ForecastCellIssue.OutcomeUnknown);
+
+        var now = Find(after.Entries, entryId);
+        if (delete ? now is null : now is not null && Math.Abs(now.Hours - newHours) <= ForecastFillPlanner.Tolerance)
+            return delete
+                ? Cell(ForecastCellStatus.Deleted, 0m, "Saisie supprimée.", ForecastEntryState.NotEntered)
+                : Cell(ForecastCellStatus.Updated, now!.Hours, $"Saisie modifiée : {now.Hours:0.##} h.", ForecastEntryState.Entered);
+
+        return unknownOutcome is not null
+            ? Cell(ForecastCellStatus.Unknown, now?.Hours, $"{unknownOutcome} La relecture ne montre pas le changement : vérifiez la saisie dans Forecast.",
+                ForecastEntryState.Unknown, ForecastCellIssue.OutcomeUnknown)
+            : Cell(ForecastCellStatus.Mismatch, now?.Hours,
+                delete
+                    ? $"La saisie {entryId} est toujours dans Forecast après la suppression."
+                    : $"Forecast contient {(now is null ? "0" : now.Hours.ToString("0.##"))} h après la modification, pas {newHours:0.##} h.",
+                ForecastEntryState.Unknown);
+    }
+
+    private static ForecastRemoteEntry? Find(IEnumerable<ForecastRemoteEntry> entries, string entryId) =>
+        entries.FirstOrDefault(e => string.Equals(e.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<(string DisplayName, string? Code)> LabelAsync(int forecastTaskId, CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var task = await db.ForecastTasks.AsNoTracking().FirstOrDefaultAsync(t => t.Id == forecastTaskId, cancellationToken);
+        return task is null
+            ? ($"Tâche #{forecastTaskId}", null)
+            : (task.DisplayName, ForecastCodes.TaskCode.Match(task.ExternalId) is { Success: true } code ? code.Value : null);
+    }
+
     private sealed record WrittenCell(ForecastCellEvaluation Evaluation, IReadOnlyList<string> Warnings, string? UnknownOutcome);
 
     /// <summary>

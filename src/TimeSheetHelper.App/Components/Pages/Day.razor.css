@@ -1,11 +1,10 @@
+/* Local tokens only; the shared ones (--ok, --warn, --danger, --accent-bg...) come from app.css and follow data-theme. */
 .day {
-    --ok: #1a7f37;
     --under: #bc4c00;
     --over: #8250df;
     --mid-bg: rgba(212, 167, 44, 0.18);
     --low-bg: rgba(225, 111, 36, 0.24);
     --low-fg: #953800;
-    --info-bg: rgba(9, 105, 218, 0.08);
     --error-bg: rgba(207, 34, 46, 0.1);
     --error-fg: #cf222e;
     --selected-bg: rgba(9, 105, 218, 0.12);
@@ -19,35 +18,32 @@
     padding-bottom: 72px;
 }
 
+:root[data-theme="dark"] .day {
+    --under: #f0883e;
+    --over: #a371f7;
+    --mid-bg: rgba(187, 128, 9, 0.2);
+    --low-bg: rgba(219, 109, 40, 0.28);
+    --low-fg: #ffa657;
+    --error-bg: rgba(248, 81, 73, 0.14);
+    --error-fg: #ff7b72;
+    --selected-bg: rgba(68, 147, 248, 0.2);
+    --stripe: rgba(141, 150, 160, 0.4);
+    --task-l: 62%;
+}
+
 @media (prefers-color-scheme: dark) {
-    .day {
-        --ok: #3fb950;
+    :root:not([data-theme="light"]) .day {
         --under: #f0883e;
         --over: #a371f7;
         --mid-bg: rgba(187, 128, 9, 0.2);
         --low-bg: rgba(219, 109, 40, 0.28);
         --low-fg: #ffa657;
-        --info-bg: rgba(68, 147, 248, 0.12);
         --error-bg: rgba(248, 81, 73, 0.14);
         --error-fg: #ff7b72;
         --selected-bg: rgba(68, 147, 248, 0.2);
         --stripe: rgba(141, 150, 160, 0.4);
         --task-l: 62%;
     }
-}
-
-/* Toolbar */
-.toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-}
-
-.toolbar h1 {
-    font-size: 1.4rem;
-    margin: 0 0 0 8px;
 }
 
 .day-nav {
@@ -108,7 +104,7 @@ a.button:hover {
 }
 
 .notice.info {
-    background: var(--info-bg);
+    background: var(--accent-bg);
 }
 
 .notice.error {
@@ -597,12 +593,6 @@ a.button:hover {
 }
 
 @media (max-width: 640px) {
-    .toolbar h1 {
-        font-size: 1.15rem;
-        flex-basis: 100%;
-        margin-left: 0;
-    }
-
     .band {
         width: 28px;
     }

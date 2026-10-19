@@ -94,16 +94,18 @@ public interface INavSummaryService
     void Invalidate(DateOnly weekStart);
 }
 
-/// NOUVEAU — implémentation (singleton) : réutilise WeekService.GetWeekAsync + SubmissionReviewService (pas de recalcul parallèle).
+/// NOUVEAU — implémentation (singleton) : réutilise WeekProposalBuilder.BuildAsync + ISubmissionGapService (pas de recalcul parallèle).
+/// Amendé après WP4 (code réel) : on prend directement les dépendances de SubmissionReviewService
+/// (même calcul que SubmissionReviewService.AnalyzeAsync, sans brouillon persisté à charger).
 public sealed class NavSummaryService(
-    WeekService weeks,
-    SubmissionReviewService review,
+    WeekProposalBuilder builder,
+    ISubmissionGapService gaps,
     TimeProvider timeProvider) : INavSummaryService { /* WP4 */ }
 ```
 
 Règles :
 - `GetAsync` sans brouillon pour la semaine ⇒ `Days` à 0 h, badges `Empty`, `GapCount = 0`.
-- Le calcul des écarts appelle `SubmissionReviewService.AnalyzeAsync(draft, report: null, ct)` (aucune lecture Forecast).
+- Le calcul des écarts appelle `builder.BuildAsync(weekStart, classifyMissing: false, ct)` puis `gaps.AnalyzeAsync(draft, report: null, SubmissionReviewService.ContextOf(proposal), ct)` — le même calcul que `SubmissionReviewService.AnalyzeAsync` (aucune lecture Forecast).
 - Stub pour WP3 tant que WP4 n'est pas fusionné : **NOUVEAU** `src\TimeSheetHelper.App\Components\Layout\NavSummaryStub.cs` (`internal sealed class NavSummaryStub : INavSummaryService`, renvoie 7 jours `Empty`). Supprimé par WP4 au moment de l'enregistrement DI réel.
 
 ### 1.2 Phase 1 — coquille (WP3)
