@@ -41,4 +41,40 @@ public sealed class DayFingerprintTests
             CultureInfo.CurrentCulture = culture;
         }
     }
+
+    [Theory]
+    [InlineData("de-DE")]
+    [InlineData("ar-SA")]
+    [InlineData("fr-CA")]
+    [InlineData("")]
+    public void G10_Fingerprint_StableAcrossOrderAndCulture(string cultureName)
+    {
+        // Decimal comma, Arabic digits or another calendar must not reach the stored fingerprint.
+        const string expected = "610c3bb689c3ad85d639373293afed0a62b19178a1e679946b6f63ac80503abb";
+        var (culture, uiCulture) = (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture);
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.CurrentUICulture = new CultureInfo(cultureName);
+            Assert.Equal(expected, DayFingerprint.Compute(Day, [(1, 4m), (2, 1.5m)]));
+            Assert.Equal(expected, DayFingerprint.Compute(Day, [(2, 1.50m), (1, 4.000m)]));
+            Assert.Equal(expected, DayFingerprint.Compute(Day, [(2, 0.75m), (1, 4m), (2, 0.75m)]));
+        }
+        finally
+        {
+            (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture) = (culture, uiCulture);
+        }
+    }
+
+    [Fact]
+    public void G10_Fingerprint_ChangesWithHoursTaskOrDay()
+    {
+        var reference = DayFingerprint.Compute(Day, [(1, 4m), (2, 1.5m)]);
+
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day, [(1, 4.25m), (2, 1.5m)]));
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day, [(1, 4m), (3, 1.5m)]));
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day, [(1, 1.5m), (2, 4m)]));
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day, [(1, 4m)]));
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day.AddDays(-1), [(1, 4m), (2, 1.5m)]));
+        Assert.NotEqual(reference, DayFingerprint.Compute(Day.AddYears(1), [(1, 4m), (2, 1.5m)]));
+    }
 }

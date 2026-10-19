@@ -358,3 +358,56 @@ kbd {
   padding: 0 4px;
   background: var(--surface);
 }
+
+/* === nav-c: submit === */
+.spin {
+  animation: nav-spin 1s linear infinite;
+}
+
+@keyframes nav-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cplus {
+  margin: 16px 0 24px;
+}
+
+.cplus-live:empty {
+  display: none;
+}
+
+.cplus button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.cplus button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cplus button[aria-disabled="true"] {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+.cplus .alert {
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 12px 0;
+}
+
+.cplus .alert.error {
+  border: 1px solid var(--danger);
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.cplus .alert.warn {
+  border: 1px solid var(--warn);
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}

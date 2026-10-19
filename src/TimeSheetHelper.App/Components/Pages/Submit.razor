@@ -24,6 +24,8 @@
 @inject NavigationManager Navigation
 @inject ShellState Shell
 @inject INavSummaryService NavSummaries
+@inject IDaySubmissionService DaySubmissions
+@inject DayLock DayLocks
 @inject ILogger<Submit> Logger
 
 <PageTitle>Soumettre — Time Sheet Helper</PageTitle>
@@ -45,6 +47,30 @@
             et soumettez la semaine vous-même.
         </p>
     </details>
+
+    <section class="cplus" aria-labelledby="cplus-title">
+        <h2 id="cplus-title">Soumission jour par jour</h2>
+        <p class="muted cplus-intro">
+            Chaque jour est relu dans Forecast juste avant d'écrire : une saisie déjà présente n'est jamais créée de nouveau,
+            et rien n'est modifié ni retiré dans Forecast sans votre confirmation.
+        </p>
+        <p class="cplus-live" role="status">@dayAnnouncement</p>
+        @if (dayAlert is not null)
+        {
+            <p class="alert error" role="alert">@dayAlert</p>
+        }
+        <DayStrip Days="DayCards" Selected="selectedDay" OnSelect="SelectDayAsync" />
+        <SendReadyBar Days="StripDays" Plans="dayPlans" Errors="dayErrors" Busy="@(dayReading.Count > 0 || sendingDay is not null || fillOp.Busy)"
+                      Sending="sendingReady" OnPrepare="PrepareReadyAsync" OnSend="SendReadyDaysAsync" />
+        @if (selectedDay is { } shownDay)
+        {
+            <DayPanel Date="shownDay" Plan="@(dayPlans.GetValueOrDefault(shownDay))" Loading="dayReading.Contains(shownDay)"
+                      Error="@(dayErrors.GetValueOrDefault(shownDay))" Sending="sendingDay == shownDay"
+                      Busy="@(sendingReady || fillOp.Busy || (sendingDay is not null && sendingDay != shownDay))" IsToday="shownDay == Today"
+                      Choices="ChoicesOf(shownDay)" Journal="dayJournal" OnChoose="c => Choose(shownDay, c.ForecastTaskId, c.Resolution)"
+                      OnSend="() => SendDayAsync(shownDay)" OnReplan="() => ReplanDayAsync(shownDay)" OnCancel="() => CancelDayAsync(shownDay)" />
+        }
+    </section>
 
     @if (loadError is not null)
     {
@@ -403,7 +429,23 @@
     private GapList? gapList;
     private SubmissionStatusBar? statusBar;
 
-    private bool AnyBusy => simulationOp.Busy || fillOp.Busy || actionBusy;
+    private bool AnyBusy => simulationOp.Busy || fillOp.Busy || actionBusy || DayBusy;
+
+    /// <summary>A send per day (one day or the ready days) or a re-read of Forecast runs: the weekly fill must not write at the same time.</summary>
+    private bool DayBusy => sendingDay is not null || sendingReady || dayReading.Count > 0;
+
+    private NavSummary? daySummary;
+    private readonly Dictionary<DateOnly, DayPlan> dayPlans = [];
+    private readonly Dictionary<DateOnly, string> dayErrors = [];
+    private readonly HashSet<DateOnly> dayReading = [];
+    private readonly Dictionary<DateOnly, Dictionary<int, ConflictResolution>> dayChoices = [];
+    private IReadOnlyList<SubmissionJournalEntry> dayJournal = [];
+    private DateOnly? selectedDay;
+    private DateOnly? sendingDay;
+    private bool sendingReady;
+    private string? dayAnnouncement;
+    private string? dayAlert;
+    private CancellationTokenSource daysCts = new();
 
     /// <summary>The data on screen is being replaced: the cards are greyed until the new analysis lands (the screen is never emptied).</summary>
     private bool Updating => draftRefreshing || analyzing || analysisStale || simulationOp.Busy;
@@ -439,7 +481,10 @@
         // Rebuilding the draft may call the classifier: only once, in the interactive render (not the prerender).
         if (!RendererInfo.IsInteractive || loadedWeek == monday)
             return;
+        var week = monday;
         await LoadAsync();
+        if (week == monday && !disposed)
+            await LoadDaysAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -462,6 +507,8 @@
     public void Dispose()
     {
         disposed = true;
+        daysCts.Cancel();
+        daysCts.Dispose();
         weekSync?.Dispose();
         debounce.Dispose();
         simulations.Dispose();
@@ -472,6 +519,273 @@
     {
         if (!disposed)
             StateHasChanged();
+    }
+
+    // Day by day submission (C+): every read and write goes through IDaySubmissionService.
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private static readonly IReadOnlyDictionary<int, ConflictResolution> NoChoices = new Dictionary<int, ConflictResolution>();
+
+    /// <summary>Monday to Friday, plus a weekend day only when it holds hours.</summary>
+    private IReadOnlyList<DateOnly> StripDays =>
+        Enumerable.Range(0, 7).Select(i => monday.AddDays(i)).Where(d => d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) || HasHours(d)).ToList();
+
+    private IReadOnlyList<DayCard> DayCards => StripDays.Select(DayCardOf).ToList();
+
+    private bool HasHours(DateOnly day) =>
+        daySummary?.Days.FirstOrDefault(d => d.Date == day) is { ClassifiedHours: > 0 } || (dayPlans.TryGetValue(day, out var plan) && plan.Cells.Count > 0);
+
+    private DayCard DayCardOf(DateOnly day)
+    {
+        var summary = daySummary?.Days.FirstOrDefault(d => d.Date == day);
+        var state = sendingDay == day ? DayStateLabels.Day(DayStatus.InProgress, true)
+            : dayErrors.ContainsKey(day) ? DayStateLabels.ReadFailed
+            : dayPlans.TryGetValue(day, out var plan) ? DayStateLabels.Day(plan)
+            : DayStateLabels.Reading;
+        return new DayCard(day, state, summary?.ClassifiedHours, summary?.TargetHours, day == Today);
+    }
+
+    private IReadOnlyDictionary<int, ConflictResolution> ChoicesOf(DateOnly day) => dayChoices.TryGetValue(day, out var c) ? c : NoChoices;
+
+    private async Task LoadDaysAsync()
+    {
+        daysCts.Cancel();
+        daysCts.Dispose();
+        daysCts = new CancellationTokenSource();
+        var ct = daysCts.Token;
+        var week = monday;
+
+        daySummary = null;
+        dayPlans.Clear();
+        dayErrors.Clear();
+        dayReading.Clear();
+        dayChoices.Clear();
+        dayJournal = [];
+        dayAnnouncement = null;
+        dayAlert = null;
+        selectedDay = Today >= week && Today < week.AddDays(7) ? Today : week;
+
+        try
+        {
+            daySummary = await NavSummaries.GetAsync(week, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Week summary for the day strip failed ({ExceptionType}).", ex.GetType().Name);
+        }
+        if (ct.IsCancellationRequested || disposed)
+            return;
+
+        if (selectedDay is { } chosen && !StripDays.Contains(chosen))
+            selectedDay = week;
+        Refresh();
+        await LoadJournalAsync(selectedDay!.Value, ct);
+        foreach (var day in StripDays)
+            await PlanDayAsync(day, ct);
+    }
+
+    private async Task PlanDayAsync(DateOnly day, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested || disposed)
+            return;
+        dayReading.Add(day);
+        Refresh();
+        try
+        {
+            var plan = await DaySubmissions.PlanAsync(day, ct);
+            if (ct.IsCancellationRequested)
+                return;
+            dayPlans[day] = plan;
+            dayErrors.Remove(day);
+            if (dayChoices.TryGetValue(day, out var choices))
+                DayStateLabels.KeepValidChoices(plan, choices);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            if (ct.IsCancellationRequested)
+                return;
+            dayErrors[day] = "Lecture de Forecast impossible : vérifiez la connexion à Forecast puis réessayez.";
+            Logger.LogWarning("Day plan failed ({ExceptionType}).", ex.GetType().Name);
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                dayReading.Remove(day);
+                Refresh();
+            }
+        }
+    }
+
+    private async Task LoadJournalAsync(DateOnly day, CancellationToken ct)
+    {
+        try
+        {
+            var journal = await DaySubmissions.GetJournalAsync(day, ct);
+            if (!ct.IsCancellationRequested && selectedDay == day)
+            {
+                dayJournal = journal;
+                Refresh();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Day journal failed ({ExceptionType}).", ex.GetType().Name);
+        }
+    }
+
+    private async Task SelectDayAsync(DateOnly day)
+    {
+        if (selectedDay == day)
+            return;
+        selectedDay = day;
+        dayJournal = [];
+        await LoadJournalAsync(day, daysCts.Token);
+    }
+
+    private void Choose(DateOnly day, int forecastTaskId, ConflictResolution resolution)
+    {
+        if (!dayChoices.TryGetValue(day, out var choices))
+            dayChoices[day] = choices = [];
+        choices[forecastTaskId] = resolution;
+        dayAnnouncement = $"{DayStateLabels.Resolution(resolution)} choisi : rien n'est écrit avant l'envoi du jour.";
+    }
+
+    private async Task ReplanDayAsync(DateOnly day)
+    {
+        if (dayReading.Contains(day) || sendingDay == day)
+            return;
+        await PlanDayAsync(day, daysCts.Token);
+        if (!dayErrors.ContainsKey(day))
+            dayAnnouncement = $"Forecast relu pour {DayStateLabels.LongDay(day)} : rien n'a été écrit.";
+    }
+
+    private async Task SendDayAsync(DateOnly day)
+    {
+        // One send at a time: a second click while a send runs does nothing.
+        if (sendingDay is not null || sendingReady || fillOp.Busy || !dayPlans.ContainsKey(day))
+            return;
+        var week = monday;
+        sendingDay = day;
+        dayAlert = null;
+        dayAnnouncement = $"Envoi de {DayStateLabels.LongDay(day)} en cours…";
+        Refresh();
+        try
+        {
+            // Not tied to the page: leaving it does not cut a send in the middle (« Annuler l'envoi » does).
+            var result = await DaySubmissions.SendAsync(day, new Dictionary<int, ConflictResolution>(ChoicesOf(day)));
+            if (week == monday && !disposed)
+            {
+                dayAnnouncement = $"{DayStateLabels.LongDay(day)} : {result.Message}";
+                dayChoices.Remove(day);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (week == monday && !disposed)
+            {
+                dayAnnouncement = null;
+                dayAlert = $"L'envoi de {DayStateLabels.LongDay(day)} a échoué : consultez le journal du jour, puis relancez-le.";
+            }
+            Logger.LogWarning("Day send failed ({ExceptionType}).", ex.GetType().Name);
+        }
+        finally
+        {
+            sendingDay = null;
+        }
+        NavSummaries.Invalidate(week);
+        if (week != monday || disposed)
+            return;
+        Refresh();
+        var ct = daysCts.Token;
+        await PlanDayAsync(day, ct);
+        if (selectedDay == day)
+            await LoadJournalAsync(day, ct);
+    }
+
+    private async Task CancelDayAsync(DateOnly day)
+    {
+        if (sendingDay != day)
+            return;
+        try
+        {
+            await DaySubmissions.CancelAsync(day);
+            dayAnnouncement = "Annulation demandée : ce qui n'a pas été écrit le sera au rejeu.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Day send cancel failed ({ExceptionType}).", ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Reads Forecast again for every day of the strip before the confirmation of « Soumettre les jours prêts ».</summary>
+    private async Task PrepareReadyAsync()
+    {
+        var ct = daysCts.Token;
+        foreach (var day in StripDays)
+            await PlanDayAsync(day, ct);
+    }
+
+    private async Task SendReadyDaysAsync()
+    {
+        if (sendingDay is not null || sendingReady || fillOp.Busy)
+            return;
+        var week = monday;
+        sendingReady = true;
+        dayAlert = null;
+        dayAnnouncement = "Envoi des jours prêts en cours…";
+        Refresh();
+        try
+        {
+            var result = await DaySubmissions.SendReadyAsync(week);
+            if (week == monday && !disposed)
+                dayAnnouncement = ReadyMessage(result);
+        }
+        catch (Exception ex)
+        {
+            if (week == monday && !disposed)
+            {
+                dayAnnouncement = null;
+                dayAlert = "L'envoi des jours prêts a échoué : consultez l'état de chaque jour, puis relancez.";
+            }
+            Logger.LogWarning("Ready days send failed ({ExceptionType}).", ex.GetType().Name);
+        }
+        finally
+        {
+            sendingReady = false;
+        }
+        NavSummaries.Invalidate(week);
+        if (week != monday || disposed)
+            return;
+        Refresh();
+        var ct = daysCts.Token;
+        foreach (var day in StripDays)
+            await PlanDayAsync(day, ct);
+        if (selectedDay is { } shown)
+            await LoadJournalAsync(shown, ct);
+    }
+
+    private static string ReadyMessage(SendReadyResult result)
+    {
+        if (result.Sent.Count == 0)
+            return "Rien de nouveau à envoyer : aucun jour n'était prêt.";
+        var sent = string.Join(" ; ", result.Sent.Select(s => $"{DayStateLabels.ShortDay(s.Date)} : {s.Message}"));
+        var message = result.Sent.Count == 1 ? $"1 jour envoyé — {sent}" : $"{result.Sent.Count} jours envoyés — {sent}";
+        if (result.SkippedDays.Count > 0)
+            message += " Non envoyés : " + string.Join(" ; ", result.SkippedDays.Select(s => $"{DayStateLabels.ShortDay(s.Date)} ({s.Reason})")) + ".";
+        return message;
     }
 
     // Week and draft
@@ -683,7 +997,7 @@
             simulation?.Success == true,
             simulationUtc,
             simulationOp.Busy,
-            fillOp.Busy,
+            fillOp.Busy || DayBusy,
             draftRefreshing || analyzing,
             DateTime.UtcNow,
             selectedDays.Count > 0));
@@ -913,6 +1227,8 @@
     private async Task FillAsync()
     {
         confirmFill = false;
+        if (DayBusy || fillOp.Busy)
+            return; // A send per day is writing (or reading) Forecast: the weekly fill would type the same hours a second time.
         if (draft is null || DaySelection.Prune(selectedDays, monday).Count == 0)
             return; // Nothing checked: the writer would take an empty scope for the whole week.
 
@@ -941,7 +1257,17 @@
 
             var days = DaySelection.Prune(selectedDays, monday);
             var ignoredTasks = simulatedIgnored.ToHashSet(); // The fill writes what the simulation validated, ignored tasks included.
-            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ignoredTasks, ct));
+            // The days stay held while the fill writes: no send per day of these days, from this tab, another one or another process.
+            var hold = await DayLocks.TryHoldDaysAsync(week, days);
+            if (hold is null)
+            {
+                fillOp = new OpState(false, null, FillGuard.DayLockedMessage);
+                return;
+            }
+
+            ForecastFillReport report;
+            await using (hold)
+                report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ignoredTasks, ct));
             if (FillGuard.ResultApplies(week, monday, disposed))
                 fill = report;
 

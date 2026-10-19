@@ -106,6 +106,70 @@ public sealed class DayLockTests : IAsyncLifetime
         Assert.Equal(_time.Now.UtcDateTime, (await DayAsync()).InProgressSinceUtc);
     }
 
+    [Fact]
+    public async Task The_weekly_fill_holds_its_days_against_day_sends_then_gives_them_back_unchanged()
+    {
+        await SeedAsync(DayStatus.Sent, null);
+        var dayLock = NewLock();
+
+        var hold = await dayLock.TryHoldDaysAsync(Week, [Day, Day.AddDays(1)]);
+
+        Assert.NotNull(hold);
+        Assert.Null(await dayLock.TryAcquireAsync(Week, Day));
+        Assert.Null(await NewLock().TryAcquireAsync(Week, Day.AddDays(1)));
+        Assert.Null(await NewLock().TryHoldDaysAsync(Week, [Day]));
+
+        await hold.DisposeAsync();
+
+        Assert.Equal((DayStatus.Sent, (DateTime?)null), ((await DayAsync()).Status, (await DayAsync()).InProgressSinceUtc));
+        await using (var db = Db())
+            Assert.Equal(DayStatus.NotAttempted, (await db.DaySubmissions.SingleAsync(d => d.Date == Day.AddDays(1))).Status);
+        Assert.NotNull(await dayLock.TryAcquireAsync(Week, Day));
+    }
+
+    [Fact]
+    public async Task The_weekly_fill_holds_nothing_when_one_of_its_days_is_being_sent()
+    {
+        var sending = await NewLock().TryAcquireAsync(Week, Day.AddDays(1));
+        var dayLock = NewLock();
+
+        var hold = await dayLock.TryHoldDaysAsync(Week, [Day, Day.AddDays(1)]);
+
+        Assert.Null(hold);
+        Assert.Equal((DayStatus.NotAttempted, (DateTime?)null), ((await DayAsync()).Status, (await DayAsync()).InProgressSinceUtc));
+        Assert.NotNull(await dayLock.TryAcquireAsync(Week, Day));
+        Assert.NotNull(sending);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task G2_ConcurrentSends_SingleWrite(bool otherProcess)
+    {
+        // The first send is held inside its write to Forecast; the second one (another tab, or another window on the same database) arrives then.
+        using var host = new DaySubmissionHost();
+        await host.SetDraftAsync(DaySubmissionHost.Monday, (host.Dev, 2m));
+        var first = host.Service();
+        var second = otherProcess ? host.Service() : first;
+        var (reached, release) = host.Server.HoldWrite(1);
+
+        var sending = first.SendAsync(DaySubmissionHost.Monday, DaySubmissionHost.NoResolutions);
+        await reached;
+        var concurrent = await second.SendAsync(DaySubmissionHost.Monday, DaySubmissionHost.NoResolutions);
+        var batch = await second.SendReadyAsync(DaySubmissionHost.Monday);
+        release();
+        var done = await sending;
+        var after = await host.Service().SendAsync(DaySubmissionHost.Monday, DaySubmissionHost.NoResolutions);
+
+        Assert.Equal((DayStatus.InProgress, 0), (concurrent.Status, concurrent.Written));
+        Assert.Empty(batch.Sent);
+        Assert.Contains(batch.SkippedDays, s => s.Date == DaySubmissionHost.Monday);
+        Assert.Equal((DayStatus.Sent, 1), (done.Status, done.Written));
+        Assert.Equal(0, after.Written);
+        Assert.Equal(1, host.Server.WriteCount);
+        Assert.Equal([(3382, 120)], host.ForecastOn(DaySubmissionHost.Monday));
+    }
+
     private sealed class Factory(Func<TimeSheetDbContext> create) : IDbContextFactory<TimeSheetDbContext>
     {
         public TimeSheetDbContext CreateDbContext() => create();

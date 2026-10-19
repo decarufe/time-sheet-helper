@@ -1,0 +1,31 @@
+.chooser {
+  border: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.opt {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 6px;
+  align-items: baseline;
+}
+.opt input[type="radio"] {
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.opt label {
+  font-weight: 600;
+  cursor: pointer;
+}
+.opt .desc {
+  grid-column: 2;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.opt.off label {
+  color: var(--muted);
+  cursor: not-allowed;
+}

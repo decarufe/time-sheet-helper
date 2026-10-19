@@ -1,0 +1,6 @@
+@* A state shown with an icon and words, never with the colour alone. *@
+<span class="badge @State.Tone state-badge"><Icon Name="@State.Icon" Small="true" /><span>@State.Label</span></span>
+
+@code {
+    [Parameter, EditorRequired] public StateLabel State { get; set; } = default!;
+}

@@ -25,6 +25,8 @@ public static class FillGuard
 {
     public const string DraftChangedMessage = "Le brouillon a changé depuis la simulation : relancez la simulation avant de saisir.";
 
+    public const string DayLockedMessage = "Un envoi par jour est en cours pour un des jours cochés (ici ou dans un autre onglet) : rien n'a été saisi. Réessayez quand il sera terminé.";
+
     /// <summary>Identity of the hours to type: a simulation only validates the exact same draft.</summary>
     public static string Fingerprint(TimesheetDraft draft) =>
         $"{draft.WeekStart:yyyy-MM-dd}|" + string.Join(";", draft.Entries
