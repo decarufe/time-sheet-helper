@@ -216,6 +216,39 @@ public sealed class ForecastTaskCatalogTests : IDisposable
         Assert.Equal("Dev renamed", task.TaskName);
     }
 
+    [Fact]
+    public async Task Excluding_from_submission_applies_to_the_selection_never_to_the_ignored_task_and_is_filterable_and_counted()
+    {
+        var a = await AddTaskAsync("T1", "Acme", "A");
+        var b = await AddTaskAsync("T2", "Acme", "B");
+        var ignored = await AddTaskAsync(ForecastTask.IgnoredExternalId, "Ignoré", "Ignoré");
+        var catalog = Catalog();
+
+        Assert.Equal(1, await catalog.SetExcludeFromSubmissionAsync([a, ignored], true));
+
+        var excluded = await catalog.QueryAsync(new ForecastTaskQuery(ExcludedOnly: true), 0, 50);
+        Assert.Equal(["T1"], excluded.Items.Select(r => r.Task.ExternalId));
+        Assert.Equal(1, (await catalog.CountsAsync()).Excluded);
+
+        Assert.Equal(1, await catalog.SetExcludeFromSubmissionAsync([a, b], false));
+        Assert.Equal(0, (await catalog.CountsAsync()).Excluded);
+    }
+
+    [Fact]
+    public async Task A_forecast_sync_keeps_the_exclusion_flag()
+    {
+        var id = await AddTaskAsync("T1", "Acme", "Dev");
+        await Catalog().SetExcludeFromSubmissionAsync([id], true);
+
+        await using (var db = CreateDb())
+            await ForecastTaskSync.UpsertAsync(db, [new ParsedForecastTask("T1", "Acme", null, null, "Dev renamed")], DateTime.UtcNow);
+
+        await using var check = CreateDb();
+        var task = await check.ForecastTasks.SingleAsync(t => t.Id == id);
+        Assert.True(task.ExcludeFromSubmission);
+        Assert.Equal("Dev renamed", task.TaskName);
+    }
+
     private sealed class Factory(Func<TimeSheetDbContext> create) : IDbContextFactory<TimeSheetDbContext>
     {
         public TimeSheetDbContext CreateDbContext() => create();

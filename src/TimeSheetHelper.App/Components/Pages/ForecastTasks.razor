@@ -22,7 +22,7 @@
         <div class="section-head">
             <h2>Tâches enregistrées</h2>
             <div class="head-actions">
-                <span class="muted">@counts.Active active(s) sur @counts.Total · @counts.Favorites favorite(s)</span>
+                <span class="muted">@counts.Active active(s) sur @counts.Total · @counts.Favorites favorite(s) · @counts.Excluded exclue(s) de la soumission</span>
                 <button class="primary" @onclick="OpenAdd">Ajouter une tâche</button>
             </div>
         </div>
@@ -50,6 +50,7 @@
             </label>
 
             <label class="checkbox"><input type="checkbox" @bind="favoritesOnly" @bind:after="RefreshAsync" /> Favoris seulement</label>
+            <label class="checkbox"><input type="checkbox" @bind="excludedOnly" @bind:after="RefreshAsync" /> Exclues de la soumission seulement</label>
         </div>
 
         @if (selected.Count > 0)
@@ -60,6 +61,8 @@
                 <button disabled="@busy" @onclick="() => SetActiveAsync(false)">Désactiver</button>
                 <button disabled="@busy" @onclick="() => SetFavoriteAsync(true)">★ Ajouter aux favoris</button>
                 <button disabled="@busy" @onclick="() => SetFavoriteAsync(false)">☆ Retirer des favoris</button>
+                <button disabled="@busy" @onclick="() => SetExcludeAsync(true)">Exclure de la soumission</button>
+                <button disabled="@busy" @onclick="() => SetExcludeAsync(false)">Inclure dans la soumission</button>
                 <button class="danger" disabled="@busy" @onclick="() => AskDelete(selected.ToList())">Supprimer</button>
                 <button class="link" @onclick="ClearSelection">Tout désélectionner</button>
             </div>
@@ -124,9 +127,12 @@
                                             @onclick="() => ToggleFavoriteAsync(row.Task)">@(row.Task.IsFavorite ? "★" : "☆")</button>
                                 </td>
                                 <td>@if (row.Task.ProjectCode is { } pc) { <code>@pc</code> } @row.Task.ProjectName</td>
-                                <td>@if (IsTaskCode(row.Task.ExternalId)) { <code>@row.Task.ExternalId</code> } @row.Task.TaskName</td>
+                                <td>@if (IsTaskCode(row.Task.ExternalId)) { <code>@row.Task.ExternalId</code> } @row.Task.TaskName@if (row.Task.ExcludeFromSubmission) { <span class="badge excluded"> Exclue de la soumission</span> }</td>
                                 <td class="nowrap muted">@(row.Task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
                                 <td class="actions">
+                                    <button disabled="@busy" aria-pressed="@row.Task.ExcludeFromSubmission"
+                                            title="Les heures de cette tâche ne sont pas envoyées dans Forecast à la soumission"
+                                            @onclick="() => ToggleExcludeAsync(row.Task)">@(row.Task.ExcludeFromSubmission ? "Inclure dans la soumission" : "Exclure de la soumission")</button>
                                     <button disabled="@busy" @onclick="() => OpenEdit(row.Task.Id)">Modifier</button>
                                     <button disabled="@busy" @onclick="() => ToggleActiveAsync(row.Task)">@(row.Task.IsActive ? "Désactiver" : "Réactiver")</button>
                                     <button class="danger" disabled="@busy" @onclick="() => AskDelete([row.Task.Id])">Supprimer</button>
@@ -193,10 +199,11 @@ else if (dialog == Dialog.ConfirmDelete)
     private ForecastTaskStatusFilter status = ForecastTaskStatusFilter.Active;
     private ForecastTaskGrouping grouping = ForecastTaskGrouping.None;
     private bool favoritesOnly;
+    private bool excludedOnly;
     private ForecastTaskSort sort = ForecastTaskSort.Project;
     private bool descending;
 
-    private ForecastTaskQuery Query => new(search, status, favoritesOnly, sort, descending, grouping);
+    private ForecastTaskQuery Query => new(search, status, favoritesOnly, sort, descending, grouping, excludedOnly);
 
     protected override async Task OnInitializedAsync()
     {
@@ -344,6 +351,18 @@ else if (dialog == Dialog.ConfirmDelete)
     private async Task ToggleFavoriteAsync(ForecastTask task) => await RunAsync(async () =>
     {
         await Catalog.SetFavoriteAsync([task.Id], !task.IsFavorite);
+        message = null;
+    });
+
+    private async Task SetExcludeAsync(bool exclude) => await RunAsync(async () =>
+    {
+        var changed = await Catalog.SetExcludeFromSubmissionAsync(selected.ToList(), exclude);
+        message = exclude ? $"{changed} tâche(s) exclue(s) de la soumission." : $"{changed} tâche(s) incluse(s) dans la soumission.";
+    });
+
+    private async Task ToggleExcludeAsync(ForecastTask task) => await RunAsync(async () =>
+    {
+        await Catalog.SetExcludeFromSubmissionAsync([task.Id], !task.ExcludeFromSubmission);
         message = null;
     });
 

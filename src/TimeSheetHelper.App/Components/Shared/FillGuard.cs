@@ -53,10 +53,13 @@ public static class FillGuard
     /// fewer days than the draft plans can never satisfy this (the report then holds fewer cells than the whole-week plan), so the
     /// week is marked as typed only once every one of its days has been entered.
     /// </summary>
+    /// <param name="ignoredTaskIds">Tasks left out of the fill, whose planned cells the report does not hold. Null: the flagged ones, like the writer.</param>
     public static bool IsWeekFullyEntered(
-        ForecastFillReport report, TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, IReadOnlyCollection<DateOnly>? days = null)
+        ForecastFillReport report, TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks,
+        IReadOnlyCollection<DateOnly>? days = null, IReadOnlyCollection<int>? ignoredTaskIds = null)
     {
-        var plan = ForecastFillPlanner.Plan(draft, tasks);
+        var ignored = ignoredTaskIds?.ToHashSet() ?? SubmissionTaskScope.AutoExcluded(tasks.Values).ToHashSet();
+        var plan = ForecastFillPlanner.Plan(draft, tasks).Where(c => !ignored.Contains(c.Task.Id)).ToList();
         var expectedCells = (days is { Count: > 0 } scope ? plan.Where(c => scope.Contains(c.Date)) : plan).Count();
         return report.Cells.Count > 0
                && report.Cells.Count == expectedCells

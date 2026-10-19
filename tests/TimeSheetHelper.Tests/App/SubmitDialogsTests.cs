@@ -1,11 +1,31 @@
 using TimeSheetHelper.App.Components;
 using TimeSheetHelper.App.Components.Shared;
+using TimeSheetHelper.Forecast;
 using TimeSheetHelper.Forecast.Submission;
 
 namespace TimeSheetHelper.Tests.App;
 
 public sealed class SubmitDialogsTests
 {
+    [Fact]
+    public void The_ignored_paragraph_states_the_hours_not_sent_names_the_tasks_and_says_the_draft_keeps_them()
+    {
+        var cells = new[]
+        {
+            new SubmissionIgnoredCell(1, "Interne – Réunions", GapFx.Day(0), 1m, true),
+            new SubmissionIgnoredCell(1, "Interne – Réunions", GapFx.Day(1), 0.5m, true),
+            new SubmissionIgnoredCell(2, "Portail – Revue", GapFx.Day(1), 2m, false),
+        };
+
+        var text = SubmitDialogs.IgnoredParagraph(cells);
+
+        Assert.Contains("3,50 h", text);
+        Assert.Contains("2 tâches ignorées", text);
+        Assert.Contains("Interne – Réunions (exclue de la soumission)", text);
+        Assert.Contains("Portail – Revue", text);
+        Assert.DoesNotContain("Portail – Revue (", text);
+        Assert.Contains("restent dans le brouillon", text);
+    }
     private static IReadOnlyList<SubmissionGap> ToVerify(int count) =>
         Enumerable.Range(0, count)
             .Select(i => GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null, day: i % 5, title: $"Point {i + 1}"))

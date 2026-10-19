@@ -175,6 +175,20 @@ public sealed class SubmitPageRevisionTests
     // ── FillGuard: does the result still belong to the screen (D1) ───────────────────────────────
 
     [Fact]
+    public void Ignored_tasks_are_not_expected_in_the_report_and_flagged_ones_are_ignored_by_default()
+    {
+        var draft = Draft((1, 0, 1m), (2, 1, 2m));
+        var report = GapFx.Report(GapFx.Cell(1, 0, ForecastCellStatus.Ok));
+        var tasks = Tasks(1, 2);
+
+        Assert.False(FillGuard.IsWeekFullyEntered(report, draft, tasks));
+        Assert.True(FillGuard.IsWeekFullyEntered(report, draft, tasks, ignoredTaskIds: [2]));
+        tasks[2].ExcludeFromSubmission = true;
+        Assert.True(FillGuard.IsWeekFullyEntered(report, draft, tasks));
+        Assert.False(FillGuard.IsWeekFullyEntered(report, draft, tasks, ignoredTaskIds: []));
+    }
+
+    [Fact]
     public void The_result_of_an_operation_is_shown_only_for_the_week_still_on_screen_and_while_the_page_lives()
     {
         Assert.True(FillGuard.ResultApplies(GapFx.Monday, GapFx.Monday, disposed: false));

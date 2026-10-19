@@ -16,14 +16,15 @@ public sealed record ForecastTaskQuery(
     bool FavoritesOnly = false,
     ForecastTaskSort Sort = ForecastTaskSort.Project,
     bool Descending = false,
-    ForecastTaskGrouping Grouping = ForecastTaskGrouping.None);
+    ForecastTaskGrouping Grouping = ForecastTaskGrouping.None,
+    bool ExcludedOnly = false);
 
 /// <summary>One listed task; <see cref="GroupHeader"/> is set on the first row of each group.</summary>
 public sealed record ForecastTaskRow(ForecastTask Task, string? GroupHeader);
 
 public sealed record ForecastTaskPage(IReadOnlyList<ForecastTaskRow> Items, int Total);
 
-public sealed record ForecastTaskCounts(int Total, int Active, int Favorites);
+public sealed record ForecastTaskCounts(int Total, int Active, int Favorites, int Excluded = 0);
 
 public sealed record ForecastTaskOperationResult(bool Ok, string? Error = null)
 {
@@ -74,7 +75,8 @@ public sealed class ForecastTaskCatalog(IDbContextFactory<TimeSheetDbContext> db
         return new ForecastTaskCounts(
             await tasks.CountAsync(cancellationToken),
             await tasks.CountAsync(t => t.IsActive, cancellationToken),
-            await tasks.CountAsync(t => t.IsFavorite, cancellationToken));
+            await tasks.CountAsync(t => t.IsFavorite, cancellationToken),
+            await tasks.CountAsync(t => t.ExcludeFromSubmission, cancellationToken));
     }
 
     public async Task<ForecastTask?> FindAsync(int id, CancellationToken cancellationToken = default)
@@ -145,6 +147,17 @@ public sealed class ForecastTaskCatalog(IDbContextFactory<TimeSheetDbContext> db
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.IsFavorite, favorite), cancellationToken);
     }
 
+    /// <summary>Flags (or unflags) tasks that cannot be entered in Forecast through the MCP server: their hours are left out of the submission.</summary>
+    public async Task<int> SetExcludeFromSubmissionAsync(IReadOnlyCollection<int> ids, bool exclude, CancellationToken cancellationToken = default)
+    {
+        if (ids.Count == 0)
+            return 0;
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        return await db.ForecastTasks
+            .Where(t => ids.Contains(t.Id) && t.ExternalId != ForecastTask.IgnoredExternalId && t.ExcludeFromSubmission != exclude)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.ExcludeFromSubmission, exclude), cancellationToken);
+    }
+
     /// <summary>
     /// Deletes the tasks nothing refers to. A task used by a rule, a timesheet line, a slot override or a cached
     /// classification is kept and reported, so the user can deactivate it instead.
@@ -200,6 +213,8 @@ public sealed class ForecastTaskCatalog(IDbContextFactory<TimeSheetDbContext> db
         };
         if (query.FavoritesOnly)
             filtered = filtered.Where(t => t.IsFavorite);
+        if (query.ExcludedOnly)
+            filtered = filtered.Where(t => t.ExcludeFromSubmission);
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var search = query.Search.Trim();

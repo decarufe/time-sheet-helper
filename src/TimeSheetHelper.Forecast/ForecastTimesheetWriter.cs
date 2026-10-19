@@ -23,12 +23,27 @@ public sealed class ForecastTimesheetWriter(
     /// Only the planned cells of these days are compared with Forecast and (in <see cref="ForecastSubmitMode.Fill"/>) registered;
     /// the other days of the week are not read for comparison and never written to. Null or empty: the whole week, as before.
     /// </param>
+    /// <param name="ignoredTaskIds">
+    /// Tasks whose cells are left out of the comparison and the fill (their hours are listed in <see cref="ForecastFillReport.IgnoredCells"/>).
+    /// Null: the tasks flagged <see cref="ForecastTask.ExcludeFromSubmission"/> — the safe default, so a caller that knows nothing of
+    /// the exclusion never writes a task Forecast's MCP cannot register. Empty: nothing is left out.
+    /// </param>
     public async Task<ForecastFillReport> FillWeekAsync(
-        TimesheetDraft draft, ForecastSubmitMode mode, IReadOnlyCollection<DateOnly>? days = null, CancellationToken cancellationToken = default)
+        TimesheetDraft draft, ForecastSubmitMode mode, IReadOnlyCollection<DateOnly>? days = null,
+        IReadOnlyCollection<int>? ignoredTaskIds = null, CancellationToken cancellationToken = default)
     {
         var report = new ForecastFillReport { WeekStart = draft.WeekStart, Mode = mode };
 
-        var plan = await PlanAsync(draft, report.Warnings, cancellationToken);
+        var (plan, taskById) = await PlanAsync(draft, report.Warnings, cancellationToken);
+        var ignored = ignoredTaskIds is null
+            ? SubmissionTaskScope.AutoExcluded(taskById.Values)
+            : ignoredTaskIds.ToHashSet();
+        var automatic = SubmissionTaskScope.AutoExcluded(taskById.Values);
+        report.IgnoredCells.AddRange(SubmissionTaskScope.IgnoredCells(draft, taskById, ignored, automatic, days));
+        if (ignored.Count > 0)
+            plan = new ForecastFillPlan(
+                plan.Cells.Where(c => !ignored.Contains(c.Task.Id)).ToList(),
+                plan.Rejected.Where(r => !ignored.Contains(r.ForecastTaskId)).ToList());
         if (days is { Count: > 0 } dayScope)
             plan = new ForecastFillPlan(
                 plan.Cells.Where(c => dayScope.Contains(c.Date)).ToList(),
@@ -50,7 +65,9 @@ public sealed class ForecastTimesheetWriter(
         if (plan.Cells.Count == 0)
         {
             if (report.Cells.Count == 0)
-                report.Warnings.Add("Aucune heure à saisir dans ce brouillon.");
+                report.Warnings.Add(report.IgnoredCells.Count > 0
+                    ? "Toutes les heures à saisir sont sur des tâches ignorées pour cette soumission : rien n'est envoyé à Forecast."
+                    : "Aucune heure à saisir dans ce brouillon.");
             return report;
         }
 
@@ -355,13 +372,13 @@ public sealed class ForecastTimesheetWriter(
         }
     }
 
-    private async Task<ForecastFillPlan> PlanAsync(
+    private async Task<(ForecastFillPlan Plan, Dictionary<int, ForecastTask> Tasks)> PlanAsync(
         TimesheetDraft draft, ICollection<string> warnings, CancellationToken cancellationToken)
     {
         var ids = draft.Entries.Select(e => e.ForecastTaskId).Distinct().ToList();
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var tasks = await db.ForecastTasks.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, cancellationToken);
-        return ForecastFillPlanner.PlanDetailed(draft, tasks, warnings);
+        return (ForecastFillPlanner.PlanDetailed(draft, tasks, warnings), tasks);
     }
 
     /// <summary>

@@ -101,6 +101,14 @@
                     }
                 </p>
             }
+            @if (draft.SubmittedUtc is null && grid.HasIgnored)
+            {
+                <p class="muted ignored-summary" role="status">
+                    @TimesheetUi.HoursLabel(grid.IgnoredTotal) de tâches ignorées ne seront pas envoyées à Forecast
+                    (elles restent comptées dans le brouillon et l'objectif) :
+                    @string.Join(", ", grid.Rows.Where(r => r.Ignored).Select(r => r.Name)).
+                </p>
+            }
             @if (draftRefreshing)
             {
                 <p class="muted" role="status">Mise à jour du brouillon…</p>
@@ -150,8 +158,30 @@
                         <tbody>
                             @foreach (var row in grid.Rows)
                             {
-                                <tr>
-                                    <th scope="row" class="task-name" style="@TimesheetUi.TaskStyle(row.TaskId)">@row.Name</th>
+                                <tr class="@(row.Ignored ? "ignored-row" : null)">
+                                    <th scope="row" class="task-name" style="@TimesheetUi.TaskStyle(row.TaskId)">
+                                        @row.Name
+                                        @if (row.Ignored)
+                                        {
+                                            <span class="badge ignored-badge">@(row.Automatic ? "Exclue de la soumission" : "Ignorée")</span>
+                                        }
+                                        @if (draft.SubmittedUtc is null)
+                                        {
+                                            <label class="task-ignore">
+                                                <input type="checkbox" checked="@row.Ignored" disabled="@AnyBusy"
+                                                       @onchange="e => SetTaskIgnored(row.TaskId, e.Value is bool v && v)" />
+                                                Ne pas envoyer
+                                            </label>
+                                            @if (row.Flagged && !row.Ignored)
+                                            {
+                                                <span class="muted note">exclue par défaut (non saisissable via MCP), incluse pour cette soumission</span>
+                                            }
+                                            else if (row.Automatic)
+                                            {
+                                                <span class="muted note">exclue automatiquement (non saisissable via MCP) : décochez pour l'inclure cette fois</span>
+                                            }
+                                        }
+                                    </th>
                                     @foreach (var day in grid.Days)
                                     {
                                         var hours = row.Hours.GetValueOrDefault(day);
@@ -225,6 +255,18 @@
                                 }
                                 <th class="num">@TimesheetUi.Hours(grid.GrandTotal)</th>
                             </tr>
+                            @if (grid.HasIgnored)
+                            {
+                                <tr class="readonly ignored-total">
+                                    <th scope="row">Dont heures non envoyées <span class="muted note">tâches ignorées</span></th>
+                                    @foreach (var day in grid.Days)
+                                    {
+                                        var hours = grid.IgnoredHours(day);
+                                        <td class="@NumClass(hours)">@HoursCell(hours)</td>
+                                    }
+                                    <td class="num total">@TimesheetUi.Hours(grid.IgnoredTotal)</td>
+                                </tr>
+                            }
                             @if (grid.Targets is { } targets)
                             {
                                 <tr class="readonly">
@@ -341,6 +383,16 @@
     /// <summary>The days the current simulation was made for.</summary>
     private HashSet<DateOnly> simulatedDays = [];
 
+    /// <summary>Tasks the user leaves out of this submission although they are not flagged, and flagged tasks the user puts back in. Per displayed week.</summary>
+    private HashSet<int> manuallyIgnored = [];
+    private HashSet<int> reincluded = [];
+
+    /// <summary>The tasks the current simulation left out.</summary>
+    private HashSet<int> simulatedIgnored = [];
+
+    /// <summary>(flagged − re-included) ∪ ignored by the user: the tasks whose hours are not sent.</summary>
+    private IReadOnlySet<int> EffectiveIgnored => SubmissionTaskScope.Effective(tasks.Values, manuallyIgnored, reincluded);
+
     private OpenPanel? panel;
     private PendingMerge? pendingMerge;
     private string? actedGapId;
@@ -358,7 +410,8 @@
     private ForecastFillReport? Report => fill ?? simulation;
 
     private bool SimulationFresh =>
-        simulation is not null && draft is not null && simulationFingerprint == FillGuard.Fingerprint(draft) && simulatedDays.SetEquals(selectedDays);
+        simulation is not null && draft is not null && simulationFingerprint == FillGuard.Fingerprint(draft) && simulatedDays.SetEquals(selectedDays)
+        && simulatedIgnored.SetEquals(EffectiveIgnored);
 
     private string TableWrapClass => draftRefreshing ? "table-wrap updating" : "table-wrap";
 
@@ -446,8 +499,42 @@
         actedGapId = null;
         selectedDays = DaySelection.Default(monday, DateOnly.FromDateTime(DateTime.Today));
         simulatedDays = [];
+        manuallyIgnored = [];
+        reincluded = [];
+        simulatedIgnored = [];
         RebuildView();
     }
+
+    /// <summary>Leaves a task out of this submission (or puts it back): a flagged task is re-included, any other one is ignored.</summary>
+    private void SetTaskIgnored(int taskId, bool ignore)
+    {
+        if (draft?.SubmittedUtc is not null)
+            return;
+
+        var flagged = SubmissionTaskScope.AutoExcluded(tasks.Values).Contains(taskId);
+        if (flagged)
+        {
+            if (ignore)
+                reincluded.Remove(taskId);
+            else
+                reincluded.Add(taskId);
+        }
+        else if (ignore)
+        {
+            manuallyIgnored.Add(taskId);
+        }
+        else
+        {
+            manuallyIgnored.Remove(taskId);
+        }
+
+        OnSelectionChanged();
+    }
+
+    private IReadOnlyList<SubmissionIgnoredCell> IgnoredCellsInScope() =>
+        draft is null
+            ? []
+            : SubmissionTaskScope.IgnoredCells(draft, tasks, EffectiveIgnored, SubmissionTaskScope.AutoExcluded(tasks.Values), selectedDays);
 
     private bool IsWholeWeek => DaySelection.IsWholeWeek(selectedDays, monday);
 
@@ -546,7 +633,7 @@
         cleanCells = GapBoard.CellsWithoutGap(Report, gaps).Where(c => selectedDays.Contains(c.Date)).ToList();
         actionContext = new GapActionContext(monday, tasks.ContainsKey);
         if (draft is not null)
-            grid = DraftGrid.Build(draft, tasks, monday, analysis, gap => !session.IsIgnored(gap) && GapBoard.InScope(gap, selectedDays));
+            grid = DraftGrid.Build(draft, tasks, monday, analysis, gap => !session.IsIgnored(gap) && GapBoard.InScope(gap, selectedDays), EffectiveIgnored);
     }
 
     private SubmissionStatus BuildStatus() =>
@@ -707,12 +794,14 @@
             var current = await ReadDraftAsync(monday) ?? draft!;
             var fingerprint = FillGuard.Fingerprint(current);
             var days = DaySelection.Prune(selectedDays, monday);
-            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, days, ct), linked.Token);
+            var ignoredTasks = EffectiveIgnored.ToHashSet();
+            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, days, ignoredTasks, ct), linked.Token);
             if (!simulations.IsCurrent(ticket) || disposed)
                 return;
 
             simulation = report;
             simulatedDays = days;
+            simulatedIgnored = ignoredTasks;
             simulationFingerprint = fingerprint;
             simulationUtc = DateTime.UtcNow;
             await SetDraftAsync(current);
@@ -780,10 +869,13 @@
         restoreFillFocus = true;
     }
 
-    private IReadOnlyList<string> FillParagraphs() =>
-        SubmitDialogs.FillParagraphs(
-            selectedDays.Sum(d => grid.DayTotals.GetValueOrDefault(d)), simulation?.Cells.Count ?? 0, monday, board.OpenToVerify, session.IgnoredCount,
-            analysis?.Summary, pendingAssignments, selectedDays);
+    private IReadOnlyList<string> FillParagraphs()
+    {
+        var ignoredCells = IgnoredCellsInScope();
+        return SubmitDialogs.FillParagraphs(
+            selectedDays.Sum(d => grid.DayTotals.GetValueOrDefault(d)) - ignoredCells.Sum(c => c.Hours), simulation?.Cells.Count ?? 0, monday,
+            board.OpenToVerify, session.IgnoredCount, analysis?.Summary, pendingAssignments, selectedDays, ignoredCells);
+    }
 
     private async Task FillAsync()
     {
@@ -815,14 +907,15 @@
             }
 
             var days = DaySelection.Prune(selectedDays, monday);
-            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ct));
+            var ignoredTasks = simulatedIgnored.ToHashSet(); // The fill writes what the simulation validated, ignored tasks included.
+            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ignoredTasks, ct));
             if (FillGuard.ResultApplies(week, monday, disposed))
                 fill = report;
 
             // The hours are in Forecast whatever the page shows now: the mark is stored even when the user moved to another week.
             // Scoped to the selected day(s): the week is marked as typed only once every one of its days has been entered this way.
-            var scopeEntered = FillGuard.IsWeekFullyEntered(report, current, tasks, days);
-            var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks);
+            var scopeEntered = FillGuard.IsWeekFullyEntered(report, current, tasks, days, ignoredTasks);
+            var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks, null, ignoredTasks);
             if (weekEntered)
             {
                 await using var db = await DbFactory.CreateDbContextAsync();
@@ -835,16 +928,19 @@
             if (!FillGuard.ResultApplies(week, monday, disposed))
                 return;
 
+            var ignoredNote = report.IgnoredCells.Count > 0
+                ? $" {TimesheetUi.HoursLabel(report.IgnoredCells.Sum(c => c.Hours))} de tâches ignorées n'ont pas été envoyées à Forecast."
+                : "";
             if (weekEntered)
             {
                 await SetDraftAsync(current);
-                fillOp = new OpState(false, $"{report.Summary}. Toutes les cellules sont vérifiées : la semaine est marquée comme saisie. "
+                fillOp = new OpState(false, $"{report.Summary}. Toutes les cellules sont vérifiées : la semaine est marquée comme saisie.{ignoredNote} "
                                             + "Pensez à la soumettre pour approbation dans Forecast.", null);
             }
             else if (scopeEntered)
             {
                 await SetDraftAsync(current);
-                fillOp = new OpState(false, SubmitDialogs.ScopeEnteredMessage(report.Summary, days, monday), null);
+                fillOp = new OpState(false, SubmitDialogs.ScopeEnteredMessage(report.Summary, days, monday) + ignoredNote, null);
             }
             else
             {

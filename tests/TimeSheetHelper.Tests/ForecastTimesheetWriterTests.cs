@@ -548,6 +548,55 @@ public sealed class ForecastTimesheetWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task A_flagged_task_is_left_out_of_the_fill_by_default_and_listed_as_ignored()
+    {
+        await using (var db = CreateDb())
+        {
+            (await db.ForecastTasks.FindAsync(_meetings.Id))!.ExcludeFromSubmission = true;
+            await db.SaveChangesAsync();
+        }
+
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 2m), Entry(_meetings, 0, 1m)), ForecastSubmitMode.Fill);
+
+        Assert.Equal(_dev.Id, Assert.Single(report.Cells).ForecastTaskId);
+        var ignored = Assert.Single(report.IgnoredCells);
+        Assert.Equal((_meetings.Id, 1m, true), (ignored.ForecastTaskId, ignored.Hours, ignored.Automatic));
+        Assert.Single(_server.Creates.ToList());
+    }
+
+    [Fact]
+    public async Task A_flagged_task_can_be_reincluded_and_any_task_can_be_ignored_explicitly()
+    {
+        await using (var db = CreateDb())
+        {
+            (await db.ForecastTasks.FindAsync(_meetings.Id))!.ExcludeFromSubmission = true;
+            await db.SaveChangesAsync();
+        }
+        var draft = Draft(Entry(_dev, 0, 2m), Entry(_meetings, 0, 1m));
+
+        var reincluded = await Writer().FillWeekAsync(draft, ForecastSubmitMode.DryRun, ignoredTaskIds: []);
+        var manual = await Writer().FillWeekAsync(draft, ForecastSubmitMode.DryRun, ignoredTaskIds: [_dev.Id]);
+
+        Assert.Equal(2, reincluded.Cells.Count);
+        Assert.Empty(reincluded.IgnoredCells);
+        Assert.Equal(_meetings.Id, Assert.Single(manual.Cells).ForecastTaskId);
+        Assert.False(Assert.Single(manual.IgnoredCells).Automatic);
+    }
+
+    [Fact]
+    public async Task A_draft_made_only_of_ignored_tasks_says_so_instead_of_claiming_no_hours()
+    {
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 2m)), ForecastSubmitMode.Fill, ignoredTaskIds: [_dev.Id]);
+
+        Assert.Empty(report.Cells);
+        Assert.Contains(report.Warnings, w => w.Contains("ignorées"));
+        Assert.DoesNotContain(report.Warnings, w => w.Contains("Aucune heure"));
+        Assert.Empty(_server.Creates);
+    }
+
+    [Fact]
     public async Task Approval_submission_is_not_automated() =>
         await Assert.ThrowsAsync<NotImplementedException>(() => Writer().SubmitForApprovalAsync(Monday));
 }

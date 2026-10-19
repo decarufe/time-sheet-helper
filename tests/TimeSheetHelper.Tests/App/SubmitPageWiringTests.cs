@@ -55,7 +55,7 @@ public sealed class SubmitPageWiringTests
     public void The_page_marks_the_week_typed_only_from_the_verdict_of_FillGuard()
     {
         // Scoped to the selected day(s): one call checks the scope, a second (gated by the first) checks the whole draft.
-        Assert.Contains("var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks);", Razor.Value);
+        Assert.Contains("var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks, null, ignoredTasks);", Razor.Value);
         Assert.Equal(2, Count(Razor.Value, "FillGuard.IsWeekFullyEntered("));
         Assert.Equal(1, Count(Razor.Value, "SubmittedUtc = DateTime.UtcNow"));
     }

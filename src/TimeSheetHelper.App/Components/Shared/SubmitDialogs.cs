@@ -1,4 +1,5 @@
 using TimeSheetHelper.Engine;
+using TimeSheetHelper.Forecast;
 using TimeSheetHelper.Forecast.Submission;
 
 namespace TimeSheetHelper.App.Components.Shared;
@@ -39,7 +40,7 @@ public static class SubmitDialogs
     /// <summary>What the confirmation of the fill says: what is typed, what stays out, and the open points to verify.</summary>
     public static IReadOnlyList<string> FillParagraphs(
         decimal draftHours, int cellCount, DateOnly monday, IReadOnlyList<SubmissionGap> openToVerify, int ignoredCount, SubmissionSummary? summary,
-        PendingAssignments? pending = null, IReadOnlyCollection<DateOnly>? selectedDays = null)
+        PendingAssignments? pending = null, IReadOnlyCollection<DateOnly>? selectedDays = null, IReadOnlyCollection<SubmissionIgnoredCell>? ignoredCells = null)
     {
         // A gap without a date concerns the whole week (auth, global error...): it is never left out by a day selection.
         var scopedToVerify = selectedDays is null
@@ -70,6 +71,9 @@ public static class SubmitDialogs
                 + "Confirmez-la ou annulez-la dans la vue Semaine avant de saisir si besoin.");
         }
 
+        if (ignoredCells is { Count: > 0 })
+            paragraphs.Add(IgnoredParagraph(ignoredCells));
+
         if (ignoredCount > 0)
             paragraphs.Add($"{ignoredCount} {(ignoredCount > 1 ? "écarts ignorés" : "écart ignoré")} pour cette session : le brouillon n'est pas modifié et la saisie reste la même.");
 
@@ -78,6 +82,19 @@ public static class SubmitDialogs
 
         paragraphs.Add("La semaine ne sera pas envoyée pour approbation : vous le ferez vous-même dans Forecast.");
         return paragraphs;
+    }
+
+    /// <summary>The hours left out of the fill because their task is ignored: how many, which tasks, and that the draft keeps them.</summary>
+    public static string IgnoredParagraph(IReadOnlyCollection<SubmissionIgnoredCell> ignoredCells)
+    {
+        var hours = ignoredCells.Sum(c => c.Hours);
+        var tasks = ignoredCells
+            .GroupBy(c => (c.ForecastTaskId, c.TaskName, c.Automatic))
+            .Select(g => g.Key.Automatic ? $"{g.Key.TaskName} (exclue de la soumission)" : g.Key.TaskName)
+            .Order(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        return $"{TimesheetUi.HoursLabel(hours)} sur {tasks.Count} {(tasks.Count > 1 ? "tâches ignorées" : "tâche ignorée")} ne seront pas envoyées à Forecast : "
+               + $"{string.Join(" ; ", tasks)}. Elles restent dans le brouillon.";
     }
 
     /// <summary>The title of the fill confirmation: generic for the whole week, naming the day(s) otherwise.</summary>

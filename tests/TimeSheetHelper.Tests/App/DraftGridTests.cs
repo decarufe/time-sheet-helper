@@ -40,6 +40,39 @@ public sealed class DraftGridTests
     }
 
     [Fact]
+    public void Ignored_rows_are_marked_kept_in_the_totals_and_their_hours_counted_apart()
+    {
+        var draft = Draft((1, 0, 2m), (2, 0, 1m), (2, 1, 1.5m));
+        var tasks = Tasks(GapFx.Task(1, "A"), GapFx.Task(2, "B"));
+        tasks[2].ExcludeFromSubmission = true;
+
+        var grid = DraftGrid.Build(draft, tasks, GapFx.Monday, null, ignored: new HashSet<int> { 2 });
+
+        var a = grid.Rows.Single(r => r.TaskId == 1);
+        var b = grid.Rows.Single(r => r.TaskId == 2);
+        Assert.False(a.Ignored);
+        Assert.True(b.Ignored && b.Automatic && b.Flagged);
+        Assert.True(grid.HasIgnored);
+        Assert.Equal(1m, grid.IgnoredHours(GapFx.Day(0)));
+        Assert.Equal(2.5m, grid.IgnoredTotal);
+        Assert.Equal(3m, grid.DayTotals[GapFx.Day(0)]);
+    }
+
+    [Fact]
+    public void A_flagged_task_that_is_reincluded_stays_flagged_but_is_no_longer_ignored()
+    {
+        var tasks = Tasks(GapFx.Task(1, "A"));
+        tasks[1].ExcludeFromSubmission = true;
+
+        var grid = DraftGrid.Build(Draft((1, 0, 1m)), tasks, GapFx.Monday, null, ignored: new HashSet<int>());
+
+        var row = Assert.Single(grid.Rows);
+        Assert.True(row.Flagged);
+        Assert.False(row.Ignored || row.Automatic);
+        Assert.False(grid.HasIgnored);
+    }
+
+    [Fact]
     public void Rows_without_hours_are_left_out_and_unknown_tasks_are_named_as_such()
     {
         var draft = Draft((1, 0, 0m), (9, 1, 1m));

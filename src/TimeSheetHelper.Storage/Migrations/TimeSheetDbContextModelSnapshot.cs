@@ -87,6 +87,9 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.Property<string>("ClientName")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ExcludeFromSubmission")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ExternalId")
                         .IsRequired()
                         .HasColumnType("TEXT");

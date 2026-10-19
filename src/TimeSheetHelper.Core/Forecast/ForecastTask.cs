@@ -17,6 +17,12 @@ public sealed class ForecastTask
     /// <summary>Starred by the user: listed first in the task picker. Never touched by a Forecast sync.</summary>
     public bool IsFavorite { get; set; }
 
+    /// <summary>
+    /// The task cannot be entered in Forecast through the MCP server (internal tasks): the hours classified on it are left out of the
+    /// submission automatically. Set by the user; never touched by a Forecast sync or a list import.
+    /// </summary>
+    public bool ExcludeFromSubmission { get; set; }
+
     public DateTime LastSeenUtc { get; set; }
 
     /// <summary>ExternalId of the built-in task that removes slots or meetings from the timesheet.</summary>

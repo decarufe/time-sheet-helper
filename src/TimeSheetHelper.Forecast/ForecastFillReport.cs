@@ -178,6 +178,9 @@ public sealed class ForecastFillReport
     /// </summary>
     public List<ForecastRemoteEntry> NonProjectEntries { get; } = [];
 
+    /// <summary>Hours of the draft left out of this fill because their task is ignored (flagged, or ignored by the user for this submission): they are not sent.</summary>
+    public List<SubmissionIgnoredCell> IgnoredCells { get; } = [];
+
     public bool Success => Cells.All(c => c.IsOk) && Cells.Count > 0;
 
     /// <summary>Some cells are in Forecast and others are not: running the fill again registers only what is missing.</summary>

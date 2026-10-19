@@ -57,6 +57,7 @@ public sealed class ForecastTaskLinker(
         }
 
         Apply(target, remote, project, now);
+        target.ExcludeFromSubmission |= local.ExcludeFromSubmission;
         await db.Rules.Where(r => r.ForecastTaskId == localTaskId)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.ForecastTaskId, target.Id), cancellationToken);
         await db.TimesheetEntries.Where(e => e.ForecastTaskId == localTaskId)

@@ -1,10 +1,21 @@
 using TimeSheetHelper.Core.Forecast;
 using TimeSheetHelper.Core.Timesheets;
+using TimeSheetHelper.Forecast;
 using TimeSheetHelper.Forecast.Submission;
 
 namespace TimeSheetHelper.App.Components.Shared;
 
-public sealed record DraftRow(int TaskId, string Name, IReadOnlyDictionary<DateOnly, decimal> Hours, decimal Total);
+public sealed record DraftRow(int TaskId, string Name, IReadOnlyDictionary<DateOnly, decimal> Hours, decimal Total)
+{
+    /// <summary>The task is left out of the fill (flagged, or ignored for this submission): its hours stay in the draft and are not sent.</summary>
+    public bool Ignored { get; init; }
+
+    /// <summary>The task is left out because of its own flag (not by the user's choice for this submission).</summary>
+    public bool Automatic { get; init; }
+
+    /// <summary>The task carries the flag, whether it is currently left out or the user re-included it.</summary>
+    public bool Flagged { get; init; }
+}
 
 /// <summary>Where a day stands against its objective (within the tolerance, below, above) or unknown without an analysis.</summary>
 public enum ObjectiveFlag { Unknown, Within, Below, Above }
@@ -46,6 +57,13 @@ public sealed class DraftGrid
 
     public decimal GrandTotal => DayTotals.Values.Sum();
 
+    /// <summary>Hours of the ignored tasks per day: counted in the totals (the work was done), not sent to Forecast.</summary>
+    public decimal IgnoredHours(DateOnly day) => Rows.Where(r => r.Ignored).Sum(r => r.Hours.GetValueOrDefault(day));
+
+    public decimal IgnoredTotal => Rows.Where(r => r.Ignored).Sum(r => r.Total);
+
+    public bool HasIgnored => Rows.Any(r => r.Ignored);
+
     /// <summary>Work with no task yet (not in the totals).</summary>
     public IReadOnlyDictionary<DateOnly, decimal> Unclassified { get; }
 
@@ -75,10 +93,13 @@ public sealed class DraftGrid
         : ObjectiveFlag.Above;
 
     /// <param name="isOpen">Whether a gap still counts (an ignored gap does not mark its cell); null = all do.</param>
+    /// <param name="ignored">Tasks left out of the fill; their rows are marked. Null: none.</param>
     public static DraftGrid Build(
-        TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, DateOnly monday, SubmissionAnalysis? analysis, Func<SubmissionGap, bool>? isOpen = null)
+        TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, DateOnly monday, SubmissionAnalysis? analysis, Func<SubmissionGap, bool>? isOpen = null,
+        IReadOnlySet<int>? ignored = null)
     {
         var weekDays = Enumerable.Range(0, 7).Select(monday.AddDays).ToList();
+        var automatic = SubmissionTaskScope.AutoExcluded(tasks.Values);
         var byCell = draft.Entries
             .GroupBy(e => (e.ForecastTaskId, e.Date))
             .ToDictionary(g => g.Key, g => g.Sum(e => e.Hours));
@@ -88,7 +109,13 @@ public sealed class DraftGrid
             {
                 var hours = weekDays.ToDictionary(d => d, d => byCell.GetValueOrDefault((id, d)));
                 var name = tasks.TryGetValue(id, out var task) ? task.DisplayName : $"Tâche #{id} inconnue";
-                return new DraftRow(id, name, hours, hours.Values.Sum());
+                var isIgnored = ignored?.Contains(id) == true;
+                return new DraftRow(id, name, hours, hours.Values.Sum())
+                {
+                    Ignored = isIgnored,
+                    Automatic = isIgnored && automatic.Contains(id),
+                    Flagged = automatic.Contains(id),
+                };
             })
             .Where(r => r.Total > 0)
             .OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
