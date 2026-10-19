@@ -143,7 +143,7 @@ public sealed class SubmitPageGadgetTests
         Assert.True(session.Ignore(verifyMonday));
         Assert.True(session.Ignore(verifyMonday));
         Assert.True(session.Ignore(verifyTuesday));
-        var board = GapBoard.Build([verifyMonday, verifyTuesday], session, new GapFilter(Day: GapFx.Day(1)));
+        var board = GapBoard.Build([verifyMonday, verifyTuesday], session, days: [GapFx.Day(1)]);
 
         Assert.Equal(2, session.IgnoredCount);
         Assert.Equal([verifyTuesday.Id], board.Ignored.Select(g => g.Id));
@@ -152,16 +152,16 @@ public sealed class SubmitPageGadgetTests
     }
 
     [Fact]
-    public void The_day_filter_does_not_hide_open_blocking_gaps_from_the_counts_that_guard_the_fill()
+    public void The_blocking_gaps_of_unchecked_days_no_longer_count_in_the_figures_that_guard_the_fill()
     {
         var blockingOnTuesday = GapFx.Gap(taskId: 1, day: 1);
         var verifyOnMonday = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null, day: 0);
 
-        var board = GapBoard.Build([blockingOnTuesday, verifyOnMonday], new SessionGapState(), new GapFilter(Day: GapFx.Day(0)));
+        var board = GapBoard.Build([blockingOnTuesday, verifyOnMonday],         new SessionGapState(), days: [GapFx.Day(0)]);
 
         Assert.Equal([verifyOnMonday.Id], board.Visible.Select(g => g.Id));
-        Assert.Equal(1, board.OpenBlockingCount);
-        Assert.Equal(blockingOnTuesday.Id, board.FirstBlocking?.Id);
+                Assert.Equal(0, board.OpenBlockingCount);
+                Assert.Null(board.FirstBlocking);
     }
 
     [Fact]

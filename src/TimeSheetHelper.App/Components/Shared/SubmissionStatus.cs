@@ -18,6 +18,7 @@ public sealed record StatusStep(string Name, string Text, StatusLevel Level);
 /// <param name="SimulationSucceeded">Every cell of that simulation is fine.</param>
 /// <param name="SimulatedUtc">When the simulation ended.</param>
 /// <param name="Refreshing">The draft or the analysis is being updated (the screen is kept, greyed).</param>
+/// <param name="HasSelection">At least one day is checked for the simulation and the fill (nothing is checked by default in another week).</param>
 public sealed record SubmissionStatusInput(
     SubmissionAnalysis? Analysis,
     int OpenBlocking,
@@ -33,7 +34,8 @@ public sealed record SubmissionStatusInput(
     bool SimulationRunning,
     bool FillRunning,
     bool Refreshing,
-    DateTime NowUtc);
+    DateTime NowUtc,
+    bool HasSelection = true);
 
 /// <summary>What the status bar says: counters, steps, week against the objective, verdict, and whether the fill may start.</summary>
 public sealed record SubmissionStatus(
@@ -85,6 +87,8 @@ public static class SubmissionStatusBuilder
             return "La semaine est déjà saisie dans Forecast : rouvrez le brouillon pour la modifier.";
         if (!input.HasRows)
             return "Aucune heure classée à saisir : attribuez des tâches dans la vue Semaine.";
+        if (!input.HasSelection)
+            return "Cochez au moins une journée dans le brouillon pour la simuler puis la saisir.";
         if (input.SimulationRunning || input.FillRunning || input.Refreshing)
             return "Une opération est en cours : attendez la fin de la mise à jour.";
         if (!input.HasSimulation)
@@ -120,6 +124,12 @@ public static class SubmissionStatusBuilder
         {
             level = StatusLevel.Idle;
             return "Rien à saisir pour cette semaine";
+        }
+
+        if (!input.HasSelection)
+        {
+            level = StatusLevel.Idle;
+            return "Cochez la ou les journées à simuler et à saisir";
         }
 
         if (!input.HasSimulation)

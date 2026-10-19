@@ -1,5 +1,6 @@
 using System.Globalization;
 using TimeSheetHelper.Core.Activities;
+using TimeSheetHelper.Core.Forecast;
 using TimeSheetHelper.Engine;
 using TimeSheetHelper.Engine.Allocation;
 using TimeSheetHelper.Engine.Grouping;
@@ -46,6 +47,25 @@ public static class TimesheetUi
 
     public static string Capitalize(string text) =>
         text.Length == 0 ? text : char.ToUpper(text[0], French) + text[1..];
+
+    public const string NoProjectLabel = "(sans projet)";
+
+    public const string NoTaskLabel = "(sans tâche)";
+
+    /// <summary>
+    /// "Client / Tâche" for a Forecast task, with a placeholder for a missing project or task name so the row is never blank;
+    /// a task unknown locally is shown by its id.
+    /// </summary>
+    public static string TaskLabel(ForecastTask? task, int taskId)
+    {
+        if (task is null)
+            return $"Tâche #{taskId} (inconnue)";
+        if (task.IsIgnored)
+            return task.DisplayName;
+
+        var project = string.IsNullOrWhiteSpace(task.ClientName) ? task.ProjectName : task.ClientName;
+        return $"{(string.IsNullOrWhiteSpace(project) ? NoProjectLabel : project.Trim())} / {(string.IsNullOrWhiteSpace(task.TaskName) ? NoTaskLabel : task.TaskName.Trim())}";
+    }
 
     public static string GroupKindLabel(GroupKind kind) => kind switch
     {

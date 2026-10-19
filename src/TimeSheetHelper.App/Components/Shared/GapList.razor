@@ -18,19 +18,6 @@
                 <button type="button" aria-pressed="@(Filter.Severity == SubmissionGapSeverity.Info ? "true" : "false")"
                         @onclick="() => SetSeverityAsync(SubmissionGapSeverity.Info)">Info (@Board.OpenInfoCount)</button>
             </div>
-            @if (Days.Count > 0)
-            {
-                <label class="day-filter">
-                    <span class="visually-hidden">Filtrer par jour</span>
-                    <select @onchange="OnDayChangedAsync" aria-label="Filtrer par jour">
-                        <option value="" selected="@(Filter.Day is null)">Tous les jours</option>
-                        @foreach (var day in Days)
-                        {
-                            <option value="@TimesheetUi.IsoDate(day)" selected="@(Filter.Day == day)">@UiLabels.Day(day)</option>
-                        }
-                    </select>
-                </label>
-            }
             <button type="button" disabled="@(Board.Visible.Count == 0)" @onclick="NextAsync">
                 Écart suivant@(Board.Visible.Count > 0 ? $" ({Board.Visible.Count})" : "")
             </button>
@@ -189,9 +176,6 @@
 
     [Parameter] public EventCallback<GapFilter> FilterChanged { get; set; }
 
-    /// <summary>Days offered by the day filter.</summary>
-    [Parameter] public IReadOnlyList<DateOnly> Days { get; set; } = [];
-
     [Parameter, EditorRequired] public Func<SubmissionGap, IReadOnlyList<GapActionView>> ActionsFor { get; set; } = _ => [];
 
     /// <summary>The resolution whose inline panel is open for a gap (null when none).</summary>
@@ -261,9 +245,6 @@
     }
 
     private Task SetSeverityAsync(SubmissionGapSeverity? severity) => FilterChanged.InvokeAsync(Filter with { Severity = severity });
-
-    private Task OnDayChangedAsync(ChangeEventArgs e) =>
-        FilterChanged.InvokeAsync(Filter with { Day = TimesheetUi.TryParseIsoDate(e.Value?.ToString(), out var day) ? day : null });
 
     private Task NextAsync()
     {

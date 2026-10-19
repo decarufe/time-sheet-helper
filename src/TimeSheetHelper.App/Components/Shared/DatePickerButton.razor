@@ -1,0 +1,17 @@
+<span class="date-picker" title="@Label">
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M4.5 1v1.5h7V1H13v1.5h1A1.5 1.5 0 0 1 15.5 4v9a1.5 1.5 0 0 1-1.5 1.5H2A1.5 1.5 0 0 1 .5 13V4A1.5 1.5 0 0 1 2 2.5h1V1zM2 6v7h12V6zm2 1.5h2v2H4z" />
+    </svg>
+    <input type="date" value="@TimesheetUi.IsoDate(Value)" aria-label="@Label" @onchange="OnChangedAsync" />
+</span>
+
+@code {
+    [Parameter, EditorRequired] public DateOnly Value { get; set; }
+
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    [Parameter] public EventCallback<DateOnly> OnPicked { get; set; }
+
+    private Task OnChangedAsync(ChangeEventArgs e) =>
+        TimesheetUi.TryParseIsoDate(e.Value?.ToString(), out var picked) ? OnPicked.InvokeAsync(picked) : Task.CompletedTask;
+}

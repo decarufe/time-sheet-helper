@@ -65,7 +65,7 @@
     {
         var status = BuildStatus();
 
-        <SubmissionStatusBar @ref="statusBar" Status="status" Updating="Updating" Busy="AnyBusy" HasSimulation="simulation is not null"
+        <SubmissionStatusBar @ref="statusBar" Status="status" Updating="Updating" Busy="AnyBusy" HasSimulation="simulation is not null" HasSelection="selectedDays.Count > 0"
                              ShowActions="draft.SubmittedUtc is null && grid.Rows.Count > 0" OnSimulate="() => SimulateAsync()"
                              OnFill="AskFill" OnGoToGap="GoToGap" FillButtonLabel="@SubmitDialogs.FillButtonLabel(selectedDays, monday)" />
 
@@ -87,7 +87,14 @@
             @if (draft.SubmittedUtc is null && grid.Rows.Count > 0)
             {
                 <p class="muted day-selection" role="status">
-                    Simulation et saisie pour @SubmitDialogs.DaysLabel(selectedDays, monday).
+                    @if (selectedDays.Count == 0)
+                    {
+                        <text>Aucune journée cochée : cochez les jours à simuler et à saisir.</text>
+                    }
+                    else
+                    {
+                        <text>Simulation et saisie pour @SubmitDialogs.DaysLabel(selectedDays, monday).</text>
+                    }
                     @if (!IsWholeWeek)
                     {
                         <button type="button" class="link" disabled="@AnyBusy" @onclick="SelectWholeWeek">Sélectionner toute la semaine</button>
@@ -240,7 +247,7 @@
             <p class="alert error" role="alert">@analysisError</p>
         }
 
-        <GapList @ref="gapList" Board="board" Filter="filter" FilterChanged="OnFilterChanged" Days="grid.Days"
+        <GapList @ref="gapList" Board="board" Filter="filter" FilterChanged="OnFilterChanged"
                  ActionsFor="ActionsFor" OpenPanelFor="OpenPanelFor" Busy="AnyBusy" Updating="Updating"
                  Analyzing="@(analysis is null && analyzing)" HasSimulation="simulation is not null" Resolved="session.Resolved"
                  CleanCells="cleanCells" OnAction="OnGapActionAsync" OnRestore="Restore">
@@ -328,8 +335,11 @@
     private IReadOnlyList<ForecastCellResult> cleanCells = [];
     private GapActionContext actionContext = new(default, _ => true);
 
-    /// <summary>Days of the displayed week to simulate and fill; other days are left untouched. At least one day, always.</summary>
+    /// <summary>Days of the displayed week to simulate and fill; other days are left untouched. Empty = nothing to simulate or fill (never the whole week).</summary>
     private HashSet<DateOnly> selectedDays = [];
+
+    /// <summary>The days the current simulation was made for.</summary>
+    private HashSet<DateOnly> simulatedDays = [];
 
     private OpenPanel? panel;
     private PendingMerge? pendingMerge;
@@ -347,7 +357,8 @@
 
     private ForecastFillReport? Report => fill ?? simulation;
 
-    private bool SimulationFresh => simulation is not null && draft is not null && simulationFingerprint == FillGuard.Fingerprint(draft);
+    private bool SimulationFresh =>
+        simulation is not null && draft is not null && simulationFingerprint == FillGuard.Fingerprint(draft) && simulatedDays.SetEquals(selectedDays);
 
     private string TableWrapClass => draftRefreshing ? "table-wrap updating" : "table-wrap";
 
@@ -361,6 +372,9 @@
     {
         if (DateOnly.TryParseExact(Semaine, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
             monday = UiLabels.MondayOf(day);
+
+        // Days of another week never stay selected, whatever happens to the load below.
+        selectedDays = DaySelection.Prune(selectedDays, monday);
 
         // Rebuilding the draft may call the classifier: only once, in the interactive render (not the prerender).
         if (!RendererInfo.IsInteractive || loadedWeek == monday)
@@ -430,33 +444,50 @@
         panel = null;
         pendingMerge = null;
         actedGapId = null;
-        selectedDays = DefaultSelection(monday);
+        selectedDays = DaySelection.Default(monday, DateOnly.FromDateTime(DateTime.Today));
+        simulatedDays = [];
         RebuildView();
     }
 
-    /// <summary>
-    /// Default selection of days to simulate and fill: today alone when the week on screen holds it (the day-by-day workflow needs
-    /// no click), the whole week otherwise (another week is most often reviewed or filled whole, as before this feature).
-    /// </summary>
-    private static HashSet<DateOnly> DefaultSelection(DateOnly monday)
-    {
-        var today = DateOnly.FromDateTime(DateTime.Today);
-        return today >= monday && today < monday.AddDays(7) ? [today] : Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
-    }
-
-    private bool IsWholeWeek => selectedDays.SetEquals(Enumerable.Range(0, 7).Select(monday.AddDays));
+    private bool IsWholeWeek => DaySelection.IsWholeWeek(selectedDays, monday);
 
     private void ToggleDay(DateOnly day, bool include)
     {
-        if (!include && selectedDays.Count <= 1 && selectedDays.Contains(day))
-            return; // At least one day must stay selected.
+        if (day < monday || day >= monday.AddDays(7))
+            return; // Only the days on screen can be selected.
         if (include)
             selectedDays.Add(day);
         else
             selectedDays.Remove(day);
+        OnSelectionChanged();
     }
 
-    private void SelectWholeWeek() => selectedDays = Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
+    private void SelectWholeWeek()
+    {
+        selectedDays = DaySelection.WeekOf(monday).ToHashSet();
+        OnSelectionChanged();
+    }
+
+    /// <summary>
+    /// The gaps shown follow the checked days. A simulation only covers the days it was made for: another selection makes it stale
+    /// (the fill needs a simulation of exactly the days it will write), and it is redone by itself unless no day is checked.
+    /// </summary>
+    private void OnSelectionChanged()
+    {
+        RebuildView();
+        if (simulation is null || draft?.SubmittedUtc is not null)
+            return;
+
+        if (SimulationFresh || selectedDays.Count == 0)
+        {
+            debounce.Cancel();
+            analysisStale = false;
+            return;
+        }
+
+        analysisStale = true;
+        debounce.Request();
+    }
 
     private async Task LoadAsync()
     {
@@ -511,11 +542,11 @@
     private void RebuildView()
     {
         var gaps = AllGaps();
-        board = GapBoard.Build(gaps, session, filter);
-        cleanCells = GapBoard.CellsWithoutGap(Report, gaps);
+        board = GapBoard.Build(gaps, session, filter, selectedDays);
+        cleanCells = GapBoard.CellsWithoutGap(Report, gaps).Where(c => selectedDays.Contains(c.Date)).ToList();
         actionContext = new GapActionContext(monday, tasks.ContainsKey);
         if (draft is not null)
-            grid = DraftGrid.Build(draft, tasks, monday, analysis, gap => !session.IsIgnored(gap));
+            grid = DraftGrid.Build(draft, tasks, monday, analysis, gap => !session.IsIgnored(gap) && GapBoard.InScope(gap, selectedDays));
     }
 
     private SubmissionStatus BuildStatus() =>
@@ -534,7 +565,8 @@
             simulationOp.Busy,
             fillOp.Busy,
             draftRefreshing || analyzing,
-            DateTime.UtcNow));
+            DateTime.UtcNow,
+            selectedDays.Count > 0));
 
     private IReadOnlyList<GapActionView> ActionsFor(SubmissionGap gap) => GapActionPlanner.Plan(gap, actionContext);
 
@@ -653,7 +685,7 @@
     /// <param name="auto">Run by the debounce after a correction (the screen is kept as it is, greyed, until the result).</param>
     private async Task SimulateAsync(bool auto = false, CancellationToken external = default)
     {
-        if (!FillGuard.CanSimulate(draft is not null, draft?.SubmittedUtc is not null, disposed, fillOp.Busy))
+        if (!FillGuard.CanSimulate(draft is not null, draft?.SubmittedUtc is not null, disposed, fillOp.Busy, selectedDays.Count > 0))
             return;
         if (!auto)
             debounce.Cancel();
@@ -674,12 +706,13 @@
 
             var current = await ReadDraftAsync(monday) ?? draft!;
             var fingerprint = FillGuard.Fingerprint(current);
-            var days = selectedDays.ToHashSet();
+            var days = DaySelection.Prune(selectedDays, monday);
             var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, days, ct), linked.Token);
             if (!simulations.IsCurrent(ticket) || disposed)
                 return;
 
             simulation = report;
+            simulatedDays = days;
             simulationFingerprint = fingerprint;
             simulationUtc = DateTime.UtcNow;
             await SetDraftAsync(current);
@@ -755,8 +788,8 @@
     private async Task FillAsync()
     {
         confirmFill = false;
-        if (draft is null)
-            return;
+        if (draft is null || DaySelection.Prune(selectedDays, monday).Count == 0)
+            return; // Nothing checked: the writer would take an empty scope for the whole week.
 
         var week = monday;
         var canFill = BuildStatus().CanFill;
@@ -781,7 +814,7 @@
                 return;
             }
 
-            var days = selectedDays.ToHashSet();
+            var days = DaySelection.Prune(selectedDays, monday);
             var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ct));
             if (FillGuard.ResultApplies(week, monday, disposed))
                 fill = report;

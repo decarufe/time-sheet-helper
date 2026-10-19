@@ -68,16 +68,22 @@ public sealed class GapBoardTests
     }
 
     [Fact]
-    public void The_day_filter_matches_the_day_of_the_cell_or_of_the_gap()
+    public void The_gaps_follow_the_checked_days_by_the_day_of_the_cell_or_of_the_gap_and_undated_gaps_always_stay()
     {
         var onCell = GapFx.Gap(taskId: 1, day: 2);
         var onDay = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null, day: 2);
         var other = GapFx.Gap(taskId: 3, day: 4);
+        var noDay = GapFx.Gap(SubmissionGapType.TaskNotFound, taskId: null) with { Date = null };
+        IEnumerable<SubmissionGap> all = [onCell, onDay, other, noDay];
 
-        var board = Build([onCell, onDay, other], filter: new GapFilter(Day: GapFx.Day(2)));
+        var onlyWednesday = GapBoard.Build(all, new SessionGapState(), days: [GapFx.Day(2)]);
+        var nothingChecked = GapBoard.Build(all, new SessionGapState(), days: []);
+        var everything = GapBoard.Build(all, new SessionGapState(), days: null);
 
-        Assert.Equal([onCell.Id, onDay.Id], board.Visible.Select(g => g.Id));
-        Assert.True(new GapFilter(Day: GapFx.Day(2)).IsActive);
+        Assert.Equal(new[] { onCell.Id, onDay.Id, noDay.Id }.Order(), onlyWednesday.Visible.Select(g => g.Id).Order());
+        Assert.Equal([noDay.Id], nothingChecked.Visible.Select(g => g.Id));
+        Assert.Equal(4, everything.Visible.Count);
+        Assert.True(new GapFilter(SubmissionGapSeverity.Blocking).IsActive);
         Assert.False(GapFilter.None.IsActive);
     }
 

@@ -67,7 +67,7 @@ public static class FillGuard
     public static bool ResultApplies(DateOnly operationWeek, DateOnly shownWeek, bool disposed) =>
         !disposed && operationWeek == shownWeek;
 
-    /// <summary>A simulation does not start under a fill that is writing, on a draft already typed, or on a page that is gone.</summary>
-    public static bool CanSimulate(bool hasDraft, bool draftSubmitted, bool disposed, bool fillRunning) =>
-        hasDraft && !draftSubmitted && !disposed && !fillRunning;
+    /// <summary>A simulation does not start under a fill that is writing, on a draft already typed, with no day checked (the writer would take that for the whole week), or on a page that is gone.</summary>
+    public static bool CanSimulate(bool hasDraft, bool draftSubmitted, bool disposed, bool fillRunning, bool hasSelection = true) =>
+        hasDraft && !draftSubmitted && !disposed && !fillRunning && hasSelection;
 }

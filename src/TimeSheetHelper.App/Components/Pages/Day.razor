@@ -21,12 +21,13 @@
 
 <div class="day @(selection is null ? null : "has-selection")">
     <header class="toolbar">
-        <h1>@TimesheetUi.Capitalize(day.ToString("dddd d MMMM yyyy", TimesheetUi.French))</h1>
         <nav class="day-nav" aria-label="Navigation par jour">
             <button type="button" @onclick="() => GoTo(day.AddDays(-1))" aria-label="Jour précédent">‹</button>
             <button type="button" @onclick="() => GoTo(Today)" disabled="@(day == Today)">Aujourd'hui</button>
             <button type="button" @onclick="() => GoTo(day.AddDays(1))" aria-label="Jour suivant">›</button>
+            <DatePickerButton Value="day" Label="Choisir un jour dans le calendrier" OnPicked="GoTo" />
         </nav>
+        <h1>@TimesheetUi.Capitalize(day.ToString("dddd d MMMM yyyy", TimesheetUi.French))</h1>
         <span class="spacer"></span>
         <a class="button" href="@WeekHref">Voir la semaine</a>
     </header>
@@ -728,7 +729,7 @@
     // Labels
 
     private string TaskName(int taskId) =>
-        timeline?.Tasks.TryGetValue(taskId, out var task) == true ? task.DisplayName : $"Tâche #{taskId}";
+        TimesheetUi.TaskLabel(timeline?.Tasks.GetValueOrDefault(taskId), taskId);
 
     private string SlotLabel(SlotAssignment slot) => slot switch
     {
@@ -738,6 +739,7 @@
         { IsWork: true, TaskId: { } id } => TaskName(id),
         { IsWork: true, GroupKey: { } key } => $"Non classé · {TimesheetUi.GroupLabel(key)}",
         { IsWork: true } => "Non classé",
+        { Kind: SlotKind.Empty, Evidence.Count: > 0 } => "Activité trop brève (non comptée)",
         _ => "",
     };
 

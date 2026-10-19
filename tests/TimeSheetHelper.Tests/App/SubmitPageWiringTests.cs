@@ -83,7 +83,10 @@ public sealed class SubmitPageWiringTests
     [Fact]
     public void The_page_asks_FillGuard_before_any_simulation_and_before_showing_any_result_of_an_operation()
     {
-        Assert.Contains("!FillGuard.CanSimulate(draft is not null, draft?.SubmittedUtc is not null, disposed, fillOp.Busy)", Razor.Value);
+        Assert.Contains("!FillGuard.CanSimulate(draft is not null, draft?.SubmittedUtc is not null, disposed, fillOp.Busy, selectedDays.Count > 0)", Razor.Value);
+        // A week change prunes the selection, and the list of gaps is scoped by the checked days (no day dropdown).
+        Assert.Contains("DaySelection.Prune(selectedDays, monday)", Razor.Value);
+        Assert.DoesNotContain("Days=\"grid.Days\"", Razor.Value);
         // Ask-for-confirmation, result of the fill (shown), mark-then-show, failure: each checks the week still on screen.
         Assert.True(Count(Razor.Value, "FillGuard.ResultApplies(week, monday, disposed)") >= 5);
     }

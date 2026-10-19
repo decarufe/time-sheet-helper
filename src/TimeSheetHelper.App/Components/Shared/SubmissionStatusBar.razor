@@ -40,7 +40,7 @@
     @if (ShowActions)
     {
         <div class="bar-actions">
-            <button type="button" class="primary" disabled="@Busy" @onclick="() => OnSimulate.InvokeAsync()">
+            <button type="button" class="primary" disabled="@(Busy || !HasSelection)" @onclick="() => OnSimulate.InvokeAsync()">
                 @(HasSimulation ? "Relancer la simulation" : "Simulation (aucune saisie)")
             </button>
             <button type="button" class="danger" @ref="fillButton" disabled="@(!Status.CanFill || Busy)" aria-describedby="@(Status.FillDisabledReason is null ? null : reasonId)"
@@ -76,6 +76,9 @@
 
     /// <summary>False when the draft is already typed in Forecast (nothing to simulate or fill).</summary>
     [Parameter] public bool ShowActions { get; set; } = true;
+
+    /// <summary>At least one day is checked: without any, there is nothing to simulate.</summary>
+    [Parameter] public bool HasSelection { get; set; } = true;
 
     [Parameter] public EventCallback OnSimulate { get; set; }
 

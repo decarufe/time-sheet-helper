@@ -84,6 +84,18 @@ public sealed class SubmissionStatusTests
             everythingWrong with { DraftSubmitted = false, HasRows = true, SimulationRunning = false, HasSimulation = true, SimulationFresh = true, OpenBlocking = 0 }));
     }
 
+    [Fact]
+    public void Nothing_to_fill_when_no_day_is_checked_and_the_verdict_asks_to_check_one()
+    {
+        var input = Ready() with { HasSelection = false };
+
+        var status = SubmissionStatusBuilder.Build(input);
+
+        Assert.False(status.CanFill);
+        Assert.Contains("Cochez au moins une journée", SubmissionStatusBuilder.FillReason(input));
+        Assert.Contains("Cochez la ou les journées", SubmissionStatusBuilder.Build(input with { HasSimulation = false, SimulationFresh = false }).Verdict);
+    }
+
     [Theory]
     [InlineData(true, false, false)]
     [InlineData(false, true, false)]

@@ -1,4 +1,5 @@
 using TimeSheetHelper.App.Components.Shared;
+using TimeSheetHelper.Core.Forecast;
 using TimeSheetHelper.Engine;
 using TimeSheetHelper.Engine.Allocation;
 using TimeSheetHelper.Tests.Engine;
@@ -119,4 +120,27 @@ public sealed class TimesheetUiTests
     [InlineData(2, 0, 3, "2 créneaux supprimés, aucune activité effacée. 3 activités conservées car elles touchent aussi d'autres créneaux.")]
     public void Removal_result_message_reports_slots_erased_and_kept_activities(int slots, int deleted, int kept, string expected) =>
         Assert.Equal(expected, TimesheetUi.RemovalResultMessage(new SlotRemovalResult(slots, deleted, kept)));
+
+    private static ForecastTask Task(string project, string task, string? client = null, string? projectCode = null) =>
+        new() { ExternalId = "x", ProjectName = project, TaskName = task, ClientName = client, ProjectCode = projectCode };
+
+    [Fact]
+    public void Task_label_shows_a_task_without_project_or_task_number_like_any_other()
+    {
+        Assert.Equal("Contoso / Dev", TimesheetUi.TaskLabel(Task("P1", "Dev", "Contoso", projectCode: null), 7));
+        Assert.Equal("Projet X / Dev", TimesheetUi.TaskLabel(Task("Projet X", "Dev"), 7));
+    }
+
+    [Fact]
+    public void Task_label_uses_placeholders_instead_of_a_blank_name()
+    {
+        Assert.Equal("(sans projet) / Dev", TimesheetUi.TaskLabel(Task(" ", "Dev"), 7));
+        Assert.Equal("Contoso / (sans tâche)", TimesheetUi.TaskLabel(Task("P1", "", "Contoso"), 7));
+        Assert.Equal("Tâche #7 (inconnue)", TimesheetUi.TaskLabel(null, 7));
+    }
+
+    [Fact]
+    public void Task_label_keeps_the_ignored_task_label() =>
+        Assert.Equal(ForecastTask.IgnoredLabel,
+            TimesheetUi.TaskLabel(new ForecastTask { ExternalId = ForecastTask.IgnoredExternalId, ProjectName = "", TaskName = "" }, 1));
 }

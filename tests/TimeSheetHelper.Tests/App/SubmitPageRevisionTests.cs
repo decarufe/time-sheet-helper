@@ -192,6 +192,10 @@ public sealed class SubmitPageRevisionTests
         bool hasDraft, bool submitted, bool disposed, bool fillRunning, bool expected) =>
         Assert.Equal(expected, FillGuard.CanSimulate(hasDraft, submitted, disposed, fillRunning));
 
+    [Fact]
+    public void A_simulation_does_not_start_when_no_day_is_checked() =>
+        Assert.False(FillGuard.CanSimulate(true, false, false, false, hasSelection: false));
+
     // ── D2: cells without gap ────────────────────────────────────────────────────────────────────
 
     [Fact]

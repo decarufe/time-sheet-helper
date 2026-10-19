@@ -1,0 +1,49 @@
+/* A calendar icon button: the native date input is stretched over it, invisible, so a click opens the browser's date picker. */
+.date-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.date-picker:hover {
+  border-color: var(--accent);
+}
+
+.date-picker:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.date-picker svg {
+  pointer-events: none;
+}
+
+.date-picker input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-picker input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}

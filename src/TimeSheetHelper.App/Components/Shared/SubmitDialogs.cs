@@ -28,6 +28,8 @@ public static class SubmitDialogs
             return UiLabels.WeekTitle(monday).ToLower(UiLabels.French);
 
         var ordered = selectedDays.Order().ToList();
+        if (ordered.Count == 0)
+            return "aucune journée";
         if (ordered.Count == 1)
             return $"le {UiLabels.Day(ordered[0])}";
 
@@ -82,7 +84,7 @@ public static class SubmitDialogs
     public static string FillTitle(IReadOnlyCollection<DateOnly>? selectedDays, DateOnly monday)
     {
         var week = Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
-        if (selectedDays is null || week.SetEquals(selectedDays))
+        if (selectedDays is null || selectedDays.Count == 0 || week.SetEquals(selectedDays))
             return "Saisir les heures dans Forecast ?";
 
         var ordered = selectedDays.Order().ToList();
@@ -95,7 +97,7 @@ public static class SubmitDialogs
     public static string FillButtonLabel(IReadOnlyCollection<DateOnly>? selectedDays, DateOnly monday)
     {
         var week = Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
-        if (selectedDays is null || week.SetEquals(selectedDays))
+        if (selectedDays is null || selectedDays.Count == 0 || week.SetEquals(selectedDays))
             return "Saisir dans Forecast…";
 
         var ordered = selectedDays.Order().ToList();

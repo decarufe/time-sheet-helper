@@ -36,7 +36,7 @@
 
 .toolbar h1 {
   font-size: 1.4rem;
-  margin: 0 8px 0 0;
+  margin: 0 0 0 8px;
 }
 
 .week-nav {
@@ -515,6 +515,7 @@ tfoot td {
   .toolbar h1 {
     font-size: 1.15rem;
     flex-basis: 100%;
+    margin-left: 0;
   }
 
   .task-col {

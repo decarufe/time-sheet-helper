@@ -20,12 +20,13 @@
 
 <div class="week">
     <header class="toolbar">
-        <h1>@WeekTitle(monday)</h1>
         <nav class="week-nav" aria-label="Navigation par semaine">
             <button type="button" @onclick="() => GoToWeek(monday.AddDays(-7))" aria-label="Semaine précédente">‹</button>
             <button type="button" @onclick="() => GoToWeek(Today)" disabled="@(monday == TimesheetUi.WeekStartOf(Today))">Cette semaine</button>
             <button type="button" @onclick="() => GoToWeek(monday.AddDays(7))" aria-label="Semaine suivante">›</button>
+            <DatePickerButton Value="monday" Label="Choisir une semaine dans le calendrier" OnPicked="GoToWeek" />
         </nav>
+        <h1>@WeekTitle(monday)</h1>
         <span class="spacer"></span>
         @if (!IsSubmitted)
         {
@@ -282,7 +283,7 @@
                             {
                                 <span class="label">Suggestion de Claude :</span>
                                 <span class="task-chip" style="@TimesheetUi.TaskStyle(suggestedTask.Id)">
-                                    <span class="swatch" aria-hidden="true"></span>@suggestedTask.DisplayName
+                                    <span class="swatch" aria-hidden="true"></span>@TimesheetUi.TaskLabel(suggestedTask, suggestedTask.Id)
                                 </span>
                                 <span class="confidence @TimesheetUi.ConfidenceClass(group.Suggestion!.Confidence)">@TimesheetUi.Percent(group.Suggestion.Confidence)</span>
                                 @if (!string.IsNullOrWhiteSpace(group.Suggestion.Reason))
@@ -476,9 +477,9 @@
     }
 
     private static string TaskName(WeekProposal week, int taskId) =>
-        week.Tasks.TryGetValue(taskId, out var task) ? task.DisplayName : $"Tâche #{taskId}";
+        TimesheetUi.TaskLabel(week.Tasks.GetValueOrDefault(taskId), taskId);
 
-    private string TaskName(int taskId) => proposal is null ? $"Tâche #{taskId}" : TaskName(proposal, taskId);
+    private string TaskName(int taskId) => TimesheetUi.TaskLabel(proposal?.Tasks.GetValueOrDefault(taskId), taskId);
 
     private DayProposal? DayOf(DateOnly day) => proposal?.Days.FirstOrDefault(d => d.Date == day);
 

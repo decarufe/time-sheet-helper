@@ -151,6 +151,14 @@ public sealed class SubmitDialogsTests
     }
 
     [Fact]
+    public void The_days_label_says_no_day_when_none_is_checked_and_the_fill_title_stays_generic()
+    {
+        Assert.Equal("aucune journée", SubmitDialogs.DaysLabel([], GapFx.Monday));
+        Assert.Equal("Saisir les heures dans Forecast ?", SubmitDialogs.FillTitle([], GapFx.Monday));
+        Assert.Equal("Saisir dans Forecast…", SubmitDialogs.FillButtonLabel([], GapFx.Monday));
+    }
+
+    [Fact]
     public void The_fill_title_and_button_label_are_generic_for_the_whole_week_and_name_the_day_otherwise()
     {
         Assert.Equal("Saisir les heures dans Forecast ?", SubmitDialogs.FillTitle(null, GapFx.Monday));

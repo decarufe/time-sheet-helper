@@ -3,16 +3,14 @@ using TimeSheetHelper.Forecast.Submission;
 
 namespace TimeSheetHelper.App.Components.Shared;
 
-/// <summary>Simple filters of the list of gaps: a severity and/or a day (null = all).</summary>
-public sealed record GapFilter(SubmissionGapSeverity? Severity = null, DateOnly? Day = null)
+/// <summary>Simple filter of the list of gaps: a severity (null = all). The days shown are those checked in the draft, not a filter.</summary>
+public sealed record GapFilter(SubmissionGapSeverity? Severity = null)
 {
     public static GapFilter None { get; } = new();
 
-    public bool IsActive => Severity is not null || Day is not null;
+    public bool IsActive => Severity is not null;
 
-    public bool Matches(SubmissionGap gap) =>
-        (Severity is null || gap.Severity == Severity)
-        && (Day is null || DayOf(gap) == Day);
+    public bool Matches(SubmissionGap gap) => Severity is null || gap.Severity == Severity;
 
     public static DateOnly? DayOf(SubmissionGap gap) => gap.Cell?.Date ?? gap.Date;
 }
@@ -73,10 +71,22 @@ public sealed class GapBoard
     /// <summary>The open gaps that match the filter, in display order.</summary>
     public IReadOnlyList<SubmissionGap> Visible => flat;
 
-    public static GapBoard Build(IEnumerable<SubmissionGap> gaps, SessionGapState session, GapFilter? filter = null)
+    /// <summary>
+    /// Whether a gap concerns the days checked for the simulation and the fill. <paramref name="days"/> null: every day. A gap without a
+    /// day concerns the whole week (auth, global error...): it is never left out.
+    /// </summary>
+    public static bool InScope(SubmissionGap gap, IReadOnlyCollection<DateOnly>? days) =>
+        days is null || GapFilter.DayOf(gap) is not { } day || days.Contains(day);
+
+    /// <param name="days">
+    /// The days checked to simulate and fill (null: all). Gaps of the other days are out of the board altogether, counts included: they
+    /// cannot block a fill that never touches those days.
+    /// </param>
+    public static GapBoard Build(
+        IEnumerable<SubmissionGap> gaps, SessionGapState session, GapFilter? filter = null, IReadOnlyCollection<DateOnly>? days = null)
     {
         filter ??= GapFilter.None;
-        var all = gaps.ToList();
+        var all = gaps.Where(g => InScope(g, days)).ToList();
         var open = all.Where(g => !session.IsIgnored(g)).ToList();
         var visible = open.Where(filter.Matches).ToList();
 
