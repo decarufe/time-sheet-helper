@@ -67,7 +67,7 @@
 
         <SubmissionStatusBar @ref="statusBar" Status="status" Updating="Updating" Busy="AnyBusy" HasSimulation="simulation is not null"
                              ShowActions="draft.SubmittedUtc is null && grid.Rows.Count > 0" OnSimulate="() => SimulateAsync()"
-                             OnFill="AskFill" OnGoToGap="GoToGap" />
+                             OnFill="AskFill" OnGoToGap="GoToGap" FillButtonLabel="@SubmitDialogs.FillButtonLabel(selectedDays, monday)" />
 
         <OpStatus State="@simulationOp" />
         <OpStatus State="@fillOp" />
@@ -84,6 +84,16 @@
                     <a href="@GapActionPlanner.WeekHref(monday)">Corriger dans la vue Semaine</a>
                 </div>
             </div>
+            @if (draft.SubmittedUtc is null && grid.Rows.Count > 0)
+            {
+                <p class="muted day-selection" role="status">
+                    Simulation et saisie pour @SubmitDialogs.DaysLabel(selectedDays, monday).
+                    @if (!IsWholeWeek)
+                    {
+                        <button type="button" class="link" disabled="@AnyBusy" @onclick="SelectWholeWeek">Sélectionner toute la semaine</button>
+                    }
+                </p>
+            }
             @if (draftRefreshing)
             {
                 <p class="muted" role="status">Mise à jour du brouillon…</p>
@@ -111,7 +121,21 @@
                                 <th scope="col">Tâche</th>
                                 @foreach (var day in grid.Days)
                                 {
-                                    <th scope="col" class="num">@UiLabels.Day(day)</th>
+                                    <th scope="col" class="num day-col">
+                                        @if (draft.SubmittedUtc is null)
+                                        {
+                                            <label class="day-toggle">
+                                                <input type="checkbox" checked="@selectedDays.Contains(day)" disabled="@AnyBusy"
+                                                       aria-label="@($"Inclure {UiLabels.Day(day)} dans la simulation et la saisie")"
+                                                       @onchange="e => ToggleDay(day, e.Value is bool v && v)" />
+                                                @UiLabels.Day(day)
+                                            </label>
+                                        }
+                                        else
+                                        {
+                                            @UiLabels.Day(day)
+                                        }
+                                    </th>
                                 }
                                 <th scope="col" class="num">Total</th>
                             </tr>
@@ -242,7 +266,7 @@
 
 @if (confirmFill && draft is not null)
 {
-    <ConfirmDialog Title="Saisir les heures dans Forecast ?" ConfirmLabel="Oui, saisir les heures" OnConfirm="FillAsync" OnCancel="CancelFill">
+    <ConfirmDialog Title="@SubmitDialogs.FillTitle(selectedDays, monday)" ConfirmLabel="Oui, saisir les heures" OnConfirm="FillAsync" OnCancel="CancelFill">
         @foreach (var paragraph in FillParagraphs())
         {
             <p>@paragraph</p>
@@ -303,6 +327,9 @@
     private DraftGrid grid = DraftGrid.Build(new TimesheetDraft(), new Dictionary<int, ForecastTask>(), default, null);
     private IReadOnlyList<ForecastCellResult> cleanCells = [];
     private GapActionContext actionContext = new(default, _ => true);
+
+    /// <summary>Days of the displayed week to simulate and fill; other days are left untouched. At least one day, always.</summary>
+    private HashSet<DateOnly> selectedDays = [];
 
     private OpenPanel? panel;
     private PendingMerge? pendingMerge;
@@ -403,8 +430,33 @@
         panel = null;
         pendingMerge = null;
         actedGapId = null;
+        selectedDays = DefaultSelection(monday);
         RebuildView();
     }
+
+    /// <summary>
+    /// Default selection of days to simulate and fill: today alone when the week on screen holds it (the day-by-day workflow needs
+    /// no click), the whole week otherwise (another week is most often reviewed or filled whole, as before this feature).
+    /// </summary>
+    private static HashSet<DateOnly> DefaultSelection(DateOnly monday)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return today >= monday && today < monday.AddDays(7) ? [today] : Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
+    }
+
+    private bool IsWholeWeek => selectedDays.SetEquals(Enumerable.Range(0, 7).Select(monday.AddDays));
+
+    private void ToggleDay(DateOnly day, bool include)
+    {
+        if (!include && selectedDays.Count <= 1 && selectedDays.Contains(day))
+            return; // At least one day must stay selected.
+        if (include)
+            selectedDays.Add(day);
+        else
+            selectedDays.Remove(day);
+    }
+
+    private void SelectWholeWeek() => selectedDays = Enumerable.Range(0, 7).Select(monday.AddDays).ToHashSet();
 
     private async Task LoadAsync()
     {
@@ -622,7 +674,8 @@
 
             var current = await ReadDraftAsync(monday) ?? draft!;
             var fingerprint = FillGuard.Fingerprint(current);
-            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, ct), linked.Token);
+            var days = selectedDays.ToHashSet();
+            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, days, ct), linked.Token);
             if (!simulations.IsCurrent(ticket) || disposed)
                 return;
 
@@ -696,7 +749,8 @@
 
     private IReadOnlyList<string> FillParagraphs() =>
         SubmitDialogs.FillParagraphs(
-            grid.GrandTotal, simulation?.Cells.Count ?? 0, monday, board.OpenToVerify, session.IgnoredCount, analysis?.Summary, pendingAssignments);
+            selectedDays.Sum(d => grid.DayTotals.GetValueOrDefault(d)), simulation?.Cells.Count ?? 0, monday, board.OpenToVerify, session.IgnoredCount,
+            analysis?.Summary, pendingAssignments, selectedDays);
 
     private async Task FillAsync()
     {
@@ -727,13 +781,16 @@
                 return;
             }
 
-            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, ct));
+            var days = selectedDays.ToHashSet();
+            var report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ct));
             if (FillGuard.ResultApplies(week, monday, disposed))
                 fill = report;
 
             // The hours are in Forecast whatever the page shows now: the mark is stored even when the user moved to another week.
-            var fullyEntered = FillGuard.IsWeekFullyEntered(report, current, tasks);
-            if (fullyEntered)
+            // Scoped to the selected day(s): the week is marked as typed only once every one of its days has been entered this way.
+            var scopeEntered = FillGuard.IsWeekFullyEntered(report, current, tasks, days);
+            var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks);
+            if (weekEntered)
             {
                 await using var db = await DbFactory.CreateDbContextAsync();
                 var stored = await db.TimesheetDrafts.FirstAsync(d => d.Id == current.Id);
@@ -745,16 +802,20 @@
             if (!FillGuard.ResultApplies(week, monday, disposed))
                 return;
 
-            if (fullyEntered)
+            if (weekEntered)
             {
                 await SetDraftAsync(current);
                 fillOp = new OpState(false, $"{report.Summary}. Toutes les cellules sont vérifiées : la semaine est marquée comme saisie. "
                                             + "Pensez à la soumettre pour approbation dans Forecast.", null);
             }
+            else if (scopeEntered)
+            {
+                await SetDraftAsync(current);
+                fillOp = new OpState(false, SubmitDialogs.ScopeEnteredMessage(report.Summary, days, monday), null);
+            }
             else
             {
-                fillOp = new OpState(false, null, $"{report.Summary}. Certaines cellules ne correspondent pas : réglez les écarts ci-dessous. "
-                                                  + "La semaine n'est pas marquée comme saisie.");
+                fillOp = new OpState(false, null, SubmitDialogs.ScopeNotEnteredMessage(report.Summary, days, monday));
             }
 
             await RefreshAnalysisAsync();

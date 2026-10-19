@@ -494,6 +494,60 @@ public sealed class ForecastTimesheetWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task A_day_scoped_fill_only_registers_and_reports_the_selected_day_leaving_the_rest_of_the_draft_untouched()
+    {
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 2m), Entry(_dev, 1, 1.5m), Entry(_meetings, 2, 1m)), ForecastSubmitMode.Fill, days: [Monday.AddDays(1)]);
+
+        var cell = Assert.Single(report.Cells);
+        Assert.Equal(Monday.AddDays(1), cell.Date);
+        Assert.Equal(ForecastCellStatus.Ok, cell.Status);
+        var created = Assert.Single(_server.Creates.ToList());
+        Assert.Equal("2026-10-06", created.GetProperty("date").GetString());
+        Assert.Single(_server.Entries);
+    }
+
+    [Fact]
+    public async Task A_dry_run_scoped_to_one_day_compares_only_that_days_cells_and_registers_nothing()
+    {
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 2m), Entry(_meetings, 2, 1m)), ForecastSubmitMode.DryRun, days: [Monday]);
+
+        var cell = Assert.Single(report.Cells);
+        Assert.Equal(Monday, cell.Date);
+        Assert.Empty(_server.Entries);
+    }
+
+    [Fact]
+    public async Task A_rejected_entry_outside_the_selected_days_is_left_out_of_the_report()
+    {
+        var unknown = new ForecastTask { ExternalId = "T9999", ProjectName = "Fantôme", TaskName = "Inconnue" };
+        await using (var db = CreateDb())
+        {
+            db.ForecastTasks.Add(unknown);
+            await db.SaveChangesAsync();
+        }
+
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(unknown, 0, 1m), Entry(_dev, 1, 1m)), ForecastSubmitMode.Fill, days: [Monday.AddDays(1)]);
+
+        var cell = Assert.Single(report.Cells);
+        Assert.Equal(_dev.Id, cell.ForecastTaskId);
+    }
+
+    [Fact]
+    public async Task A_null_or_empty_day_selection_fills_the_whole_week_as_before()
+    {
+        var whole = Draft(Entry(_dev, 0, 1m), Entry(_meetings, 2, 1m));
+
+        var nullDays = await Writer().FillWeekAsync(whole, ForecastSubmitMode.DryRun, days: null);
+        var emptyDays = await Writer().FillWeekAsync(whole, ForecastSubmitMode.DryRun, days: []);
+
+        Assert.Equal(2, nullDays.Cells.Count);
+        Assert.Equal(2, emptyDays.Cells.Count);
+    }
+
+    [Fact]
     public async Task Approval_submission_is_not_automated() =>
         await Assert.ThrowsAsync<NotImplementedException>(() => Writer().SubmitForApprovalAsync(Monday));
 }

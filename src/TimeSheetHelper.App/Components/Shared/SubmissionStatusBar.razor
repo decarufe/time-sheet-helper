@@ -44,7 +44,7 @@
                 @(HasSimulation ? "Relancer la simulation" : "Simulation (aucune saisie)")
             </button>
             <button type="button" class="danger" @ref="fillButton" disabled="@(!Status.CanFill || Busy)" aria-describedby="@(Status.FillDisabledReason is null ? null : reasonId)"
-                    @onclick="() => OnFill.InvokeAsync()">Saisir dans Forecast…</button>
+                    @onclick="() => OnFill.InvokeAsync()">@FillButtonLabel</button>
             @if (Status.FillDisabledReason is { } reason)
             {
                 <span id="@reasonId" class="reason">
@@ -82,6 +82,9 @@
     [Parameter] public EventCallback OnFill { get; set; }
 
     [Parameter] public EventCallback<string?> OnGoToGap { get; set; }
+
+    /// <summary>The text of the fill button: generic for the whole week by default, or naming the selected day(s).</summary>
+    [Parameter] public string FillButtonLabel { get; set; } = "Saisir dans Forecast…";
 
     /// <summary>Gives the focus back to the fill button (after its confirmation was closed).</summary>
     public async ValueTask FocusFillAsync()

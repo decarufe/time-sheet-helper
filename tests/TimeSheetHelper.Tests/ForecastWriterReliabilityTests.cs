@@ -163,7 +163,7 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
         };
 
         var report = await Writer().FillWeekAsync(
-            Draft(Entry(_dev, 0, 1m), Entry(_dev, 1, 1m), Entry(_meetings, 0, 1m)), ForecastSubmitMode.Fill, cts.Token);
+            Draft(Entry(_dev, 0, 1m), Entry(_dev, 1, 1m), Entry(_meetings, 0, 1m)), ForecastSubmitMode.Fill, cancellationToken: cts.Token);
 
         Assert.True(report.Interrupted);
         Assert.Equal(3, report.Cells.Count);

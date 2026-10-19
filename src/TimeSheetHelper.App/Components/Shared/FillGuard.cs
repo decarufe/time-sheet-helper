@@ -48,12 +48,16 @@ public static class FillGuard
     }
 
     /// <summary>
-    /// The week is marked as typed only when Forecast, read back, holds every cell the draft plans and every one of them is verified:
-    /// a missing, partial or unverified cell leaves the week open.
+    /// Whether every planned cell of <paramref name="days"/> was verified in <paramref name="report"/>: a missing, partial or
+    /// unverified cell leaves the scope open. <paramref name="days"/> null or empty: the whole week, as before — a fill scoped to
+    /// fewer days than the draft plans can never satisfy this (the report then holds fewer cells than the whole-week plan), so the
+    /// week is marked as typed only once every one of its days has been entered.
     /// </summary>
-    public static bool IsWeekFullyEntered(ForecastFillReport report, TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks)
+    public static bool IsWeekFullyEntered(
+        ForecastFillReport report, TimesheetDraft draft, IReadOnlyDictionary<int, ForecastTask> tasks, IReadOnlyCollection<DateOnly>? days = null)
     {
-        var expectedCells = ForecastFillPlanner.Plan(draft, tasks).Count;
+        var plan = ForecastFillPlanner.Plan(draft, tasks);
+        var expectedCells = (days is { Count: > 0 } scope ? plan.Where(c => scope.Contains(c.Date)) : plan).Count();
         return report.Cells.Count > 0
                && report.Cells.Count == expectedCells
                && report.Cells.All(c => c.Status == ForecastCellStatus.Ok);

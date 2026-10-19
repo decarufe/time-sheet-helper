@@ -54,8 +54,9 @@ public sealed class SubmitPageWiringTests
     [Fact]
     public void The_page_marks_the_week_typed_only_from_the_verdict_of_FillGuard()
     {
-        Assert.Contains("var fullyEntered = FillGuard.IsWeekFullyEntered(report, current, tasks);", Razor.Value);
-        Assert.Equal(1, Count(Razor.Value, "FillGuard.IsWeekFullyEntered("));
+        // Scoped to the selected day(s): one call checks the scope, a second (gated by the first) checks the whole draft.
+        Assert.Contains("var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks);", Razor.Value);
+        Assert.Equal(2, Count(Razor.Value, "FillGuard.IsWeekFullyEntered("));
         Assert.Equal(1, Count(Razor.Value, "SubmittedUtc = DateTime.UtcNow"));
     }
 
@@ -63,12 +64,12 @@ public sealed class SubmitPageWiringTests
     public void The_week_is_marked_typed_before_the_page_checks_that_it_still_shows_that_week_so_that_a_week_change_loses_nothing()
     {
         var razor = Razor.Value;
-        var verdict = razor.IndexOf("var fullyEntered = FillGuard.IsWeekFullyEntered(", StringComparison.Ordinal);
+        var verdict = razor.IndexOf("var scopeEntered = FillGuard.IsWeekFullyEntered(", StringComparison.Ordinal);
         var mark = razor.IndexOf("SubmittedUtc = DateTime.UtcNow", StringComparison.Ordinal);
         var nextScreenCheck = razor.IndexOf("FillGuard.ResultApplies(", verdict, StringComparison.Ordinal);
 
         Assert.True(verdict >= 0 && mark > verdict && nextScreenCheck > mark, "marking must sit between the verdict and the screen check");
-        Assert.Contains("if (fullyEntered)", razor[verdict..mark]);
+        Assert.Contains("if (weekEntered)", razor[verdict..mark]);
         Assert.DoesNotContain("ResultApplies", razor[verdict..mark]);
     }
 

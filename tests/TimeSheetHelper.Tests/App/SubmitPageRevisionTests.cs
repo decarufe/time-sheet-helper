@@ -151,6 +151,27 @@ public sealed class SubmitPageRevisionTests
             GapFx.Report(GapFx.Cell(1, 0, ForecastCellStatus.Ok), GapFx.Cell(2, 1, ForecastCellStatus.Ok)), draft, Tasks(1, 2)));
     }
 
+    [Fact]
+    public void A_day_scoped_verdict_only_expects_the_cells_of_the_selected_day_even_when_the_draft_holds_more()
+    {
+        var draft = Draft((1, 0, 1m), (2, 1, 2m));
+        var report = GapFx.Report(GapFx.Cell(1, 0, ForecastCellStatus.Ok));
+
+        Assert.True(FillGuard.IsWeekFullyEntered(report, draft, Tasks(1, 2), [GapFx.Day(0)]));
+        Assert.False(FillGuard.IsWeekFullyEntered(report, draft, Tasks(1, 2)));
+        Assert.False(FillGuard.IsWeekFullyEntered(report, draft, Tasks(1, 2), [GapFx.Day(0), GapFx.Day(1)]));
+    }
+
+    [Fact]
+    public void A_null_or_empty_day_selection_expects_the_whole_draft_like_the_old_overload()
+    {
+        var draft = Draft((1, 0, 1m), (2, 1, 2m));
+        var report = GapFx.Report(GapFx.Cell(1, 0, ForecastCellStatus.Ok), GapFx.Cell(2, 1, ForecastCellStatus.Ok));
+
+        Assert.True(FillGuard.IsWeekFullyEntered(report, draft, Tasks(1, 2), null));
+        Assert.True(FillGuard.IsWeekFullyEntered(report, draft, Tasks(1, 2), []));
+    }
+
     // ── FillGuard: does the result still belong to the screen (D1) ───────────────────────────────
 
     [Fact]

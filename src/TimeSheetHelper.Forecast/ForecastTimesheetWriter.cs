@@ -19,12 +19,21 @@ public sealed class ForecastTimesheetWriter(
     IDbContextFactory<TimeSheetDbContext> dbFactory,
     ILogger<ForecastTimesheetWriter> logger)
 {
+    /// <param name="days">
+    /// Only the planned cells of these days are compared with Forecast and (in <see cref="ForecastSubmitMode.Fill"/>) registered;
+    /// the other days of the week are not read for comparison and never written to. Null or empty: the whole week, as before.
+    /// </param>
     public async Task<ForecastFillReport> FillWeekAsync(
-        TimesheetDraft draft, ForecastSubmitMode mode, CancellationToken cancellationToken = default)
+        TimesheetDraft draft, ForecastSubmitMode mode, IReadOnlyCollection<DateOnly>? days = null, CancellationToken cancellationToken = default)
     {
         var report = new ForecastFillReport { WeekStart = draft.WeekStart, Mode = mode };
 
         var plan = await PlanAsync(draft, report.Warnings, cancellationToken);
+        if (days is { Count: > 0 } dayScope)
+            plan = new ForecastFillPlan(
+                plan.Cells.Where(c => dayScope.Contains(c.Date)).ToList(),
+                plan.Rejected.Where(r => dayScope.Contains(r.Date)).ToList());
+
         foreach (var rejected in plan.Rejected)
         {
             // The cell would vanish from the plan, and the week would be taken for complete: it is an error cell instead.
