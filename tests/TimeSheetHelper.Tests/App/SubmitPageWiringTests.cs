@@ -74,6 +74,21 @@ public sealed class SubmitPageWiringTests
     }
 
     [Fact]
+    public void The_page_loads_the_choices_of_the_week_with_its_draft_and_saves_each_change()
+    {
+        Assert.Contains("choices = await TaskChoices.LoadAsync(value.WeekStart);", Razor.Value);
+        Assert.Contains("await TaskChoices.SetAsync(week, taskId, stored);", Razor.Value);
+    }
+
+    [Fact]
+    public void The_page_offers_to_reset_the_choices_of_the_week_only_when_some_are_stored()
+    {
+        Assert.Contains("choices.Count > 0", Razor.Value);
+        Assert.Contains("Réinitialiser les choix de la semaine", Razor.Value);
+        Assert.Contains("await TaskChoices.ResetWeekAsync(week);", Razor.Value);
+    }
+
+    [Fact]
     public void The_page_asks_FillGuard_before_the_fill_and_again_on_the_draft_read_just_before_writing()
     {
         Assert.Contains("FillGuard.Preflight(canFill, draft, simulationFingerprint) != FillPreflight.Allowed", Razor.Value);

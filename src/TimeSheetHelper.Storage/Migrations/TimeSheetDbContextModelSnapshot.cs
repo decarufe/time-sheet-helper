@@ -311,6 +311,31 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.ToTable("TimesheetEntries");
                 });
 
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.WeekTaskChoice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Ignore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly>("WeekStart")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ForecastTaskId");
+
+                    b.HasIndex("WeekStart", "ForecastTaskId")
+                        .IsUnique();
+
+                    b.ToTable("WeekTaskChoices");
+                });
+
             modelBuilder.Entity("TimeSheetHelper.Core.Rules.Rule", b =>
                 {
                     b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
@@ -331,6 +356,15 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.HasOne("TimeSheetHelper.Core.Timesheets.TimesheetDraft", null)
                         .WithMany("Entries")
                         .HasForeignKey("TimesheetDraftId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.WeekTaskChoice", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
+                        .WithMany()
+                        .HasForeignKey("ForecastTaskId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

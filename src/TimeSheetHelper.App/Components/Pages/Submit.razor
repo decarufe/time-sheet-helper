@@ -17,6 +17,7 @@
 @inject ForecastTaskLinker Linker
 @inject ForecastTaskReader TaskReader
 @inject ForecastTaskCatalog Catalog
+@inject SubmissionTaskChoices TaskChoices
 @inject SubmissionReviewService Review
 @inject GroupAssignmentService Assignments
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
@@ -109,6 +110,13 @@
                     @string.Join(", ", grid.Rows.Where(r => r.Ignored).Select(r => r.Name)).
                 </p>
             }
+            @if (draft.SubmittedUtc is null && choices.Count > 0)
+            {
+                <p class="muted">
+                    @(choices.Count == 1 ? "1 choix mémorisé" : $"{choices.Count} choix mémorisés") pour cette semaine.
+                    <button type="button" class="link" disabled="@AnyBusy" @onclick="ResetChoicesAsync">Réinitialiser les choix de la semaine</button>
+                </p>
+            }
             @if (draftRefreshing)
             {
                 <p class="muted" role="status">Mise à jour du brouillon…</p>
@@ -169,16 +177,16 @@
                                         {
                                             <label class="task-ignore">
                                                 <input type="checkbox" checked="@row.Ignored" disabled="@AnyBusy"
-                                                       @onchange="e => SetTaskIgnored(row.TaskId, e.Value is bool v && v)" />
+                                                       @onchange="e => SetTaskIgnoredAsync(row.TaskId, e.Value is bool v && v)" />
                                                 Ne pas envoyer
                                             </label>
                                             @if (row.Flagged && !row.Ignored)
                                             {
-                                                <span class="muted note">exclue par défaut (non saisissable via MCP), incluse pour cette soumission</span>
+                                                <span class="muted note">exclue par défaut (non saisissable via MCP), incluse pour cette semaine</span>
                                             }
                                             else if (row.Automatic)
                                             {
-                                                <span class="muted note">exclue automatiquement (non saisissable via MCP) : décochez pour l'inclure cette fois</span>
+                                                <span class="muted note">exclue automatiquement (non saisissable via MCP) : décochez pour l'inclure pour cette semaine</span>
                                             }
                                         }
                                     </th>
@@ -383,15 +391,14 @@
     /// <summary>The days the current simulation was made for.</summary>
     private HashSet<DateOnly> simulatedDays = [];
 
-    /// <summary>Tasks the user leaves out of this submission although they are not flagged, and flagged tasks the user puts back in. Per displayed week.</summary>
-    private HashSet<int> manuallyIgnored = [];
-    private HashSet<int> reincluded = [];
+    /// <summary>The user's remembered choice per task for the displayed week (true = left out, false = put back in); no entry = follow the task's flag.</summary>
+    private Dictionary<int, bool> choices = [];
 
     /// <summary>The tasks the current simulation left out.</summary>
     private HashSet<int> simulatedIgnored = [];
 
-    /// <summary>(flagged − re-included) ∪ ignored by the user: the tasks whose hours are not sent.</summary>
-    private IReadOnlySet<int> EffectiveIgnored => SubmissionTaskScope.Effective(tasks.Values, manuallyIgnored, reincluded);
+    /// <summary>The tasks whose hours are not sent: the flagged ones, as the user's choices for the week amend them.</summary>
+    private IReadOnlySet<int> EffectiveIgnored => SubmissionTaskScope.Effective(tasks.Values, choices);
 
     private OpenPanel? panel;
     private PendingMerge? pendingMerge;
@@ -499,36 +506,52 @@
         actedGapId = null;
         selectedDays = DaySelection.Default(monday, DateOnly.FromDateTime(DateTime.Today));
         simulatedDays = [];
-        manuallyIgnored = [];
-        reincluded = [];
+        choices = [];
         simulatedIgnored = [];
         RebuildView();
     }
 
-    /// <summary>Leaves a task out of this submission (or puts it back): a flagged task is re-included, any other one is ignored.</summary>
-    private void SetTaskIgnored(int taskId, bool ignore)
+    /// <summary>Leaves a task out of this week's submission (or puts it back) and remembers the choice for that week.</summary>
+    private async Task SetTaskIgnoredAsync(int taskId, bool ignore)
     {
-        if (draft?.SubmittedUtc is not null)
+        if (draft?.SubmittedUtc is not null || !tasks.TryGetValue(taskId, out var task))
             return;
 
-        var flagged = SubmissionTaskScope.AutoExcluded(tasks.Values).Contains(taskId);
-        if (flagged)
-        {
-            if (ignore)
-                reincluded.Remove(taskId);
-            else
-                reincluded.Add(taskId);
-        }
-        else if (ignore)
-        {
-            manuallyIgnored.Add(taskId);
-        }
+        var week = monday;
+        var stored = SubmissionTaskScope.ChoiceToStore(task, ignore);
+        if (stored is { } value)
+            choices[taskId] = value;
         else
-        {
-            manuallyIgnored.Remove(taskId);
-        }
+            choices.Remove(taskId);
 
         OnSelectionChanged();
+        try
+        {
+            await TaskChoices.SetAsync(week, taskId, stored);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "The choice for a task of the week could not be saved.");
+        }
+    }
+
+    /// <summary>Forgets the week's remembered choices so every task follows its "exclude from submission" flag again.</summary>
+    private async Task ResetChoicesAsync()
+    {
+        if (draft?.SubmittedUtc is not null || choices.Count == 0)
+            return;
+
+        var week = monday;
+        choices = [];
+        OnSelectionChanged();
+        try
+        {
+            await TaskChoices.ResetWeekAsync(week);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "The choices of the week could not be reset.");
+        }
     }
 
     private IReadOnlyList<SubmissionIgnoredCell> IgnoredCellsInScope() =>
@@ -609,6 +632,7 @@
         draft = value;
         await using (var db = await DbFactory.CreateDbContextAsync())
             tasks = await db.ForecastTasks.AsNoTracking().ToDictionaryAsync(t => t.Id);
+        choices = await TaskChoices.LoadAsync(value.WeekStart);
         RebuildView();
     }
 

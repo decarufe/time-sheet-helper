@@ -66,6 +66,12 @@ public sealed class ForecastTaskLinker(
             .ExecuteUpdateAsync(s => s.SetProperty(o => o.ForecastTaskId, (int?)target.Id), cancellationToken);
         await db.ClassificationCache.Where(c => c.ForecastTaskId == localTaskId)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.ForecastTaskId, (int?)target.Id), cancellationToken);
+        // One choice per week and task: where the surviving task already has one, it wins.
+        await db.WeekTaskChoices.Where(c => c.ForecastTaskId == localTaskId
+                && db.WeekTaskChoices.Any(o => o.ForecastTaskId == target.Id && o.WeekStart == c.WeekStart))
+            .ExecuteDeleteAsync(cancellationToken);
+        await db.WeekTaskChoices.Where(c => c.ForecastTaskId == localTaskId)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.ForecastTaskId, target.Id), cancellationToken);
         db.ForecastTasks.Remove(local);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

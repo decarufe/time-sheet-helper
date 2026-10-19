@@ -24,6 +24,21 @@ public sealed class TimesheetEntry
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// The user's explicit choice for one task of one week's submission: <see cref="Ignore"/> true leaves the task out of the fill,
+/// false puts it back in (a task flagged <see cref="ForecastTask.ExcludeFromSubmission"/> is left out by default). No row: follow the flag.
+/// </summary>
+public sealed class WeekTaskChoice
+{
+    public int Id { get; set; }
+
+    /// <summary>Monday of the week.</summary>
+    public DateOnly WeekStart { get; set; }
+
+    public int ForecastTaskId { get; set; }
+    public bool Ignore { get; set; }
+}
+
 /// <summary>Manual assignment of a 15-minute slot by the user; overrides anything the engine computes.</summary>
 public sealed class SlotOverride
 {

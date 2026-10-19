@@ -56,6 +56,7 @@ public sealed class DraftGridTests
         Assert.Equal(1m, grid.IgnoredHours(GapFx.Day(0)));
         Assert.Equal(2.5m, grid.IgnoredTotal);
         Assert.Equal(3m, grid.DayTotals[GapFx.Day(0)]);
+        Assert.Equal(4.5m, grid.GrandTotal);
     }
 
     [Fact]

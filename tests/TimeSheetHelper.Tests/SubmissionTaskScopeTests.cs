@@ -23,13 +23,22 @@ public sealed class SubmissionTaskScopeTests
     }
 
     [Fact]
-    public void The_effective_set_is_the_flagged_minus_the_reincluded_plus_the_manually_ignored()
+    public void The_effective_set_is_the_flag_amended_by_the_explicit_choices_of_the_week()
     {
         var tasks = new[] { Task(1, flagged: true), Task(2, flagged: true), Task(3), Task(4) };
 
-        var effective = SubmissionTaskScope.Effective(tasks, manuallyIgnored: [3], reincluded: [1]);
+        var effective = SubmissionTaskScope.Effective(tasks, new Dictionary<int, bool> { [1] = false, [3] = true, [4] = false, [99] = true });
 
         Assert.Equal([2, 3], effective.Order());
+    }
+
+    [Fact]
+    public void A_choice_is_stored_only_when_it_differs_from_what_the_flag_gives()
+    {
+        Assert.Null(SubmissionTaskScope.ChoiceToStore(Task(1, flagged: true), ignore: true));
+        Assert.Equal(false, SubmissionTaskScope.ChoiceToStore(Task(1, flagged: true), ignore: false));
+        Assert.Null(SubmissionTaskScope.ChoiceToStore(Task(2), ignore: false));
+        Assert.Equal(true, SubmissionTaskScope.ChoiceToStore(Task(2), ignore: true));
     }
 
     [Fact]

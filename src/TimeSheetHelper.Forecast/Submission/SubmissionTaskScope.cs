@@ -17,15 +17,24 @@ public static class SubmissionTaskScope
     public static IReadOnlySet<int> AutoExcluded(IEnumerable<ForecastTask> tasks) =>
         tasks.Where(t => t.ExcludeFromSubmission && !t.IsIgnored).Select(t => t.Id).ToHashSet();
 
-    /// <summary>(flagged − re-included) ∪ manually ignored.</summary>
-    public static IReadOnlySet<int> Effective(
-        IEnumerable<ForecastTask> tasks, IEnumerable<int> manuallyIgnored, IEnumerable<int> reincluded)
+    /// <summary>(flagged − re-included) ∪ ignored, from the explicit choices (task id → true = left out, false = put back in). Choices on unknown tasks are dropped.</summary>
+    public static IReadOnlySet<int> Effective(IEnumerable<ForecastTask> tasks, IReadOnlyDictionary<int, bool> choices)
     {
-        var effective = AutoExcluded(tasks).ToHashSet();
-        effective.ExceptWith(reincluded);
-        effective.UnionWith(manuallyIgnored);
+        var list = tasks as IReadOnlyCollection<ForecastTask> ?? tasks.ToList();
+        var effective = AutoExcluded(list).ToHashSet();
+        foreach (var task in list.Where(t => !t.IsIgnored && choices.ContainsKey(t.Id)))
+        {
+            if (choices[task.Id])
+                effective.Add(task.Id);
+            else
+                effective.Remove(task.Id);
+        }
+
         return effective;
     }
+
+    /// <summary>The choice to remember for <paramref name="ignore"/> on <paramref name="task"/>: null (follow the flag) when it is what the flag already gives.</summary>
+    public static bool? ChoiceToStore(ForecastTask task, bool ignore) => ignore == task.ExcludeFromSubmission ? null : ignore;
 
     /// <summary>The cells of the draft (rounded like the fill does) that fall on an ignored task, restricted to <paramref name="days"/> when given.</summary>
     public static IReadOnlyList<SubmissionIgnoredCell> IgnoredCells(

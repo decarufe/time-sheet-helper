@@ -15,6 +15,7 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
     public DbSet<TimesheetDraft> TimesheetDrafts => Set<TimesheetDraft>();
     public DbSet<TimesheetEntry> TimesheetEntries => Set<TimesheetEntry>();
     public DbSet<SlotOverride> SlotOverrides => Set<SlotOverride>();
+    public DbSet<WeekTaskChoice> WeekTaskChoices => Set<WeekTaskChoice>();
     public DbSet<RemovedSlot> RemovedSlots => Set<RemovedSlot>();
     public DbSet<ClassificationCacheEntry> ClassificationCache => Set<ClassificationCacheEntry>();
     public DbSet<InstalledPlugin> InstalledPlugins => Set<InstalledPlugin>();
@@ -51,6 +52,10 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
         var entry = modelBuilder.Entity<TimesheetEntry>();
         entry.Property(e => e.Hours).HasConversion<double>();
         entry.HasOne<ForecastTask>().WithMany().HasForeignKey(e => e.ForecastTaskId);
+
+        var choice = modelBuilder.Entity<WeekTaskChoice>();
+        choice.HasIndex(c => new { c.WeekStart, c.ForecastTaskId }).IsUnique();
+        choice.HasOne<ForecastTask>().WithMany().HasForeignKey(c => c.ForecastTaskId).OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<SlotOverride>().HasIndex(s => s.SlotStartUtc).IsUnique();
         modelBuilder.Entity<RemovedSlot>().HasIndex(s => s.SlotStartUtc).IsUnique();

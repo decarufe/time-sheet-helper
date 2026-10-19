@@ -48,6 +48,24 @@ public sealed class SubmissionGapServiceTests
     // ── Local gaps ────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
+    public void Hours_of_a_task_left_out_of_the_fill_still_count_in_the_day_and_week_totals_and_the_objective()
+    {
+        // Task 9 (flagged or ignored) has no cell in the report: the writer left it out. Its 2 h are worked, so no total drops them.
+        var draft = Draft((1, 0, 6m), (9, 0, 2m), (1, 1, 8m), (1, 2, 8m), (1, 3, 8m), (1, 4, 8m));
+        var report = Report(
+            Cell(1, 0, 6m, ForecastCellStatus.Planned), Cell(1, 1, 8m, ForecastCellStatus.Planned), Cell(1, 2, 8m, ForecastCellStatus.Planned),
+            Cell(1, 3, 8m, ForecastCellStatus.Planned), Cell(1, 4, 8m, ForecastCellStatus.Planned));
+
+        var analysis = Analyze(draft, report, Context());
+
+        Assert.Equal(40m, analysis.Summary.WeekHours);
+        Assert.Equal(8m, analysis.Summary.Days.Single(d => d.Date == Monday).DraftHours);
+        Assert.True(analysis.Summary.Days.Single(d => d.Date == Monday).WithinTolerance);
+        Assert.True(analysis.Summary.WeekWithinTolerance);
+        Assert.DoesNotContain(analysis.Gaps, g => g.Type is SubmissionGapType.DayBelowTarget or SubmissionGapType.TaskNotFound);
+    }
+
+    [Fact]
     public void A_week_on_target_with_a_clean_simulation_has_no_gap_and_can_be_filled()
     {
         var report = Report(
