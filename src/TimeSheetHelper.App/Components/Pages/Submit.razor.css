@@ -37,6 +37,8 @@
 }
 
 .table-wrap {
+  /* Containing block for the visually-hidden spans: without it they escape the scroller and widen the page. */
+  position: relative;
   overflow-x: auto;
   margin-top: 10px;
 }

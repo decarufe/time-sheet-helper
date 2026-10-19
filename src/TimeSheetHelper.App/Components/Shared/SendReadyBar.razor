@@ -4,7 +4,7 @@
 <div class="send-ready">
     @if (Sending)
     {
-        <button type="button" class="primary" aria-disabled="true" aria-describedby="@noteId">
+        <button type="button" class="primary" aria-disabled="true" aria-describedby="@noteId" @ref="trigger">
             <Icon Name="refresh" Small="true" Class="spin" /> Envoi des jours prêts en cours…
         </button>
     }
@@ -12,7 +12,7 @@
     {
         var count = ReadyDays.Count;
         var enabled = !Busy && !preparing && count > 0;
-        <button type="button" class="primary" disabled="@(!enabled)" aria-describedby="@noteId" @onclick="PrepareAsync">
+        <button type="button" class="primary" disabled="@(!enabled)" aria-describedby="@noteId" @ref="trigger" @onclick="PrepareAsync">
             @if (preparing)
             {
                 <Icon Name="refresh" Small="true" Class="spin" /> <text>Lecture de Forecast…</text>
@@ -29,7 +29,7 @@
 @if (confirming)
 {
     <ConfirmDialog Title="Soumettre les jours prêts ?" Subtitle="@WeekLabel" ConfirmLabel="@ConfirmLabel" OnConfirm="ConfirmAsync"
-                   OnCancel="() => confirming = false">
+                   OnCancel="CloseConfirm">
         <p><strong>Seront envoyés :</strong></p>
         <ul>
             @foreach (var (date, plan) in ReadyDays)
@@ -57,6 +57,8 @@
     private readonly string noteId = $"send-ready-{Guid.NewGuid():N}";
     private bool preparing;
     private bool confirming;
+    private bool restoreFocus;
+    private ElementReference trigger;
     private string? emptyNote;
 
     /// <summary>The days of the week shown, in order.</summary>
@@ -122,9 +124,25 @@
             confirming = true;
     }
 
-    private Task ConfirmAsync()
+    // Focus goes back to the button that opened the confirmation, whichever way it closes.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!restoreFocus)
+            return;
+        restoreFocus = false;
+        try { await trigger.FocusAsync(); }
+        catch (Exception) { /* disconnected circuit: focus is a nicety */ }
+    }
+
+    private void CloseConfirm()
     {
         confirming = false;
+        restoreFocus = true;
+    }
+
+    private Task ConfirmAsync()
+    {
+        CloseConfirm();
         return OnSend.InvokeAsync();
     }
 }

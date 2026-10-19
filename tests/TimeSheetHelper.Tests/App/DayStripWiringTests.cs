@@ -100,4 +100,20 @@ public sealed class DayStripWiringTests
         Assert.Contains("DayStateLabels.Action(plan, NoChoices).Reason", bar);
         Assert.Matches(new Regex(@"@foreach \(var \(date, reason\) in OtherDays\)\s*\{?\s*<li>@DayStateLabels\.ShortDay\(date\) — @reason</li>"), bar);
     }
+
+    [Fact]
+    public void ConfirmDialog_KeepsFocusInside_AndTheReadyBarGivesItBackToItsButton()
+    {
+        var dialog = Component("ConfirmDialog");
+        var bar = Component("SendReadyBar");
+
+        // Tab past the last button wraps to the first, Shift+Tab past the first wraps to the last.
+        Assert.Matches(new Regex("""<span class="focus-sentinel" tabindex="0" @onfocus="FocusCancelAsync"></span>\s*<h2"""), dialog);
+        Assert.Matches(new Regex("""</div>\s*<span class="focus-sentinel" tabindex="0" @onfocus="FocusConfirmAsync"></span>\s*</div>\s*@code"""), dialog);
+        // Both the cancel and the confirm path close the dialog through CloseConfirm, which asks for the focus back on the trigger.
+        Assert.Equal(2, Count(bar, "@ref=\"trigger\""));
+        Assert.Contains("OnCancel=\"CloseConfirm\"", bar);
+        Assert.Matches(new Regex(@"private Task ConfirmAsync\(\)\s*\{\s*CloseConfirm\(\);"), bar);
+        Assert.Contains("await trigger.FocusAsync()", bar);
+    }
 }

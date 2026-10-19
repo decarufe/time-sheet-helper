@@ -18,7 +18,7 @@
 }
 .card h2 { margin-top: 0; }
 
-.table-wrap { overflow-x: auto; margin-top: 8px; }
+.table-wrap { position: relative; overflow-x: auto; margin-top: 8px; }
 table.rules td { vertical-align: middle; }
 table.rules tr.disabled td { opacity: 0.55; }
 table.rules tr.editing td { background: var(--accent-bg); }

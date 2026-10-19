@@ -23,6 +23,7 @@
   color: var(--muted);
 }
 .dp-table {
+  position: relative;
   overflow-x: auto;
 }
 .dp-table th.task {

@@ -211,7 +211,7 @@ public sealed partial class ForecastMcpSession(
 
             entries.AddRange(parsed);
             complete = false;
-            detail = note ?? $"{parsed.Count} saisie(s) lue(s) pour le {start:yyyy-MM-dd}, mais Forecast en contient d'autres.";
+            detail = note ?? $"{parsed.Count} saisie(s) lue(s) pour le {start.ToString("d MMMM", CultureInfo.GetCultureInfo("fr-CA"))}, mais Forecast en contient d'autres.";
         }
 
         static IEnumerable<ForecastRemoteEntry> Parse(ForecastToolResult result) =>

@@ -53,9 +53,9 @@ public sealed class DayStateLabelsTests : IDisposable
     [Fact]
     public void Labels_StatesSharingATone_AreToldApartByTheirWords()
     {
-        var cells = Enum.GetValues<CellState>().Select(DayStateLabels.Cell).ToList();
+        var cells = Enum.GetValues<CellState>().Select(DayStateLabels.Cell).Append(DayStateLabels.NotCompared).ToList();
         var days = Enum.GetValues<DayStatus>().Select(s => DayStateLabels.Day(s, hasHours: true))
-            .Append(DayStateLabels.Day(DayStatus.NotAttempted, hasHours: false)).Append(DayStateLabels.ToReread).ToList();
+            .Append(DayStateLabels.Day(DayStatus.NotAttempted, hasHours: false)).Append(DayStateLabels.ToReread).Append(DayStateLabels.NothingToSend).ToList();
 
         Assert.Equal(cells.Count, cells.Select(l => l.Label).Distinct().Count());
         Assert.Equal(days.Count, days.Select(l => l.Label).Distinct().Count());
@@ -103,6 +103,39 @@ public sealed class DayStateLabelsTests : IDisposable
         Assert.Contains("rien ne sera écrit", action.Reason);
         // The day holds hours but nothing is known of Forecast: neither « Non saisi » nor « Prêt ».
         Assert.Equal(("À relire", "warn", "warn"), (DayStateLabels.Day(plan).Label, DayStateLabels.Day(plan).Icon, DayStateLabels.Day(plan).Tone));
+        // Its cells were never compared nor attempted: not « envoi interrompu », and no technical detail (ISO date, count read) in the note.
+        var cell = plan.Cells.Single();
+        Assert.Equal(DayStateLabels.NotCompared, DayStateLabels.Cell(cell, plan));
+        Assert.DoesNotContain("interrompu", DayStateLabels.Cell(cell, plan).Label);
+        Assert.DoesNotMatch(@"\d{4}-\d{2}-\d{2}", DayStateLabels.CellNote(cell, null));
+        Assert.Contains("Relisez Forecast", DayStateLabels.CellNote(cell, null));
+    }
+
+    [Fact]
+    public async Task Labels_DayWhoseHoursAreAllIgnored_IsNothingToSend_NotReady()
+    {
+        await _host.IgnoreForTheWeekAsync(_host.Dev, true);
+        await _host.SetDraftAsync(Monday, (_host.Dev, 2m));
+
+        var plan = await _host.Service().PlanAsync(Monday);
+
+        Assert.False(plan.IsReady);
+        Assert.Equal(DayStatus.NotAttempted, plan.Status);
+        Assert.Equal(("Rien à envoyer", "minus"), (DayStateLabels.Day(plan).Label, DayStateLabels.Day(plan).Icon));
+    }
+
+    [Fact]
+    public async Task Labels_DayWithAnIgnoredAndASendableTask_StaysReady()
+    {
+        await _host.IgnoreForTheWeekAsync(_host.Support, true);
+        await _host.SetDraftAsync(Monday, (_host.Dev, 2m), (_host.Support, 1m));
+
+        var plan = await _host.Service().PlanAsync(Monday);
+
+        Assert.True(plan.IsReady);
+        Assert.Equal("Prêt", DayStateLabels.Day(plan).Label);
+        // With a complete reading, a cell keeps its own words.
+        Assert.Equal(DayStateLabels.Cell(CellState.New), DayStateLabels.Cell(plan.Cells.First(c => c.State == CellState.New), plan));
     }
 
     [Theory]

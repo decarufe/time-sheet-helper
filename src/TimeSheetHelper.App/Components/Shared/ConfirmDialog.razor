@@ -1,5 +1,7 @@
 <div class="confirm-backdrop" @onclick="CancelAsync"></div>
 <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="@titleId" aria-describedby="@messageId" @onkeydown="OnKeyDownAsync">
+    @* Focus sentinels: Tab past either end wraps to the other button, so focus never leaves the modal. *@
+    <span class="focus-sentinel" tabindex="0" @onfocus="FocusCancelAsync"></span>
     <h2 id="@titleId">@Title</h2>
     @if (!string.IsNullOrEmpty(Subtitle))
     {
@@ -16,14 +18,16 @@
         }
     </div>
     <div class="buttons">
-        <button type="button" class="danger" @onclick="ConfirmAsync">@ConfirmLabel</button>
+        <button type="button" class="danger" @ref="confirmButton" @onclick="ConfirmAsync">@ConfirmLabel</button>
         <button type="button" @ref="cancelButton" @onclick="CancelAsync">Annuler</button>
     </div>
+    <span class="focus-sentinel" tabindex="0" @onfocus="FocusConfirmAsync"></span>
 </div>
 
 @code {
     private readonly string titleId = $"confirm-title-{Guid.NewGuid():N}";
     private readonly string messageId = $"confirm-message-{Guid.NewGuid():N}";
+    private ElementReference confirmButton;
     private ElementReference cancelButton;
 
     [Parameter, EditorRequired] public string Title { get; set; } = "";
@@ -50,6 +54,16 @@
             try { await cancelButton.FocusAsync(); }
             catch (Exception) { /* prerendering or disconnected circuit: focus is a nicety */ }
         }
+    }
+
+    private Task FocusCancelAsync() => FocusAsync(cancelButton);
+
+    private Task FocusConfirmAsync() => FocusAsync(confirmButton);
+
+    private static async Task FocusAsync(ElementReference element)
+    {
+        try { await element.FocusAsync(); }
+        catch (Exception) { /* disconnected circuit: focus is a nicety */ }
     }
 
     private Task ConfirmAsync() => OnConfirm.InvokeAsync();

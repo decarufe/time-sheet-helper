@@ -152,7 +152,8 @@ public static class DayPlanner
 
         if (!forecast.IsComplete)
             return Cell(CellState.NotAttempted, CellOperation.None,
-                $"Lecture incomplète des saisies de Forecast ({forecast.Detail ?? "liste tronquée"}) : aucune comparaison, rien n'est écrit.");
+                "Lecture de Forecast incomplète : cellule non comparée, rien n'est écrit. Relisez Forecast."
+                + (forecast.Detail is { } detail ? $" (Détail : {detail})" : ""));
 
         if (locked is not null)
             return Cell(CellState.Locked, CellOperation.None,

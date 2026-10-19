@@ -40,6 +40,16 @@ public static class DayStateLabels
     /// <summary>A day whose last reading of Forecast was incomplete: nothing is known (nor written) before Forecast is read again in full.</summary>
     public static readonly StateLabel ToReread = new("À relire", "warn", "warn");
 
+    /// <summary>A day never attempted whose hours are all on tasks left out of the send (« Ne pas envoyer »).</summary>
+    public static readonly StateLabel NothingToSend = new("Rien à envoyer", "minus", "neutral");
+
+    /// <summary>A cell of a day whose reading of Forecast was incomplete: nothing was compared nor attempted.</summary>
+    public static readonly StateLabel NotCompared = new("Non comparé — relire Forecast", "warn", "warn");
+
+    /// <summary>The badge of a cell in its day: a cell left aside by an incomplete reading is not « interrompue », it was never compared.</summary>
+    public static StateLabel Cell(CellPlan cell, DayPlan plan) =>
+        cell.State == CellState.NotAttempted && !plan.ForecastReadComplete ? NotCompared : Cell(cell.State);
+
     public static StateLabel Cell(CellState state) => state switch
     {
         CellState.New => new("Nouveau — sera écrit", "plus", "accent"),
@@ -70,10 +80,18 @@ public static class DayStateLabels
 
     /// <summary>
     /// Status of a planned day: « À relire » when the reading of Forecast was incomplete; otherwise a day never attempted is « Prêt » as soon as
-    /// the draft holds hours for it (blocked or already in Forecast included), as the contracts derive it from the hours.
+    /// the draft holds hours for it (blocked or already in Forecast included), as the contracts derive it from the hours — except when all of
+    /// them are on tasks left out of the send: « Rien à envoyer ».
     /// </summary>
-    public static StateLabel Day(DayPlan plan) =>
-        plan.Gate == DayGate.ReadForecastFirst ? ToReread : Day(plan.Status, plan.Cells.Any(c => c.DraftHours > 0));
+    public static StateLabel Day(DayPlan plan)
+    {
+        if (plan.Gate == DayGate.ReadForecastFirst)
+            return ToReread;
+        var withHours = plan.Cells.Where(c => c.DraftHours > 0).ToList();
+        if (plan.Status == DayStatus.NotAttempted && withHours.Count > 0 && withHours.All(c => c.State == CellState.Ignored))
+            return NothingToSend;
+        return Day(plan.Status, withHours.Count > 0);
+    }
 
     /// <summary>Help line of a status, when the label needs one.</summary>
     public static string? DayHelp(DayStatus status) => status switch

@@ -153,6 +153,7 @@ select:focus-visible {
 }
 
 .table-wrap {
+  position: relative;
   max-height: 65vh;
   overflow: auto;
   margin-top: 8px;
