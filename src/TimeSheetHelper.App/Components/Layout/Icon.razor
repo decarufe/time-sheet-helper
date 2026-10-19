@@ -1,0 +1,42 @@
+@* Line icon set of the navigation prototype (docs\nav-prototypes\shared\pages.js) + minus, lock, clock, ring (CR-4). *@
+<svg class="ico @(Small ? "sm" : null) @Class" viewBox="0 0 24 24" aria-hidden="true" focusable="false">@((MarkupString)Paths(Name))</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    [Parameter] public bool Small { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    private static readonly Dictionary<string, string> Icons = new(StringComparer.Ordinal)
+    {
+        ["semaine"] = """<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M7 13h2M11 13h2M15 13h2M7 17h2M11 17h2"/>""",
+        ["jour"] = """<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><circle cx="12" cy="15" r="2" fill="currentColor"/>""",
+        ["soumettre"] = """<path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>""",
+        ["regles"] = """<path d="M4 6h16M7 12h10M10 18h4"/>""",
+        ["taches"] = """<path d="M9 6h12M9 12h12M9 18h12"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>""",
+        ["sources"] = """<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>""",
+        ["activite"] = """<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>""",
+        ["menu"] = """<path d="M4 6h16M4 12h16M4 18h16"/>""",
+        ["chevL"] = """<path d="m15 18-6-6 6-6"/>""",
+        ["chevR"] = """<path d="m9 18 6-6-6-6"/>""",
+        ["sun"] = """<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>""",
+        ["moon"] = """<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>""",
+        ["pause"] = """<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>""",
+        ["play"] = """<path d="m7 4 13 8-13 8z"/>""",
+        ["panel"] = """<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>""",
+        ["check"] = """<path d="m5 12 5 5L20 7"/>""",
+        ["refresh"] = """<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>""",
+        ["x"] = """<path d="M18 6 6 18M6 6l12 12"/>""",
+        ["warn"] = """<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.5"/>""",
+        ["minus"] = """<path d="M5 12h14"/>""",
+        ["lock"] = """<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>""",
+        ["clock"] = """<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>""",
+        ["ring"] = """<circle cx="12" cy="12" r="7"/>""",
+    };
+
+    /// <summary>Icon names available to the shell and to later work packages.</summary>
+    public static IReadOnlyCollection<string> Names => Icons.Keys;
+
+    private static string Paths(string name) => Icons.TryGetValue(name, out var paths) ? paths : "";
+}

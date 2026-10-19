@@ -1,0 +1,48 @@
+@inject ShellState Shell
+
+<nav class="rail" aria-label="Sections">
+    <span class="rail-logo" role="img" aria-label="Time Sheet Helper">
+        <Icon Name="clock" />
+    </span>
+    <ul class="rail-links">
+        @foreach (var section in Sections)
+        {
+            var active = section.Section == Current;
+            <li>
+                <a class="rail-link @(active ? "active" : null)" href="@Shell.RouteFor(section.Section)"
+                   aria-current="@(active ? "true" : null)" aria-label="@section.Name" data-tip="@section.Tip">
+                    <Icon Name="@section.Icon" />
+                    <span class="rail-lbl" aria-hidden="true">@section.Short</span>
+                </a>
+            </li>
+        }
+    </ul>
+    <div class="rail-gap"></div>
+    <div class="rail-foot">
+        <ShellTools ButtonClass="rail-link" Tracking="Tracking" Theme="Theme"
+                    OnToggleTracking="OnToggleTracking" OnToggleTheme="OnToggleTheme" />
+    </div>
+</nav>
+
+@code {
+    /// <summary>The four rail sections; the seven destinations stay reachable from the panel and Alt+1..7.</summary>
+    internal static readonly IReadOnlyList<SectionLink> Sections =
+    [
+        new(NavSection.Time, "Ma semaine", "Temps", "semaine", "Ma semaine (Alt+1, Alt+2)"),
+        new(NavSection.Sending, "Soumettre", "Envoi", "soumettre", "Soumettre (Alt+3)"),
+        new(NavSection.Configuration, "Configuration", "Config", "regles", "Configuration (Alt+4 à Alt+6)"),
+        new(NavSection.Advanced, "Avancé", "Avancé", "activite", "Avancé (Alt+7)"),
+    ];
+
+    internal sealed record SectionLink(NavSection Section, string Name, string Short, string Icon, string Tip);
+
+    [Parameter] public NavSection? Current { get; set; }
+
+    [Parameter] public TrackingState Tracking { get; set; }
+
+    [Parameter] public ShellTheme Theme { get; set; }
+
+    [Parameter] public EventCallback OnToggleTracking { get; set; }
+
+    [Parameter] public EventCallback OnToggleTheme { get; set; }
+}

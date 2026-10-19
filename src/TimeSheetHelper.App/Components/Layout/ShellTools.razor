@@ -1,0 +1,32 @@
+@* Window tracking and theme buttons, shown in the rail foot (desktop) and in the header (.m-tools, mobile). *@
+
+@if (Tracking != TrackingState.Disabled)
+{
+    var paused = Tracking == TrackingState.Paused;
+    <button type="button" class="@ButtonClass shell-track @(paused ? "paused" : "on")" data-tip="@TrackLabel"
+            aria-pressed="@(paused ? "false" : "true")" aria-label="@TrackLabel" @onclick="OnToggleTracking">
+        <Icon Name="@(paused ? "pause" : "play")" />
+        <span class="track-dot" aria-hidden="true"></span>
+    </button>
+}
+<button type="button" class="@ButtonClass shell-theme" data-tip="Thème (Alt+T)"
+        aria-label="Basculer le thème clair/sombre" @onclick="OnToggleTheme">
+    <Icon Name="@(Theme == ShellTheme.Dark ? "sun" : "moon")" />
+</button>
+
+@code {
+    [Parameter] public TrackingState Tracking { get; set; }
+
+    [Parameter] public ShellTheme Theme { get; set; }
+
+    [Parameter] public EventCallback OnToggleTracking { get; set; }
+
+    [Parameter] public EventCallback OnToggleTheme { get; set; }
+
+    /// <summary>Class of the buttons: "rail-link" in the rail, "icon-btn" in the header.</summary>
+    [Parameter] public string ButtonClass { get; set; } = "icon-btn";
+
+    private string TrackLabel => Tracking == TrackingState.Paused
+        ? "Surveillance en pause, cliquer pour reprendre"
+        : "Surveillance active, cliquer pour mettre en pause";
+}

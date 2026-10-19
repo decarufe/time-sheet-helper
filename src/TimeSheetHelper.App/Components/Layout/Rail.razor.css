@@ -1,0 +1,106 @@
+.rail {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    height: 100vh;
+    height: 100dvh;
+    padding: 12px 0;
+    box-sizing: border-box;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    /* Visible overflow so the tooltips can extend over the panel (the rail itself never needs to scroll). */
+    overflow: visible;
+}
+
+.rail-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
+.rail-links {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.rail-gap {
+    flex: 1;
+}
+
+.rail-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rail-link,
+.rail-foot ::deep .rail-link {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 48px;
+    height: 52px;
+    box-sizing: border-box;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: none;
+    transition: background-color .12s, color .12s;
+}
+
+.rail-link:hover,
+.rail-foot ::deep .rail-link:hover {
+    background: var(--accent-bg);
+    color: var(--fg);
+}
+
+.rail-link:focus-visible,
+.rail-foot ::deep .rail-link:focus-visible {
+    outline-offset: -2px;
+}
+
+.rail-link.active {
+    background: var(--accent-bg);
+    color: var(--accent-text);
+}
+
+.rail-link.active::before {
+    content: "";
+    position: absolute;
+    left: -6px;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+}
+
+.rail-lbl {
+    font-size: 11px;
+    line-height: 1.1;
+}
+
+@media (max-width: 860px) {
+    .rail {
+        display: none;
+    }
+}

@@ -1,13 +1,22 @@
+/* Design tokens (nav-c-design-spec §2). Theme = html[data-theme="light|dark"]; no attribute = system theme. */
 :root {
   --bg: #ffffff;
   --fg: #1f2328;
   --muted: #656d76;
   --border: #d0d7de;
+  --border-strong: #6e7781;
   --accent: #0969da;
+  --accent-bg: rgba(9, 105, 218, 0.1);
+  --accent-text: #0550ae;
+  --on-accent: #ffffff;
+  --surface: #f6f8fa;
   --row-alt: #f6f8fa;
+  --shadow: 0 8px 24px rgba(31, 35, 40, 0.16);
+  --radius: 8px;
+  --scrim: rgba(0, 0, 0, 0.4);
   --idle: #9a6700;
   --locked: #8250df;
-  /* Status tokens shared by every page: text/border colour and its soft background. */
+  /* Status tokens shared by every page: --X = icon/border colour, --X-bg = soft background, --X-text = text on --X-bg. */
   --ok: #1a7f37;
   --warn: #9a6700;
   --danger: #cf222e;
@@ -15,18 +24,66 @@
   --ok-bg: rgba(26, 127, 55, 0.1);
   --warn-bg: rgba(154, 103, 0, 0.12);
   --danger-bg: rgba(207, 34, 46, 0.1);
-  --info-bg: rgba(101, 109, 118, 0.12);
+  --info-bg: rgba(87, 96, 106, 0.12);
+  --locked-bg: rgba(130, 80, 223, 0.12);
+  --ok-text: #116329;
+  --warn-text: #7d4e00;
+  --danger-text: #a40e26;
+  --info-text: #57606a;
+  --locked-text: #6639ba;
   color-scheme: light dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #8d96a0;
+  --border: #30363d;
+  --border-strong: #7d8590;
+  --accent: #4493f8;
+  --accent-bg: rgba(68, 147, 248, 0.16);
+  --accent-text: #58a6ff;
+  --on-accent: #0d1117;
+  --surface: #151b23;
+  --row-alt: #161b22;
+  --shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+  --idle: #d29922;
+  --locked: #a371f7;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --danger: #f85149;
+  --info: #9198a1;
+  --ok-bg: rgba(63, 185, 80, 0.15);
+  --warn-bg: rgba(210, 153, 34, 0.16);
+  --danger-bg: rgba(248, 81, 73, 0.15);
+  --info-bg: rgba(145, 152, 161, 0.16);
+  --locked-bg: rgba(163, 113, 247, 0.16);
+  --ok-text: #3fb950;
+  --warn-text: #d29922;
+  --danger-text: #ff7b72;
+  --info-text: #9198a1;
+  --locked-text: #b392f7;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0d1117;
     --fg: #e6edf3;
     --muted: #8d96a0;
     --border: #30363d;
+    --border-strong: #7d8590;
     --accent: #4493f8;
+    --accent-bg: rgba(68, 147, 248, 0.16);
+    --accent-text: #58a6ff;
+    --on-accent: #0d1117;
+    --surface: #151b23;
     --row-alt: #161b22;
+    --shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
     --idle: #d29922;
     --locked: #a371f7;
     --ok: #3fb950;
@@ -37,6 +94,12 @@
     --warn-bg: rgba(210, 153, 34, 0.16);
     --danger-bg: rgba(248, 81, 73, 0.15);
     --info-bg: rgba(145, 152, 161, 0.16);
+    --locked-bg: rgba(163, 113, 247, 0.16);
+    --ok-text: #3fb950;
+    --warn-text: #d29922;
+    --danger-text: #ff7b72;
+    --info-text: #9198a1;
+    --locked-text: #b392f7;
   }
 }
 
@@ -49,10 +112,20 @@
   white-space: nowrap;
 }
 
+/* nav-c-design-spec §9: no transition, but a waiting indicator (.spin) stays visible. */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .spin {
+    animation-duration: 2s !important;
+  }
+  :not(.spin) {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 
@@ -61,7 +134,7 @@ body {
   color: var(--fg);
   font-family: "Segoe UI", system-ui, sans-serif;
   margin: 0;
-  padding: 16px 24px;
+  padding: 0;
 }
 
 .toolbar {
@@ -173,29 +246,115 @@ code {
   top: 0.5rem;
 }
 
-.app-nav {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border);
-  margin: -16px -24px 16px;
-  padding: 8px 24px;
-}
-.app-nav .brand {
-  font-weight: 600;
-  margin-right: 16px;
-}
-.app-nav a {
-  color: var(--fg);
-  text-decoration: none;
-  padding: 4px 10px;
+/* === nav-c: shell === */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -100px;
+  z-index: 1000;
+  padding: 8px 12px;
   border-radius: 6px;
-}
-.app-nav a:hover {
-  background: var(--row-alt);
-}
-.app-nav a.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+h1[tabindex="-1"]:focus {
+  outline: none;
+}
+
+svg.ico {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+svg.ico.sm {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--surface);
+}
+
+[data-tip] {
+  position: relative;
+}
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 200;
+  background: var(--fg);
+  color: var(--bg);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  padding: 4px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+
+.track-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.shell-track.on .track-dot {
+  background: var(--ok);
+}
+.shell-track.paused .track-dot {
+  background: var(--warn);
+}
+
+.badge.ok { background: var(--ok-bg); color: var(--ok-text); }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+.badge.danger { background: var(--danger-bg); color: var(--danger-text); }
+.badge.info { background: var(--info-bg); color: var(--info-text); }
+.badge.accent { background: var(--accent-bg); color: var(--accent-text); }
+.badge.locked { background: var(--locked-bg); color: var(--locked-text); }
+.badge.neutral { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+
+html.drawer-open body {
+  overflow: hidden;
+}
+
+kbd {
+  font: 0.8em ui-monospace, SFMono-Regular, Consolas, monospace;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--surface);
 }

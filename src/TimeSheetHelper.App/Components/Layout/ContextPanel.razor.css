@@ -1,0 +1,281 @@
+.ctx-panel {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    height: 100vh;
+    height: 100dvh;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    transition: visibility 0s linear 0s;
+}
+
+/* Collapsed panel: out of the tab order once the column transition is over.
+   html[data-panel="0"] is set before the first render (App.razor) to avoid a flash of the panel. */
+.app-shell.no-panel .ctx-panel:not(.drawer),
+html[data-panel="0"] .ctx-panel:not(.drawer) {
+    visibility: hidden;
+    border-right: 0;
+    transition: visibility 0s linear .18s;
+}
+
+.ctx-panel-in {
+    width: 248px;
+    box-sizing: border-box;
+    padding: 18px 12px 24px;
+}
+
+.ctx-close {
+    float: right;
+    margin: -4px 0 8px 8px;
+}
+
+.ctx-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 8px 12px;
+    font-size: 1.05rem;
+}
+
+.ctx-title-tag {
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-bg);
+    color: var(--accent-text);
+    font-size: .78rem;
+    font-weight: 600;
+}
+
+.ctx-sub {
+    margin: 18px 8px 6px;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.ctx-links,
+.ctx-days,
+.ctx-checks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ctx-link,
+.ctx-day {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    color: var(--fg);
+    text-decoration: none;
+}
+
+.ctx-link:hover,
+.ctx-day:hover {
+    background: var(--accent-bg);
+}
+
+.ctx-link.current,
+.ctx-day.current {
+    background: var(--accent-bg);
+    font-weight: 600;
+}
+
+.ctx-link.current::before,
+.ctx-day.current::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+}
+
+.ctx-link-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.ctx-link-desc {
+    color: var(--muted);
+    font-size: .8rem;
+    font-weight: 400;
+}
+
+.ctx-link.current .ctx-link-desc {
+    color: var(--fg);
+}
+
+.ctx-link-key {
+    color: var(--muted);
+    font-size: .72rem;
+    white-space: nowrap;
+}
+
+.ctx-link.current .ctx-link-key {
+    color: var(--fg);
+}
+
+.day-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+}
+
+.day-dot.ok {
+    background: var(--ok-bg);
+    color: var(--ok-text);
+}
+
+.day-dot.warn {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+}
+
+.day-dot.none {
+    color: var(--muted);
+}
+
+.day-dot ::deep svg.ico.sm {
+    width: 12px;
+    height: 12px;
+}
+
+.ctx-day-name {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.today-tag {
+    font-weight: 400;
+}
+
+.ctx-day-hours {
+    color: var(--muted);
+    font-size: .85rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ctx-day.current .ctx-day-hours {
+    color: var(--fg);
+}
+
+.ctx-total {
+    display: flex;
+    justify-content: space-between;
+    margin: 8px 0 0;
+    padding: 10px 8px 0;
+    border-top: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+}
+
+.ctx-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+}
+
+.ctx-check > span {
+    display: flex;
+    flex-direction: column;
+}
+
+.ctx-check small {
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.ctx-check.ok {
+    color: var(--ok-text);
+}
+
+.ctx-check.todo {
+    color: var(--warn-text);
+}
+
+.ctx-check ::deep svg.ico {
+    flex: none;
+    margin-top: 3px;
+}
+
+.ctx-help-text {
+    margin: 12px 8px 0;
+    color: var(--muted);
+    font-size: .88rem;
+}
+
+.ctx-shortcuts {
+    margin: 24px 8px 0;
+    color: var(--muted);
+    font-size: .85rem;
+}
+
+.ctx-shortcuts summary {
+    cursor: pointer;
+    min-height: 24px;
+}
+
+.ctx-shortcuts dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+    margin: 10px 0 0;
+}
+
+.ctx-shortcuts dt {
+    white-space: nowrap;
+}
+
+.ctx-shortcuts dd {
+    margin: 0;
+}
+
+@media (max-width: 860px) {
+    .ctx-panel {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 80;
+        width: min(86vw, 320px);
+        height: auto;
+        visibility: hidden;
+        transform: translateX(-105%);
+        transition: transform .18s ease, visibility 0s linear .18s;
+    }
+
+    .ctx-panel.drawer {
+        visibility: visible;
+        transform: none;
+        box-shadow: var(--shadow);
+        transition: transform .18s ease, visibility 0s linear 0s;
+    }
+
+    .ctx-panel-in {
+        width: auto;
+    }
+}

@@ -19,6 +19,9 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
     public DbSet<RemovedSlot> RemovedSlots => Set<RemovedSlot>();
     public DbSet<ClassificationCacheEntry> ClassificationCache => Set<ClassificationCacheEntry>();
     public DbSet<InstalledPlugin> InstalledPlugins => Set<InstalledPlugin>();
+    public DbSet<DaySubmission> DaySubmissions => Set<DaySubmission>();
+    public DbSet<DaySubmissionCell> DaySubmissionCells => Set<DaySubmissionCell>();
+    public DbSet<SubmissionJournalEntry> SubmissionJournal => Set<SubmissionJournalEntry>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -56,6 +59,25 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
         var choice = modelBuilder.Entity<WeekTaskChoice>();
         choice.HasIndex(c => new { c.WeekStart, c.ForecastTaskId }).IsUnique();
         choice.HasOne<ForecastTask>().WithMany().HasForeignKey(c => c.ForecastTaskId).OnDelete(DeleteBehavior.Cascade);
+
+        // No foreign key from cells or journal to ForecastTasks: deleting or merging a task must never erase what was sent to Forecast.
+        var day = modelBuilder.Entity<DaySubmission>();
+        day.HasIndex(d => new { d.WeekStart, d.Date }).IsUnique();
+        day.Property(d => d.Fingerprint).HasMaxLength(64);
+        day.HasMany(d => d.Cells).WithOne().HasForeignKey(c => c.DaySubmissionId).OnDelete(DeleteBehavior.Cascade);
+
+        var cell = modelBuilder.Entity<DaySubmissionCell>();
+        cell.HasIndex(c => new { c.DaySubmissionId, c.ForecastTaskId }).IsUnique();
+        cell.Property(c => c.SentHours).HasConversion<double>();
+        cell.Property(c => c.ForecastEntryId).HasMaxLength(64);
+
+        var journal = modelBuilder.Entity<SubmissionJournalEntry>();
+        journal.ToTable("SubmissionJournal");
+        journal.HasOne<DaySubmission>().WithMany().HasForeignKey(j => j.DaySubmissionId).OnDelete(DeleteBehavior.Cascade);
+        journal.Property(j => j.Kind).HasConversion<string>().HasMaxLength(32);
+        journal.Property(j => j.Outcome).HasConversion<string>().HasMaxLength(32);
+        journal.Property(j => j.Hours).HasConversion<double?>();
+        journal.Property(j => j.Message).HasMaxLength(SubmissionJournalEntry.MessageMaxLength);
 
         modelBuilder.Entity<SlotOverride>().HasIndex(s => s.SlotStartUtc).IsUnique();
         modelBuilder.Entity<RemovedSlot>().HasIndex(s => s.SlotStartUtc).IsUnique();
