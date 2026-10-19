@@ -1,7 +1,8 @@
 .rail {
     position: sticky;
     top: 0;
-    z-index: 60;
+    /* Above the context panel (60) so the tooltips overflowing the rail stay visible; below the mobile layers (70+), where the rail is hidden anyway. */
+    z-index: 65;
     display: flex;
     flex-direction: column;
     align-items: center;

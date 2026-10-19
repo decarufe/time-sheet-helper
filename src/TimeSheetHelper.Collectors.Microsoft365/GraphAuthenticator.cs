@@ -27,7 +27,8 @@ public sealed class Microsoft365SignInRequiredException(string message, Exceptio
 public sealed class GraphAuthenticator(IOptionsMonitor<Microsoft365Options> options, ILogger<GraphAuthenticator> logger)
     : IGraphAccessTokenProvider
 {
-    public static readonly string[] Scopes = ["User.Read", "Calendars.Read", "Mail.ReadBasic", "Chat.ReadBasic", "ChatMessage.Read"];
+    // GET chats/{id}/messages needs the delegated Chat.Read (ChatMessage.Read is refused with 403 for this call).
+    public static readonly string[] Scopes = ["User.Read", "Calendars.Read", "Mail.ReadBasic", "Chat.ReadBasic", "Chat.Read"];
 
     internal const string NotConfiguredMessage = "Inscription d'application Microsoft 365 manquante";
     internal const string SignInRequiredMessage = "Connexion Microsoft 365 requise";

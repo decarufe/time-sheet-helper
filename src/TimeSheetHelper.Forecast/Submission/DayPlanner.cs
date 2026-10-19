@@ -313,10 +313,11 @@ public static class DayPlanner
 
         // 3. The project: the hours of a project go to its only task of the day, or are split when the draft explains them.
         var open = candidates.Where(id => !byTask.ContainsKey(id) && tasks.ContainsKey(id)).ToList();
-        // A registration whose task number is known but matches no task of the day belongs to another task of the project: it is not attributed.
+        // A registration whose task number is known but matches no task of the day belongs to another task of the project (or to nobody we
+        // know): it is never attributed, so never deleted nor modified through another task.
         bool IsForeign(ForecastRemoteEntry entry) =>
             entry.TaskCode is not null
-            && !open.Any(id => SameProject(tasks[id], entry) && TaskCodeOf(tasks[id]) is null);
+            && !candidates.Any(id => tasks.TryGetValue(id, out var t) && string.Equals(TaskCodeOf(t), entry.TaskCode, StringComparison.OrdinalIgnoreCase));
 
         foreach (var group in remaining.Where(e => (e.ProjectName is not null || e.ProjectId is not null) && !IsForeign(e))
                      .GroupBy(e => e.ProjectId ?? e.ProjectName!).ToList())

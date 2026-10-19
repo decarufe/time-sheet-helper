@@ -101,6 +101,19 @@ public sealed class DayPlannerTests
     }
 
     [Fact]
+    public void A_registration_of_a_task_number_unknown_here_is_never_deleted_nor_modified_through_another_task()
+    {
+        var foreign = Remote("T9999", 4m, "e9", project: "Alpha");
+        _tasks[4] = new ForecastTask { Id = 4, ExternalId = "manuelle", ProjectName = "Alpha", TaskName = "Divers" };
+
+        var removed = Plan([], Read(foreign), Sent(DayStatus.Sent, (4, 4m, "e1")));
+        var changed = Plan([Draft(4, 6m)], Read(foreign), Sent(DayStatus.Sent, (4, 4m, "e1")));
+
+        Assert.Equal((CellState.Unchanged, CellOperation.None, (decimal?)null), (Cell(removed, 4).State, Cell(removed, 4).Operation, Cell(removed, 4).ForecastHours));
+        Assert.Equal((CellState.New, CellOperation.Create, (decimal?)null), (Cell(changed, 4).State, Cell(changed, 4).Operation, Cell(changed, 4).ForecastHours));
+    }
+
+    [Fact]
     public void Forecast_changed_elsewhere_is_a_conflict_with_its_resolutions()
     {
         var plan = Plan([Draft(1, 6m)], Read(Remote(null, 5m, "e1")), Sent(DayStatus.Sent, (1, 4m, "e1")));

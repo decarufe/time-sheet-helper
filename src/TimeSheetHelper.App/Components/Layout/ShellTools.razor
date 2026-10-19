@@ -5,7 +5,7 @@
     var paused = Tracking == TrackingState.Paused;
     <button type="button" class="@ButtonClass shell-track @(paused ? "paused" : "on")" data-tip="@TrackLabel"
             aria-pressed="@(paused ? "false" : "true")" aria-label="@TrackLabel" @onclick="OnToggleTracking">
-        <Icon Name="@(paused ? "pause" : "play")" />
+        <Icon Name="@(paused ? "eye-off" : "eye")" />
         <span class="track-dot" aria-hidden="true"></span>
     </button>
 }
@@ -27,6 +27,6 @@
     [Parameter] public string ButtonClass { get; set; } = "icon-btn";
 
     private string TrackLabel => Tracking == TrackingState.Paused
-        ? "Surveillance en pause, cliquer pour reprendre"
-        : "Surveillance active, cliquer pour mettre en pause";
+        ? "Surveillance en pause — cliquer pour reprendre"
+        : "Surveillance active — cliquer pour suspendre";
 }

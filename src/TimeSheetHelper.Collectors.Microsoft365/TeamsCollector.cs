@@ -42,6 +42,8 @@ internal sealed class TeamsCollector(
         }
 
         var count = 0;
+        var forbidden = 0;
+        string? lastForbiddenCode = null;
         foreach (var (chat, inlineMembers) in chats)
         {
             try
@@ -50,8 +52,24 @@ internal sealed class TeamsCollector(
             }
             catch (GraphRequestException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             {
-                warnings.Add($"Conversation Teams ignorée ({chat.Topic ?? chat.Id}) : accès refusé");
+                // Only the status and Graph's error code are logged: never a token nor the content of a message.
+                Logger.LogWarning("Teams chat messages refused: HTTP {Status}, Graph error code {ErrorCode}", (int)ex.StatusCode, ex.ErrorCode ?? "(none)");
+                if (ex.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    forbidden++;
+                    lastForbiddenCode = ex.ErrorCode;
+                }
+                warnings.Add(ex.StatusCode == HttpStatusCode.Forbidden
+                    ? $"Conversation Teams ignorée ({chat.Topic ?? chat.Id}) : accès refusé ({ex.ErrorCode ?? "Forbidden"})"
+                    : $"Conversation Teams ignorée ({chat.Topic ?? chat.Id}) : introuvable");
             }
+        }
+
+        if (forbidden > 0 && forbidden == chats.Count)
+        {
+            // Every chat refused: one actionable message instead of one line per chat.
+            warnings.Clear();
+            warnings.Add(PermissionMessage(lastForbiddenCode));
         }
 
         if (chats.Count >= maxChats)
@@ -59,6 +77,11 @@ internal sealed class TeamsCollector(
 
         return count;
     }
+
+    internal static string PermissionMessage(string? errorCode) =>
+        $"Teams : accès refusé à toutes les conversations (code Graph : {errorCode ?? "Forbidden"}). "
+        + "La permission déléguée Chat.Read est manquante ou n'a pas reçu le consentement : ajoutez-la dans Entra (consentement administrateur si exigé), "
+        + "puis reconnectez-vous à Microsoft 365. Si l'erreur persiste, une politique Teams du locataire peut bloquer l'accès.";
 
     private async Task<List<(ChatInfo, IReadOnlyList<JsonElement>?)>> ListChatsAsync(
         string url, DateTime fromUtc, int maxChats, bool sorted, CancellationToken cancellationToken)
