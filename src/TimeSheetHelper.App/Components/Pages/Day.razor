@@ -29,7 +29,6 @@
         <Actions>
             <nav class="day-nav" aria-label="Navigation par jour">
                 <button type="button" @onclick="() => GoTo(day.AddDays(-1))" aria-label="Jour précédent">‹</button>
-                <button type="button" @onclick="() => GoTo(Today)" disabled="@(day == Today)">Aujourd'hui</button>
                 <button type="button" @onclick="() => GoTo(day.AddDays(1))" aria-label="Jour suivant">›</button>
                 <DatePickerButton Value="day" Label="Choisir un jour dans le calendrier" OnPicked="GoTo" />
             </nav>
@@ -349,12 +348,13 @@
 
     private bool SelectionHasOverride => SelectedSlots().Any(s => s.Kind is SlotKind.Override or SlotKind.ExcludedByOverride or SlotKind.Ignored);
 
-    // A week chosen in the shell header opens the same weekday of that week.
+    // A week chosen in the shell header opens the same weekday of that week, or today for the current week
+    // (the shell "Aujourd'hui" button replaces the page one).
     protected override void OnInitialized() =>
         weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() =>
         {
             if (weekSync.IsPending && weekSync.Shown is { } shown)
-                GoTo(day.AddDays(week.DayNumber - shown.DayNumber));
+                GoTo(week == TimesheetUi.WeekStartOf(Today) ? Today : day.AddDays(week.DayNumber - shown.DayNumber));
         }));
 
     protected override async Task OnParametersSetAsync()

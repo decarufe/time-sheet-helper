@@ -72,6 +72,9 @@ public sealed class ForecastTaskLinker(
             .ExecuteDeleteAsync(cancellationToken);
         await db.WeekTaskChoices.Where(c => c.ForecastTaskId == localTaskId)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.ForecastTaskId, target.Id), cancellationToken);
+        await MergeSentCellsAsync(db, localTaskId, target.Id, cancellationToken);
+        await db.SubmissionJournal.Where(j => j.ForecastTaskId == localTaskId)
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.ForecastTaskId, (int?)target.Id), cancellationToken);
         db.ForecastTasks.Remove(local);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -79,6 +82,35 @@ public sealed class ForecastTaskLinker(
         logger.LogInformation("« {Previous} » fusionnée avec {Code}.", previous, remote.Code);
         return new ForecastRelinkResult(target.Id, true,
             $"« {previous} » est fusionnée avec la tâche {remote.Code} déjà connue (« {target.DisplayName} ») : règles et heures lui sont rattachées.");
+    }
+
+    /// <summary>
+    /// What was sent for the merged task follows the surviving one. One cell per day and task: where the surviving task was also sent that
+    /// day, the hours add up (Forecast holds both registrations) and the entry id is dropped, as no single registration holds the sum.
+    /// </summary>
+    private static async Task MergeSentCellsAsync(TimeSheetDbContext db, int fromTaskId, int toTaskId, CancellationToken cancellationToken)
+    {
+        var moving = await db.DaySubmissionCells.Where(c => c.ForecastTaskId == fromTaskId).ToListAsync(cancellationToken);
+        if (moving.Count == 0)
+            return;
+        var dayIds = moving.Select(c => c.DaySubmissionId).ToList();
+        var existing = await db.DaySubmissionCells
+            .Where(c => c.ForecastTaskId == toTaskId && dayIds.Contains(c.DaySubmissionId))
+            .ToDictionaryAsync(c => c.DaySubmissionId, cancellationToken);
+        foreach (var cell in moving)
+        {
+            if (existing.TryGetValue(cell.DaySubmissionId, out var kept))
+            {
+                kept.SentHours += cell.SentHours;
+                kept.ForecastEntryId = null;
+                db.DaySubmissionCells.Remove(cell);
+            }
+            else
+            {
+                cell.ForecastTaskId = toTaskId;
+            }
+        }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static void Apply(Core.Forecast.ForecastTask task, ForecastRemoteTask remote, string project, DateTime now)

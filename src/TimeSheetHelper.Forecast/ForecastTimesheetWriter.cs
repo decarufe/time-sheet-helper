@@ -28,11 +28,17 @@ public sealed class ForecastTimesheetWriter(
     /// Null: the tasks flagged <see cref="ForecastTask.ExcludeFromSubmission"/> — the safe default, so a caller that knows nothing of
     /// the exclusion never writes a task Forecast's MCP cannot register. Empty: nothing is left out.
     /// </param>
+    /// <param name="onlyTaskIds">
+    /// Null: every planned cell is reported and registered. Otherwise only the cells of these tasks are: the others are context, judged
+    /// with the registrations of their project and day (so they count in what Forecast already holds) but never reported nor written.
+    /// </param>
     public async Task<ForecastFillReport> FillWeekAsync(
         TimesheetDraft draft, ForecastSubmitMode mode, IReadOnlyCollection<DateOnly>? days = null,
-        IReadOnlyCollection<int>? ignoredTaskIds = null, CancellationToken cancellationToken = default)
+        IReadOnlyCollection<int>? ignoredTaskIds = null, CancellationToken cancellationToken = default,
+        IReadOnlyCollection<int>? onlyTaskIds = null)
     {
         var report = new ForecastFillReport { WeekStart = draft.WeekStart, Mode = mode };
+        bool Reported(int taskId) => onlyTaskIds is null || onlyTaskIds.Contains(taskId);
 
         var (plan, taskById) = await PlanAsync(draft, report.Warnings, cancellationToken);
         var ignored = ignoredTaskIds is null
@@ -49,7 +55,7 @@ public sealed class ForecastTimesheetWriter(
                 plan.Cells.Where(c => dayScope.Contains(c.Date)).ToList(),
                 plan.Rejected.Where(r => dayScope.Contains(r.Date)).ToList());
 
-        foreach (var rejected in plan.Rejected)
+        foreach (var rejected in plan.Rejected.Where(r => Reported(r.ForecastTaskId)))
         {
             // The cell would vanish from the plan, and the week would be taken for complete: it is an error cell instead.
             report.Cells.Add(new ForecastCellResult(
@@ -62,7 +68,8 @@ public sealed class ForecastTimesheetWriter(
             });
         }
 
-        if (plan.Cells.Count == 0)
+        var reportable = plan.Cells.Where(c => Reported(c.Task.Id)).ToList();
+        if (reportable.Count == 0)
         {
             if (report.Cells.Count == 0)
                 report.Warnings.Add(report.IgnoredCells.Count > 0
@@ -80,7 +87,7 @@ public sealed class ForecastTimesheetWriter(
         catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
         {
             logger.LogWarning(ex, "Connexion à Forecast impossible.");
-            FailAll(report, plan.Cells, ex.Message);
+            FailAll(report, reportable, ex.Message);
             return report;
         }
 
@@ -98,7 +105,7 @@ public sealed class ForecastTimesheetWriter(
         catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
         {
             logger.LogWarning(ex, "Lecture de Forecast impossible.");
-            FailAll(report, plan.Cells, ex.Message);
+            FailAll(report, reportable, ex.Message);
             return report;
         }
 
@@ -107,7 +114,7 @@ public sealed class ForecastTimesheetWriter(
             // Without every registration of the week, "nothing there" could be a lie and the fill would duplicate hours.
             report.ReadTruncated = true;
             report.ReadDetail = existing.Detail;
-            foreach (var cell in plan.Cells)
+            foreach (var cell in reportable)
                 report.Cells.Add(Result(cell, ForecastCellStatus.Unknown, null,
                     $"Lecture incomplète des saisies de Forecast ({existing.Detail ?? "liste tronquée"}) : aucune comparaison, rien n'est saisi.")
                     with { Issue = ForecastCellIssue.ReadIncomplete, EntryState = ForecastEntryState.Unknown });
@@ -133,6 +140,10 @@ public sealed class ForecastTimesheetWriter(
             {
                 resolved.Add(new ForecastResolvedCell(cell, remote));
             }
+            else if (!Reported(cell.Task.Id))
+            {
+                // Context cell the server does not know: nothing to judge it by, and it is not this call's to report.
+            }
             else if (failure is not null)
             {
                 report.Cells.Add(Result(cell, ForecastCellStatus.Error, null, failure) with { EntryState = ForecastEntryState.NotEntered });
@@ -148,7 +159,8 @@ public sealed class ForecastTimesheetWriter(
             }
         }
 
-        var evaluations = ForecastCellEvaluator.Evaluate(resolved, existing.Entries);
+        var evaluations = ForecastCellEvaluator.Evaluate(resolved, existing.Entries)
+            .Where(e => Reported(e.Resolved.Cell.Task.Id)).ToList();
         var preflight = await PreflightAsync(session, evaluations, report, cancellationToken);
 
         var written = new List<WrittenCell>();

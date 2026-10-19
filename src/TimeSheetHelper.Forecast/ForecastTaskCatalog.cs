@@ -159,8 +159,8 @@ public sealed class ForecastTaskCatalog(IDbContextFactory<TimeSheetDbContext> db
     }
 
     /// <summary>
-    /// Deletes the tasks nothing refers to. A task used by a rule, a timesheet line, a slot override or a cached
-    /// classification is kept and reported, so the user can deactivate it instead.
+    /// Deletes the tasks nothing refers to. A task used by a rule, a timesheet line, a slot override, a cached
+    /// classification or a day submission (sent cell, journal line) is kept and reported, so the user can deactivate it instead.
     /// </summary>
     public async Task<ForecastTaskDeleteReport> DeleteAsync(IReadOnlyCollection<int> ids, CancellationToken cancellationToken = default)
     {
@@ -186,6 +186,9 @@ public sealed class ForecastTaskCatalog(IDbContextFactory<TimeSheetDbContext> db
             .Select(o => o.ForecastTaskId!.Value).ToListAsync(cancellationToken));
         Add(await db.ClassificationCache.Where(c => c.ForecastTaskId != null && taskIds.Contains(c.ForecastTaskId.Value))
             .Select(c => c.ForecastTaskId!.Value).ToListAsync(cancellationToken));
+        Add(await db.DaySubmissionCells.Where(c => taskIds.Contains(c.ForecastTaskId)).Select(c => c.ForecastTaskId).ToListAsync(cancellationToken));
+        Add(await db.SubmissionJournal.Where(j => j.ForecastTaskId != null && taskIds.Contains(j.ForecastTaskId.Value))
+            .Select(j => j.ForecastTaskId!.Value).ToListAsync(cancellationToken));
 
         var blocked = tasks.Where(t => references.ContainsKey(t.Id))
             .Select(t => new ForecastTaskBlocked(t.Id, t.DisplayName, references[t.Id]))

@@ -203,6 +203,36 @@ public sealed class ForecastTaskCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Delete_keeps_tasks_sent_to_forecast_or_named_in_the_journal()
+    {
+        var sent = await AddTaskAsync("T1", "Acme", "Sent");
+        var journaled = await AddTaskAsync("T2", "Acme", "Journaled");
+        await using (var db = CreateDb())
+        {
+            var day = new DaySubmission
+            {
+                WeekStart = new DateOnly(2026, 10, 5),
+                Date = new DateOnly(2026, 10, 5),
+                Status = DayStatus.Sent,
+                Cells = [new DaySubmissionCell { ForecastTaskId = sent, SentHours = 1m }],
+            };
+            db.DaySubmissions.Add(day);
+            await db.SaveChangesAsync();
+            db.SubmissionJournal.Add(new SubmissionJournalEntry
+            {
+                DaySubmissionId = day.Id, TimestampUtc = DateTime.UtcNow, Kind = JournalKind.Failed, Outcome = JournalOutcome.Failed,
+                ForecastTaskId = journaled, Message = "x",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var report = await Catalog().DeleteAsync([sent, journaled]);
+
+        Assert.Equal(0, report.Deleted);
+        Assert.Equal([sent, journaled], report.Blocked.Select(b => b.TaskId).Order());
+    }
+
+    [Fact]
     public async Task A_forecast_sync_keeps_the_favorite_flag()
     {
         var id = await AddTaskAsync("T1", "Acme", "Dev", favorite: true);

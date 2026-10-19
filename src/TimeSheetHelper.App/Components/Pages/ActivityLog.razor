@@ -7,9 +7,9 @@
 @inject ActivityStore Store
 @inject PluginHost Plugins
 
-<PageTitle>Time Sheet Helper</PageTitle>
+<PageTitle>Activité brute — Time Sheet Helper</PageTitle>
 
-<PageHeader Title="Activité du jour">
+<PageHeader Title="Activité brute">
     <Actions>
         <button @onclick="() => ChangeDay(-1)" aria-label="Jour précédent">‹</button>
         <input type="date" @bind="day" @bind:after="LoadAsync" aria-label="Jour" />

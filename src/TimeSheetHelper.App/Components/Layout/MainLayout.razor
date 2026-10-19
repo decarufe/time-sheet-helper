@@ -10,7 +10,7 @@
 @inject PluginHost Plugins
 @inject TimeProvider Time
 
-<a class="skip-link" href="@($"{relativePath}#main")" @onclick="FocusMainAsync" @onclick:preventDefault>Aller au contenu</a>
+<a class="skip-link" href="@($"{relativePath}#main")" inert="@drawerOpen" @onclick="FocusMainAsync" @onclick:preventDefault>Aller au contenu</a>
 
 <div class="app-shell @(Shell.PanelOpen ? null : "no-panel")">
     <Rail Current="current?.Section" Tracking="tracking" Theme="Shell.Theme"

@@ -597,6 +597,34 @@ public sealed class ForecastTimesheetWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task Only_the_requested_tasks_are_written_and_the_others_serve_as_context()
+    {
+        _server.Entries.Add((FakeForecastClient.DevProject, Monday, 120, FakeForecastClient.MyId));
+
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 2m), Entry(_review, 0, 1m)), ForecastSubmitMode.Fill, onlyTaskIds: [_review.Id]);
+
+        Assert.True(report.Success, report.Summary);
+        Assert.Equal(ForecastCellStatus.Ok, Assert.Single(report.Cells).Status);
+        Assert.Equal(_review.Id, report.Cells[0].ForecastTaskId);
+        Assert.Equal(3383, Assert.Single(_server.Creates).GetProperty("task_id").GetInt64());
+        Assert.Equal(180, _server.Entries.Sum(e => e.Minutes));
+    }
+
+    [Fact]
+    public async Task A_context_cell_that_differs_from_Forecast_blocks_the_requested_cell_and_is_not_reported()
+    {
+        _server.Entries.Add((FakeForecastClient.DevProject, Monday, 120, FakeForecastClient.MyId));
+
+        var report = await Writer().FillWeekAsync(
+            Draft(Entry(_dev, 0, 3m), Entry(_review, 0, 1m)), ForecastSubmitMode.Fill, onlyTaskIds: [_review.Id]);
+
+        Assert.Equal(ForecastCellStatus.Mismatch, Assert.Single(report.Cells).Status);
+        Assert.Equal(_review.Id, report.Cells[0].ForecastTaskId);
+        Assert.Empty(_server.Creates);
+    }
+
+    [Fact]
     public async Task Approval_submission_is_not_automated() =>
         await Assert.ThrowsAsync<NotImplementedException>(() => Writer().SubmitForApprovalAsync(Monday));
 }

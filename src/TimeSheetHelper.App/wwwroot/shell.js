@@ -86,12 +86,50 @@ export function setPanel(open) {
   write(PANEL_KEY, open ? "1" : "0");
 }
 
-// Locks the page scroll while the mobile drawer is open.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])";
+
+let trap = null;
+
+function focusables(root) {
+  return Array.from(root.querySelectorAll(FOCUSABLE))
+    .filter((el) => !el.disabled && !el.closest("[inert]") && el.getClientRects().length > 0);
+}
+
+function releaseTrap() {
+  if (trap) document.removeEventListener("keydown", trap, true);
+  trap = null;
+}
+
+// Locks the page scroll and keeps Tab focus inside the panel while the mobile drawer is open.
 export function setDrawerOpen(open) {
   document.documentElement.classList.toggle("drawer-open", !!open);
+  releaseTrap();
+  if (!open) return;
+  trap = (e) => {
+    if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+    const panel = document.getElementById("panel");
+    if (!panel) return;
+    const items = focusables(panel);
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (!panel.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener("keydown", trap, true);
 }
 
 export function dispose() {
   if (listener) document.removeEventListener("keydown", listener);
   listener = null;
+  releaseTrap();
 }

@@ -30,6 +30,8 @@ public static class AppServices
         services.AddSingleton<SubmissionReviewService>();
         services.AddScoped<ShellState>();
         services.AddSingleton<INavSummaryService, NavSummaryService>();
+        services.AddSingleton<DayLock>();
+        services.AddSingleton<IDaySubmissionService, DaySubmissionService>();
         return services;
     }
 
