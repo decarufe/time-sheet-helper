@@ -9,6 +9,7 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
     // Identifiers declared by the window-tracking plugin shipped with the application.
     private const string FocusTrackerId = "focus-tracker";
     private const string TogglePauseAction = "toggle-pause";
+    private const string AppIconResource = "TimeSheetHelper.App.app.ico";
 
     private Thread? _thread;
     private ApplicationContext? _context;
@@ -32,9 +33,10 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
 
     private void Run()
     {
+        using var appIcon = LoadAppIcon();
         using var icon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = appIcon ?? SystemIcons.Application,
             Text = "Time Sheet Helper",
             Visible = true,
             ContextMenuStrip = new ContextMenuStrip(),
@@ -67,6 +69,20 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
         _context = new ApplicationContext();
         Application.Run(_context);
         icon.Visible = false;
+    }
+
+    /// <summary>The application icon embedded in the assembly, at the size the tray uses; null when it cannot be loaded.</summary>
+    internal static Icon? LoadAppIcon()
+    {
+        try
+        {
+            using var stream = typeof(TrayIcon).Assembly.GetManifestResourceStream(AppIconResource);
+            return stream is null ? null : new Icon(stream, SystemInformation.SmallIconSize);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException)
+        {
+            return null;
+        }
     }
 
     private void RefreshPauseItem(ToolStripMenuItem item, NotifyIcon icon)

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype B — Barre du haut à onglets · Time Sheet Helper</title>
+<link rel="stylesheet" href="../shared/base.css">
+<style>
+  body { display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
+  .topbar { position: sticky; top: 0; z-index: 60; display: flex; align-items: center; gap: 16px; padding: 0 24px; height: 52px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; color: var(--fg); white-space: nowrap; }
+  .logo { width: 26px; height: 26px; flex: none; }
+
+  .tabs { display: flex; align-items: stretch; gap: 2px; height: 100%; margin: 0; padding: 0; list-style: none; }
+  .tabs > li { display: flex; position: relative; }
+  .tab { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; height: 100%; color: var(--muted); text-decoration: none; background: none; border: 0; font: inherit; cursor: pointer; white-space: nowrap; }
+  .tab:hover { color: var(--fg); background: var(--row-alt); }
+  .tab[aria-current="page"], .tab.has-current { color: var(--fg); font-weight: 600; }
+  .tab[aria-current="page"]::after, .tab.has-current::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent); }
+  .tab .badge { padding: 0 7px; font-size: .72rem; }
+  .tab svg.chev { width: 14px; height: 14px; transition: transform .12s; }
+  .tab[aria-expanded="true"] svg.chev { transform: rotate(180deg); }
+  .sep { width: 1px; background: var(--border); margin: 14px 8px; }
+
+  .menu { position: absolute; top: calc(100% + 1px); left: 0; min-width: 260px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; display: none; z-index: 80; }
+  .menu.right { left: auto; right: 0; }
+  .menu.open { display: block; }
+  .menu .m-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; cursor: pointer; background: none; border: 0; font: inherit; width: 100%; text-align: left; }
+  .menu .m-item:hover, .menu .m-item:focus-visible { background: var(--row-alt); outline: none; }
+  .menu .m-item:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .menu .m-item[aria-current="page"] { color: var(--accent); background: var(--accent-bg); font-weight: 600; }
+  .menu .m-item .d { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; }
+  .menu .m-item .t { flex: 1; min-width: 0; }
+  .menu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 4px; }
+  .menu .m-label { padding: 6px 10px 2px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+
+  .right-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .track { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: inherit; font-size: .82rem; cursor: pointer; white-space: nowrap; }
+  .track:hover { border-color: var(--accent); }
+  .track .dot { color: var(--ok); }
+  .track.paused .dot { color: var(--warn); }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; }
+  .icon-btn:hover { background: var(--row-alt); color: var(--fg); border-color: var(--border); }
+
+  .subbar { border-bottom: 1px solid var(--border); background: var(--surface); }
+  .subbar-in { max-width: 1120px; margin: 0 auto; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .crumb { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: .82rem; width: 100%; }
+  .crumb a { color: var(--muted); text-decoration: none; }
+  .crumb a:hover { color: var(--accent); text-decoration: underline; }
+  .crumb svg { width: 12px; height: 12px; }
+  .subbar h1 { outline: none; }
+  .subbar .acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  main.page { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; padding: 22px 32px 56px; }
+
+  .bottom-bar { display: none; }
+  .sheet-wrap { display: none; }
+
+  @media (max-width: 760px) {
+    .topbar { padding: 0 12px; gap: 8px; height: 48px; }
+    .topbar .tabs, .topbar .track .t-label, .topbar .sep { display: none; }
+    .brand span { font-size: .95rem; }
+    .subbar-in, main.page { padding-left: 14px; padding-right: 14px; }
+    .subbar .acts { margin-left: 0; width: 100%; }
+    main.page { padding-bottom: 96px; }
+    .bottom-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; background: var(--bg); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+    .bottom-bar a, .bottom-bar button { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px 7px; color: var(--muted); text-decoration: none; background: none; border: 0; font: inherit; font-size: .72rem; cursor: pointer; min-width: 0; }
+    .bottom-bar a[aria-current="page"], .bottom-bar .has-current { color: var(--accent); font-weight: 600; }
+    .bottom-bar a[aria-current="page"]::before, .bottom-bar .has-current::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent); }
+    .bottom-bar .badge { position: absolute; top: 3px; left: calc(50% + 6px); padding: 0 5px; font-size: .65rem; }
+    .sheet-wrap { position: fixed; inset: 0; z-index: 90; background: rgba(1, 4, 9, .5); align-items: flex-end; }
+    .sheet-wrap.open { display: flex; }
+    .sheet { width: 100%; max-height: 80vh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0; border: 1px solid var(--border); padding: 8px 10px calc(14px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
+    .sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 4px auto 8px; }
+    .sheet .m-item { display: flex; align-items: center; gap: 12px; padding: 12px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; background: none; border: 0; font: inherit; width: 100%; text-align: left; cursor: pointer; }
+    .sheet .m-item:hover, .sheet .m-item:focus-visible { background: var(--row-alt); }
+    .sheet .m-item[aria-current="page"] { color: var(--accent); background: var(--accent-bg); font-weight: 600; }
+    .sheet .m-item .t { flex: 1; }
+    .sheet .m-label { padding: 10px 10px 2px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .sheet .m-item .d { display: block; font-size: .78rem; color: var(--muted); font-weight: 400; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Aller au contenu</a>
+
+<header class="topbar">
+  <a class="brand" href="#/semaine" aria-label="Time Sheet Helper — accueil">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#1D4ED8"/><circle cx="32" cy="32" r="22" fill="#fff"/><path d="M32 17V32L22 38" fill="none" stroke="#1D4ED8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="47" r="15" fill="#16A34A" stroke="#fff" stroke-width="3"/><path d="M40 47.5l5 5 9-10.5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Time Sheet Helper</span>
+  </a>
+  <nav aria-label="Navigation principale" style="height:100%">
+    <ul class="tabs" id="tabs"></ul>
+  </nav>
+  <div class="right-tools">
+    <button class="track" id="track" type="button"></button>
+    <button class="icon-btn" id="theme" type="button" title="Thème (Alt+T)"></button>
+  </div>
+</header>
+
+<div class="subbar">
+  <div class="subbar-in" id="subbar"></div>
+</div>
+<main class="page" id="main"></main>
+
+<nav class="bottom-bar" id="bottom" aria-label="Navigation principale (mobile)"></nav>
+<div class="sheet-wrap" id="sheet-wrap">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Plus de pages" id="sheet"></div>
+</div>
+
+<script src="../shared/pages.js"></script>
+<script>
+(function () {
+  const T = window.TSH, $ = (s) => document.querySelector(s);
+  const MAIN = ["semaine", "jour", "soumettre"];
+  const MENUS = [
+    { id: "config", label: "Configuration", pages: ["regles", "taches", "sources"] },
+    { id: "plus", label: "Plus", pages: ["activite"] },
+  ];
+  let lastId = null, openMenu = null;
+  const page = (id) => T.byId(id);
+  const badge = (p) => (p.badge ? `<span class="badge ${p.badge.tone}" title="${p.badge.label}">${p.badge.text}<span class="visually-hidden"> — ${p.badge.label}</span></span>` : "");
+  const menuBadge = (m) => { const b = m.pages.map(page).filter((p) => p.badge); return b.length ? `<span class="badge ${b[0].tone}" title="${b[0].badge.label}">${b.length === 1 ? b[0].badge.text : "•"}<span class="visually-hidden"> — ${b.map((p) => p.badge.label).join(", ")}</span></span>` : ""; };
+
+  function renderTabs(cur) {
+    const items = MAIN.map((id) => { const p = page(id); return `<li><a class="tab" href="#/${id}" ${id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon, "sm")}<span>${p.label}</span>${badge(p)}</a></li>`; });
+    const menus = MENUS.map((m) => {
+      const has = m.pages.includes(cur.id);
+      return `<li><button type="button" class="tab ${has ? "has-current" : ""}" id="tb-${m.id}" aria-haspopup="menu" aria-expanded="${openMenu === m.id}" aria-controls="menu-${m.id}" data-menu="${m.id}">${m.id === "plus" ? T.icon("more", "sm") : ""}<span>${m.label}</span>${menuBadge(m)}${T.icon("chevD", "chev")}</button>
+        <div class="menu ${m.id === "plus" ? "right" : ""} ${openMenu === m.id ? "open" : ""}" id="menu-${m.id}" role="menu" aria-labelledby="tb-${m.id}">
+          ${m.pages.map((id) => { const p = page(id); return `<a class="m-item" role="menuitem" tabindex="-1" href="#/${id}" ${id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon, "sm")}<span class="t">${p.label}<span class="d">${p.desc}</span></span>${badge(p)}</a>`; }).join("")}
+        </div></li>`;
+    });
+    $("#tabs").innerHTML = items.join("") + `<li class="sep" role="presentation"></li>` + menus.join("");
+  }
+
+  function renderBottom(cur) {
+    const mainLinks = MAIN.map((id) => { const p = page(id); return `<a href="#/${id}" ${id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon)}<span>${p.label}</span>${badge(p)}</a>`; }).join("");
+    const moreHas = !MAIN.includes(cur.id);
+    $("#bottom").innerHTML = mainLinks + `<button type="button" id="more-btn" class="${moreHas ? "has-current" : ""}" aria-haspopup="dialog" aria-expanded="${$("#sheet-wrap").classList.contains("open")}">${T.icon("more")}<span>Plus</span>${menuBadge({ pages: ["regles", "taches", "sources", "activite"] })}</button>`;
+    const row = (id) => { const p = page(id); return `<a class="m-item" href="#/${id}" ${id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon)}<span class="t">${p.label}<span class="d">${p.desc}</span></span>${badge(p)}</a>`; };
+    const paused = T.state.paused;
+    $("#sheet").innerHTML = `<div class="grab"></div><div class="m-label">Configuration</div>${["regles", "taches", "sources"].map(row).join("")}<div class="m-label">Avancé</div>${row("activite")}<div class="m-label">Préférences</div>
+      <button type="button" class="m-item" data-action="toggle-pause">${T.icon(paused ? "play" : "pause")}<span class="t">${paused ? "Reprendre la surveillance" : "Mettre en pause"}</span></button>
+      <button type="button" class="m-item" data-action="toggle-theme">${T.icon(T.effectiveTheme() === "dark" ? "sun" : "moon")}<span class="t">Thème ${T.effectiveTheme() === "dark" ? "clair" : "sombre"}</span></button>`;
+  }
+
+  function render() {
+    const cur = T.current();
+    const group = T.GROUPS.find((g) => g.id === cur.group);
+    renderTabs(cur);
+    renderBottom(cur);
+    const weekNav = cur.id === "semaine" || cur.id === "soumettre" ? T.weekNavHtml() : "";
+    $("#subbar").innerHTML = `<nav class="crumb" aria-label="Fil d'Ariane"><a href="#/semaine">Accueil</a>${T.icon("chevR")}<span>${group.label}</span>${T.icon("chevR")}<span aria-current="page">${cur.label}</span></nav>
+      <h1 id="h1" tabindex="-1">${cur.title()}</h1><div class="acts">${weekNav}${cur.actions.map(T.actionButton).join("")}</div>`;
+    $("#main").innerHTML = cur.body();
+    document.title = `${cur.label} — Time Sheet Helper`;
+    const paused = T.state.paused;
+    const track = $("#track");
+    track.className = "track" + (paused ? " paused" : "");
+    track.innerHTML = `<span class="dot"></span><span class="t-label">${paused ? "En pause" : "Surveillance active"}</span>`;
+    track.setAttribute("aria-label", paused ? "Surveillance en pause, cliquer pour reprendre" : "Surveillance active, cliquer pour mettre en pause");
+    $("#theme").innerHTML = T.icon(T.effectiveTheme() === "dark" ? "sun" : "moon");
+    $("#theme").setAttribute("aria-label", "Basculer le thème clair/sombre");
+    if (lastId !== null && lastId !== cur.id) { $("#h1").focus({ preventScroll: true }); window.scrollTo(0, 0); }
+    lastId = cur.id;
+    closeSheet(false);
+    if (openMenu && lastId === cur.id && !menuStay) { openMenu = null; }
+    menuStay = false;
+  }
+  let menuStay = false;
+
+  /* ---- Menus déroulants (clavier : ↓ ↑ Home End Échap, Tab ferme) ---- */
+  function setMenu(id, focusFirst) {
+    openMenu = id;
+    document.querySelectorAll(".menu").forEach((m) => m.classList.toggle("open", m.id === "menu-" + id));
+    document.querySelectorAll("[data-menu]").forEach((b) => b.setAttribute("aria-expanded", String(b.dataset.menu === id)));
+    if (id && focusFirst) { const first = document.querySelector(`#menu-${id} [role=menuitem][aria-current]`) || document.querySelector(`#menu-${id} [role=menuitem]`); first && first.focus(); }
+  }
+  const closeMenus = (returnFocus) => { const id = openMenu; setMenu(null); if (returnFocus && id) { const b = $("#tb-" + id); b && b.focus(); } };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-menu]");
+    if (b) { setMenu(openMenu === b.dataset.menu ? null : b.dataset.menu, e.detail === 0); return; }
+    if (e.target.closest(".menu a")) { setMenu(null); return; }
+    if (openMenu && !e.target.closest(".menu")) setMenu(null);
+  });
+  document.addEventListener("keydown", (e) => {
+    const tb = e.target.closest && e.target.closest("[data-menu]");
+    if (tb && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); setMenu(tb.dataset.menu, true); return; }
+    const inMenu = e.target.closest && e.target.closest(".menu");
+    if (inMenu) {
+      const items = [...inMenu.querySelectorAll("[role=menuitem]")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+      else if (e.key === "Home") { e.preventDefault(); items[0].focus(); }
+      else if (e.key === "End") { e.preventDefault(); items[items.length - 1].focus(); }
+      else if (e.key === "Escape") { e.preventDefault(); closeMenus(true); }
+      else if (e.key === "Tab") { closeMenus(false); }
+    } else if (e.key === "Escape") {
+      if (openMenu) closeMenus(true);
+      else if ($("#sheet-wrap").classList.contains("open")) closeSheet(true);
+    }
+  });
+
+  /* ---- Feuille « Plus » (mobile) ---- */
+  const sheetWrap = $("#sheet-wrap");
+  function openSheet() { sheetWrap.classList.add("open"); $("#more-btn").setAttribute("aria-expanded", "true"); const f = $("#sheet .m-item[aria-current]") || $("#sheet .m-item"); f && f.focus(); }
+  function closeSheet(restore) { if (!sheetWrap.classList.contains("open")) return; sheetWrap.classList.remove("open"); const b = $("#more-btn"); if (b) { b.setAttribute("aria-expanded", "false"); restore && b.focus(); } }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#more-btn")) { sheetWrap.classList.contains("open") ? closeSheet(true) : openSheet(); }
+    else if (e.target === sheetWrap) closeSheet(true);
+    else if (e.target.closest("#sheet a")) closeSheet(false);
+  });
+  sheetWrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const f = [...sheetWrap.querySelectorAll("a,button")];
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
+  $("#track").addEventListener("click", () => T.runAction("toggle-pause"));
+  $("#theme").addEventListener("click", () => T.runAction("toggle-theme"));
+  /* Les actions du menu mobile gardent la feuille ouverte */
+  $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-action]")) menuStay = true; }, true);
+  T.on(() => { const keepSheet = sheetWrap.classList.contains("open") && menuStay; render(); if (keepSheet) { sheetWrap.classList.add("open"); const b = $("#more-btn"); b && b.setAttribute("aria-expanded", "true"); const a = $("#sheet [data-action]"); a && a.focus(); } });
+  render();
+})();
+</script>
+</body>
+</html>
