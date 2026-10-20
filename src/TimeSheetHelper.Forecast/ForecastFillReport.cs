@@ -31,6 +31,35 @@ public enum ForecastCellStatus
 
     /// <summary>What Forecast holds for the cell could not be established (read incomplete, outcome of a write unknown).</summary>
     Unknown,
+
+    /// <summary>The hours of an existing registration were changed (and read back).</summary>
+    Updated,
+
+    /// <summary>An existing registration was removed (and is no longer read).</summary>
+    Deleted,
+
+    /// <summary>Forecast already held the requested state: nothing was written (the operation is idempotent).</summary>
+    Skipped,
+}
+
+/// <summary>Whether the Forecast server offers a kind of write.</summary>
+public enum ForecastCapability
+{
+    Available,
+    Unavailable,
+}
+
+/// <summary>
+/// The writes the Forecast server offers. Forecast-mcp registers time but cannot change the hours of a registration nor remove one:
+/// <see cref="Update"/> and <see cref="Delete"/> are then <see cref="ForecastCapability.Unavailable"/> and <see cref="UnavailableReason"/> says why.
+/// </summary>
+public sealed record ForecastCapabilities(
+    ForecastCapability Create, ForecastCapability Update, ForecastCapability Delete, string? UnavailableReason)
+{
+    /// <summary>Not connected yet: nothing is assumed available.</summary>
+    public static ForecastCapabilities Unknown { get; } = new(
+        ForecastCapability.Unavailable, ForecastCapability.Unavailable, ForecastCapability.Unavailable,
+        "Capacités de Forecast inconnues : pas encore de connexion.");
 }
 
 /// <summary>Why a cell is in the state it is in, when its status alone does not say.</summary>
@@ -129,7 +158,8 @@ public sealed record ForecastCellResult(
     ForecastCellStatus Status,
     string? Message = null)
 {
-    public bool IsOk => Status is ForecastCellStatus.Ok or ForecastCellStatus.Planned;
+    public bool IsOk => Status is ForecastCellStatus.Ok or ForecastCellStatus.Planned
+        or ForecastCellStatus.Updated or ForecastCellStatus.Deleted or ForecastCellStatus.Skipped;
 
     public ForecastCellIssue Issue { get; init; }
 

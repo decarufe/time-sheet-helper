@@ -23,28 +23,30 @@
 <PageTitle>Sources — Time Sheet Helper</PageTitle>
 
 <div class="page">
-    <header class="page-header">
-        <h1>Sources</h1>
-        <p class="muted">
-            D'où viennent les activités. Chaque source est un plugin : vous pouvez l'activer, la régler ou la retirer sans redémarrer l'application.
-            @if (Scheduler.IsRunning)
-            {
-                <span class="pill running">Synchronisation en cours@(Scheduler.CurrentCollector is { } c ? $" : {c}" : "")…</span>
-            }
-            else if (Scheduler.NextRunUtc is { } next)
-            {
-                <span>Prochaine synchronisation automatique vers @next.ToLocalTime().ToString("HH:mm").</span>
-            }
-            else
-            {
-                <span>Synchronisation automatique désactivée.</span>
-            }
-        </p>
-        <button class="primary" disabled="@IsBusy("sync:*")" @onclick="() => SyncAsync(null)">
-            @(IsBusy("sync:*") ? "Synchronisation…" : "Tout synchroniser maintenant")
-        </button>
-        <OpStatus State="@Op("sync:*")" />
-    </header>
+    <PageHeader Title="Sources">
+        <Actions>
+            <button class="primary" disabled="@IsBusy("sync:*")" @onclick="() => SyncAsync(null)">
+                @(IsBusy("sync:*") ? "Synchronisation…" : "Tout synchroniser maintenant")
+            </button>
+        </Actions>
+    </PageHeader>
+
+    <p class="muted page-intro">
+        D'où viennent les activités. Chaque source est un plugin : vous pouvez l'activer, la régler ou la retirer sans redémarrer l'application.
+        @if (Scheduler.IsRunning)
+        {
+            <span class="pill running">Synchronisation en cours@(Scheduler.CurrentCollector is { } c ? $" : {c}" : "")…</span>
+        }
+        else if (Scheduler.NextRunUtc is { } next)
+        {
+            <span>Prochaine synchronisation automatique vers @next.ToLocalTime().ToString("HH:mm").</span>
+        }
+        else
+        {
+            <span>Synchronisation automatique désactivée.</span>
+        }
+    </p>
+    <OpStatus State="@Op("sync:*")" />
 
     <h2>Sources</h2>
     <p class="muted">Les sources « synchronisées » sont interrogées pour la semaine en cours (et la précédente le lundi matin) ; les autres enregistrent en continu ou reçoivent leurs données.</p>

@@ -221,6 +221,66 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.ToTable("ClassificationCache");
                 });
 
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.DaySubmission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("InProgressSinceUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SentUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateOnly>("WeekStart")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WeekStart", "Date")
+                        .IsUnique();
+
+                    b.ToTable("DaySubmissions");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.DaySubmissionCell", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DaySubmissionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ForecastEntryId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("SentHours")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DaySubmissionId", "ForecastTaskId")
+                        .IsUnique();
+
+                    b.ToTable("DaySubmissionCells");
+                });
+
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.RemovedSlot", b =>
                 {
                     b.Property<int>("Id")
@@ -259,6 +319,46 @@ namespace TimeSheetHelper.Storage.Migrations
                         .IsUnique();
 
                     b.ToTable("SlotOverrides");
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.SubmissionJournalEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DaySubmissionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("Hours")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DaySubmissionId");
+
+                    b.ToTable("SubmissionJournal", (string)null);
                 });
 
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetDraft", b =>
@@ -345,6 +445,24 @@ namespace TimeSheetHelper.Storage.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.DaySubmissionCell", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Timesheets.DaySubmission", null)
+                        .WithMany("Cells")
+                        .HasForeignKey("DaySubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.SubmissionJournalEntry", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Timesheets.DaySubmission", null)
+                        .WithMany()
+                        .HasForeignKey("DaySubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetEntry", b =>
                 {
                     b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
@@ -367,6 +485,11 @@ namespace TimeSheetHelper.Storage.Migrations
                         .HasForeignKey("ForecastTaskId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.DaySubmission", b =>
+                {
+                    b.Navigation("Cells");
                 });
 
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.TimesheetDraft", b =>

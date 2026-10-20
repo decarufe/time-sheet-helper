@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Concept B — Calendrier de la semaine et horloge</title>
+  <rect x="3" y="7" width="58" height="54" rx="9" fill="#FFFFFF" stroke="#0F172A" stroke-width="3"/>
+  <path d="M4.5 16A7.5 7.5 0 0 1 12 8.5H52A7.5 7.5 0 0 1 59.5 16V25H4.5Z" fill="#7C3AED"/>
+  <path d="M19 2V13M45 2V13" stroke="#0F172A" stroke-width="6" stroke-linecap="round"/>
+  <path d="M19 2V13M45 2V13" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <rect x="9" y="31" width="10" height="8" rx="2" fill="#7C3AED"/>
+  <rect x="23" y="31" width="10" height="8" rx="2" fill="#7C3AED"/>
+  <rect x="37" y="31" width="10" height="8" rx="2" fill="#7C3AED"/>
+  <rect x="9" y="44" width="10" height="8" rx="2" fill="#7C3AED"/>
+  <circle cx="46" cy="46" r="16" fill="#F59E0B" stroke="#FFFFFF" stroke-width="3"/>
+  <path d="M46 37V46L52 50" fill="none" stroke="#0F172A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

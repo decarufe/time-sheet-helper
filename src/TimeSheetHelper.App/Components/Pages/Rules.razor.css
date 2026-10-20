@@ -1,23 +1,10 @@
+/* Shared tokens (--ok, --warn, --danger, --accent-bg...) come from app.css and follow data-theme. */
 .page {
-    --ok: #1a7f37;
-    --danger: #cf222e;
-    --warn: #9a6700;
     --surface: var(--row-alt);
-    --accent-soft: rgba(9, 105, 218, 0.08);
     max-width: 1200px;
 }
 
-@media (prefers-color-scheme: dark) {
-    .page {
-        --ok: #3fb950;
-        --danger: #f85149;
-        --warn: #d29922;
-        --accent-soft: rgba(68, 147, 248, 0.12);
-    }
-}
-
-.page-header h1 { font-size: 1.4rem; margin: 0 0 4px; }
-.page-header p { margin: 0 0 8px; max-width: 75ch; }
+.page-intro { margin: 0 0 8px; max-width: 75ch; }
 
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
 .section-head h2 { margin: 0; }
@@ -31,10 +18,10 @@
 }
 .card h2 { margin-top: 0; }
 
-.table-wrap { overflow-x: auto; margin-top: 8px; }
+.table-wrap { position: relative; overflow-x: auto; margin-top: 8px; }
 table.rules td { vertical-align: middle; }
 table.rules tr.disabled td { opacity: 0.55; }
-table.rules tr.editing td { background: var(--accent-soft); }
+table.rules tr.editing td { background: var(--accent-bg); }
 table.rules code { margin-left: 4px; word-break: normal; overflow-wrap: anywhere; }
 .actions { white-space: nowrap; text-align: right; }
 .actions button { margin-left: 4px; }

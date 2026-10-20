@@ -34,7 +34,7 @@ public sealed record SlotCandidate(int? TaskId, string? GroupKey, double Weight,
 /// <param name="Alternatives">Other candidates, best first.</param>
 /// <param name="Evidence">Ids of the activities that weighed in the slot.</param>
 /// <param name="ActiveTime">Time covered by active work or meetings in the slot.</param>
-/// <param name="Notes">Comment the user gave when assigning the slot (overrides only).</param>
+/// <param name="Notes">Comment the user gave when assigning the slot, or else the title of the calendar meeting behind it.</param>
 public sealed record SlotAssignment(
     DateTime SlotStartUtc,
     SlotKind Kind,

@@ -1,0 +1,79 @@
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Forecast.Submission
+
+@* The four choices of a conflict; the unavailable ones stay visible, disabled, with their reason. Complement and Remove change Forecast: confirmed first. *@
+<fieldset @key="version" class="chooser" disabled="@Disabled">
+    <legend class="visually-hidden">Résolution pour « @Cell.TaskDisplayName »</legend>
+    @foreach (var option in DayStateLabels.Options(Cell, Capabilities))
+    {
+        var id = $"{baseId}-{option.Value}";
+        <div class="opt @(option.Available ? null : "off")">
+            <input type="radio" id="@id" name="@baseId" checked="@(Value == option.Value)" disabled="@(!option.Available)"
+                   aria-describedby="@($"{id}-desc")" @onchange="() => ChooseAsync(option)" />
+            <label for="@id">@option.Label</label>
+            <span id="@($"{id}-desc")" class="desc">
+                @if (option.Available)
+                {
+                    @option.Description
+                }
+                else
+                {
+                    <text>Indisponible : @option.UnavailableReason</text>
+                }
+            </span>
+        </div>
+    }
+</fieldset>
+
+@if (pending is { } choice)
+{
+    <ConfirmDialog Title="@($"{choice.Label} dans Forecast ?")" Subtitle="@Cell.TaskDisplayName" ConfirmLabel="@choice.Label"
+                   OnConfirm="ConfirmAsync" OnCancel="Cancel">
+        <p>@choice.Description</p>
+        <p>La modification est faite dans Forecast au prochain envoi du jour, après une nouvelle lecture de Forecast.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private readonly string baseId = $"res-{Guid.NewGuid():N}";
+    private ResolutionOption? pending;
+    private int version;
+
+    [Parameter, EditorRequired] public CellPlan Cell { get; set; } = default!;
+
+    [Parameter, EditorRequired] public ForecastCapabilities Capabilities { get; set; } = default!;
+
+    [Parameter] public ConflictResolution? Value { get; set; }
+
+    [Parameter] public EventCallback<ConflictResolution> OnChange { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    private Task ChooseAsync(ResolutionOption option)
+    {
+        if (!option.Available || Disabled)
+            return Task.CompletedTask;
+        if (option.Destructive)
+        {
+            pending = option;
+            return Task.CompletedTask;
+        }
+        return OnChange.InvokeAsync(option.Value);
+    }
+
+    private async Task ConfirmAsync()
+    {
+        var choice = pending;
+        pending = null;
+        if (choice is not null)
+            await OnChange.InvokeAsync(choice.Value);
+        version++;
+    }
+
+    // The browser already checked the radio: render the fieldset again so the previous choice shows.
+    private void Cancel()
+    {
+        pending = null;
+        version++;
+    }
+}

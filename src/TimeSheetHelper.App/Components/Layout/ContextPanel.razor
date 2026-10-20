@@ -1,0 +1,178 @@
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Services
+@inject ShellState Shell
+@inject TimeProvider Time
+
+<aside class="ctx-panel @(Drawer ? "drawer" : null)" id="panel" aria-label="Panneau de section"
+       role="@(Drawer ? "dialog" : null)" aria-modal="@(Drawer ? "true" : null)"
+       inert="@Inert" @onkeydown="OnKeyDown">
+    <div class="ctx-panel-in">
+        @if (Drawer)
+        {
+            <button type="button" class="icon-btn ctx-close" aria-label="Fermer le panneau" @ref="closeButton"
+                    @onclick="() => OnClose.InvokeAsync(true)">
+                <Icon Name="x" />
+            </button>
+        }
+
+        @switch (Section)
+        {
+            case NavSection.Time:
+                <h2 class="ctx-title">Ma semaine <span class="ctx-title-tag">S@(ShellFormat.WeekNumber(Shell.WeekStart))</span></h2>
+                @PageLinks(NavSection.Time)
+                <h3 class="ctx-sub">Jours de la semaine</h3>
+                <ul class="ctx-days">
+                    @foreach (var day in WeekDays)
+                    {
+                        var route = $"jour/{TimesheetUi.IsoDate(day.Date)}";
+                        var current = RelativePath.Equals(route, StringComparison.OrdinalIgnoreCase);
+                        var tone = day.Summary is { } d ? ShellFormat.DotTone(d.Badge) : "none";
+                        var state = day.Summary is { } st ? ShellFormat.BadgeLabel(st.Badge) : "Chargement";
+                        var hours = day.Summary is { } h ? ShellFormat.HoursOf(h.ClassifiedHours, h.TargetHours) : "—";
+                        var isToday = day.Date == Today;
+                        <li>
+                            <a class="ctx-day @(current ? "current" : null)" href="@route" title="@state"
+                               aria-current="@(current ? "page" : null)" @onclick="LinkClicked">
+                                <span class="day-dot @tone" aria-hidden="true"><Icon Name="@ShellFormat.DotIcon(tone)" Small /></span>
+                                <span class="ctx-day-name">
+                                    @ShellFormat.ShortDay(day.Date)
+                                    @if (isToday)
+                                    {
+                                        <span class="badge info today-tag">aujourd'hui</span>
+                                    }
+                                </span>
+                                <span class="visually-hidden">, @state,</span>
+                                <span class="ctx-day-hours">@hours</span>
+                            </a>
+                        </li>
+                    }
+                </ul>
+                <p class="ctx-total">
+                    <span>Total</span>
+                    <strong>@(Summary is { } total ? ShellFormat.HoursOf(total.ClassifiedHours, total.WeeklyTargetHours) : "—")</strong>
+                </p>
+                break;
+
+            case NavSection.Sending:
+                <h2 class="ctx-title">Avant d'envoyer</h2>
+                @PageLinks(NavSection.Sending)
+                <h3 class="ctx-sub">Liste de vérification</h3>
+                @if (Summary is { } s)
+                {
+                    var unclassified = s.Days.Sum(d => d.UnclassifiedHours);
+                    <ul class="ctx-checks">
+                        @Check(unclassified == 0, unclassified == 0 ? "Toutes les heures sont classées" : $"{ShellFormat.Hours(unclassified)} à classer", "Dans Jour ou Semaine")
+                        @Check(s.BlockingGapCount == 0, s.BlockingGapCount switch { 0 => "Aucun écart bloquant", 1 => "1 écart bloquant", var n => $"{n} écarts bloquants" }, "À régler dans Semaine")
+                        @Check(s.ClassifiedHours >= s.WeeklyTargetHours, ShellFormat.HoursOf(s.ClassifiedHours, s.WeeklyTargetHours), "Objectif hebdomadaire, non bloquant")
+                        @Check(s.IsSubmitted, s.IsSubmitted ? "Semaine envoyée" : "Pas encore envoyée", null)
+                    </ul>
+                }
+                else
+                {
+                    <p class="ctx-help-text">Chargement de la semaine…</p>
+                }
+                break;
+
+            case NavSection.Configuration:
+                <h2 class="ctx-title">Configuration</h2>
+                @PageLinks(NavSection.Configuration)
+                break;
+
+            default:
+                <h2 class="ctx-title">Avancé</h2>
+                @PageLinks(NavSection.Advanced)
+                <p class="ctx-help-text">Le journal brut des fenêtres actives, tel que la surveillance l'a enregistré. Utile pour comprendre une proposition.</p>
+                break;
+        }
+
+        <details class="ctx-shortcuts">
+            <summary>Raccourcis clavier</summary>
+            <dl>
+                <dt><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>7</kbd></dt><dd>Aller à une page</dd>
+                <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Semaine précédente / suivante</dd>
+                <dt><kbd>Ctrl</kbd>+<kbd>B</kbd></dt><dd>Afficher ou masquer le panneau</dd>
+                <dt><kbd>Alt</kbd>+<kbd>T</kbd></dt><dd>Thème clair / sombre</dd>
+            </dl>
+        </details>
+    </div>
+</aside>
+
+@code {
+    private static readonly Dictionary<string, string> Descriptions = new()
+    {
+        [""] = "Vue d'ensemble et écarts",
+        ["jour"] = "Saisie détaillée d'une journée",
+        ["soumettre"] = "Envoi vers Forecast",
+        ["regles"] = "Classement automatique",
+        ["taches"] = "Tâches Forecast connues",
+        ["sources"] = "Sources d'activité",
+        ["activite"] = "Journal des fenêtres actives",
+    };
+
+    private ElementReference closeButton;
+
+    /// <summary>Destination of the current page; null outside the seven destinations.</summary>
+    [Parameter] public NavDestination? Current { get; set; }
+
+    /// <summary>Relative path of the current page, without query ("jour/2026-10-19").</summary>
+    [Parameter] public string RelativePath { get; set; } = "";
+
+    [Parameter] public NavSummary? Summary { get; set; }
+
+    /// <summary>Mobile drawer open: the panel becomes a modal dialog.</summary>
+    [Parameter] public bool Drawer { get; set; }
+
+    [Parameter] public bool Inert { get; set; }
+
+    /// <summary>Asks to close the drawer; the argument tells whether the focus returns to the Menu button.</summary>
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private NavSection Section => Current?.Section ?? NavSection.Time;
+
+    private DateOnly Today => DateOnly.FromDateTime(Time.GetLocalNow().DateTime);
+
+    private IEnumerable<(DateOnly Date, DaySummary? Summary)> WeekDays =>
+        Enumerable.Range(0, 5).Select(i =>
+        {
+            var date = Shell.WeekStart.AddDays(i);
+            return (date, Summary?.WeekStart == Shell.WeekStart ? Summary.Days.FirstOrDefault(d => d.Date == date) : null);
+        });
+
+    public ValueTask FocusCloseButtonAsync() => Drawer ? closeButton.FocusAsync() : ValueTask.CompletedTask;
+
+    private Task LinkClicked() => Drawer ? OnClose.InvokeAsync(false) : Task.CompletedTask;
+
+    private Task OnKeyDown(KeyboardEventArgs e) =>
+        Drawer && e.Key == "Escape" ? OnClose.InvokeAsync(true) : Task.CompletedTask;
+
+    private RenderFragment PageLinks(NavSection section) =>
+        @<ul class="ctx-links">
+            @foreach (var destination in ShortcutMap.Destinations.Where(d => d.Section == section))
+            {
+                var current = destination == Current;
+                <li>
+                    <a class="ctx-link @(current ? "current" : null)" href="@destination.Route"
+                       aria-current="@(current ? "page" : null)" @onclick="LinkClicked">
+                        <Icon Name="@destination.Icon" />
+                        <span class="ctx-link-text">
+                            <span>@destination.Label</span>
+                            <span class="ctx-link-desc">@Descriptions[destination.Route]</span>
+                        </span>
+                        <kbd class="ctx-link-key" title="Raccourci">Alt+@destination.Shortcut</kbd>
+                    </a>
+                </li>
+            }
+        </ul>;
+
+    private static RenderFragment Check(bool ok, string text, string? detail) =>
+        @<li class="ctx-check @(ok ? "ok" : "todo")">
+            <Icon Name="@(ok ? "check" : "warn")" Small />
+            <span>
+                <span class="visually-hidden">@(ok ? "Fait : " : "À faire : ")</span>@text
+                @if (detail is not null)
+                {
+                    <small>@detail</small>
+                }
+            </span>
+        </li>;
+}

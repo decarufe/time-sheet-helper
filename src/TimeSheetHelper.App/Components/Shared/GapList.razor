@@ -117,44 +117,6 @@
         </div>
     </div>
 
-    <div class="section">
-        <h3>
-            <button type="button" class="fold" aria-expanded="@(cleanOpen ? "true" : "false")" aria-controls="gaps-clean"
-                    @onclick="() => cleanOpen = !cleanOpen">
-                <span aria-hidden="true">@(cleanOpen ? "▾" : "▸")</span> Sans écart (@CleanCells.Count)
-            </button>
-        </h3>
-        <div id="gaps-clean" hidden="@(!cleanOpen)">
-            @if (!HasSimulation)
-            {
-                <p class="muted">Lancez la simulation pour voir les cellules prêtes ou déjà dans Forecast.</p>
-            }
-            else if (CleanCells.Count == 0)
-            {
-                <p class="muted">Aucune cellule sans écart.</p>
-            }
-            else
-            {
-                <table>
-                    <caption class="visually-hidden">Cellules sans écart</caption>
-                    <thead>
-                        <tr><th scope="col">Tâche</th><th scope="col">Jour</th><th scope="col" class="num">Attendu</th><th scope="col">État</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var cell in CleanCells)
-                        {
-                            <tr>
-                                <td>@cell.TaskDisplayName</td>
-                                <td class="nowrap">@UiLabels.Day(cell.Date)</td>
-                                <td class="num">@TimesheetUi.HoursLabel(cell.Expected)</td>
-                                <td>@UiLabels.CellStatus(cell.Status)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            }
-        </div>
-    </div>
 </section>
 
 @code {
@@ -168,7 +130,6 @@
     private readonly HashSet<SubmissionGapSeverity> collapsedSections = [SubmissionGapSeverity.Info];
     private bool resolvedOpen;
     private bool ignoredOpen;
-    private bool cleanOpen;
 
     [Parameter, EditorRequired] public GapBoard Board { get; set; } = default!;
 
@@ -191,11 +152,7 @@
     /// <summary>No analysis yet (first load).</summary>
     [Parameter] public bool Analyzing { get; set; }
 
-    [Parameter] public bool HasSimulation { get; set; }
-
     [Parameter] public IReadOnlyList<ResolvedGap> Resolved { get; set; } = [];
-
-    [Parameter] public IReadOnlyList<ForecastCellResult> CleanCells { get; set; } = [];
 
     [Parameter] public EventCallback<(SubmissionGap Gap, SubmissionGapResolution Resolution)> OnAction { get; set; }
 

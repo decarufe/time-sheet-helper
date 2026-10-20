@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using TimeSheetHelper.App.Components.Layout;
 using TimeSheetHelper.App.Plugins;
 using TimeSheetHelper.App.Services;
 using TimeSheetHelper.App.Sync;
@@ -27,6 +28,10 @@ public static class AppServices
         services.AddForecast(configuration);
         services.AddTimesheetEngine(configuration);
         services.AddSingleton<SubmissionReviewService>();
+        services.AddScoped<ShellState>();
+        services.AddSingleton<INavSummaryService, NavSummaryService>();
+        services.AddSingleton<DayLock>();
+        services.AddSingleton<IDaySubmissionService, DaySubmissionService>();
         return services;
     }
 

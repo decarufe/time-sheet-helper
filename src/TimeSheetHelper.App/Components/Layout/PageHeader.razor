@@ -1,0 +1,14 @@
+@* Usage (WP6) : <PageHeader Title="Règles"><Actions>…boutons de la page…</Actions></PageHeader>
+   Renders nothing itself: the title becomes the single <h1> of WeekHeader and the actions are rendered on its right. *@
+@implements IDisposable
+@inject ShellState Shell
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    protected override void OnParametersSet() => Shell.SetHeader(Title, Actions);
+
+    public void Dispose() => Shell.SetHeader(null, null);
+}

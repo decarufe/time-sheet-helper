@@ -36,7 +36,13 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <AssemblyName>TimeSheetHelper</AssemblyName>
     <RootNamespace>TimeSheetHelper.App</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- Same .ico as the executable's, embedded so the tray icon loads from the assembly (works in single-file publish). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="TimeSheetHelper.App.app.ico" />
+  </ItemGroup>
 
   <!--
     Publishes each bundled plugin (framework-dependent, whatever the application's own runtime identifier) next to the

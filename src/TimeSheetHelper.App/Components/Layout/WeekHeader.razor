@@ -1,0 +1,161 @@
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Services
+@inject ShellState Shell
+@inject TimeProvider Time
+
+<header class="week-head" id="head">
+    <div class="week-head-in">
+        <div class="week-head-row">
+            <button type="button" class="icon-btn toggle-panel" aria-expanded="@(PanelOpen ? "true" : "false")"
+                    aria-controls="panel" aria-label="Panneau de section" title="Panneau (Ctrl+B)" @onclick="OnTogglePanel">
+                <Icon Name="panel" />
+            </button>
+            <button type="button" class="icon-btn menu-btn" aria-expanded="@(DrawerOpen ? "true" : "false")"
+                    aria-controls="panel" aria-label="Menu" @ref="menuButton" @onclick="OnOpenDrawer">
+                <Icon Name="menu" />
+            </button>
+
+            <div class="week-head-titles">
+                @if (WeekCentric)
+                {
+                    <p class="kicker">@ShellFormat.Kicker(Shell.WeekStart)</p>
+                }
+                @if (Shell.PageTitle is { } title)
+                {
+                    <h1 class="week-head-title" tabindex="-1" @ref="titleElement">@title</h1>
+                }
+                else
+                {
+                    <p class="week-head-title">@(Current?.Label ?? "Time Sheet Helper")</p>
+                }
+            </div>
+
+            @if (WeekCentric)
+            {
+                <div class="week-nav" role="group" aria-label="Semaine affichée">
+                    <button type="button" class="icon-btn" aria-label="Semaine précédente" title="Semaine précédente ([)"
+                            @onclick="() => Shell.ShiftWeek(-1)">
+                        <Icon Name="chevL" />
+                    </button>
+                    <DatePickerButton Value="Shell.WeekStart" Label="Choisir la semaine" OnPicked="Shell.SetWeek" />
+                    <button type="button" class="icon-btn" aria-label="Semaine suivante" title="Semaine suivante (])"
+                            @onclick="() => Shell.ShiftWeek(1)">
+                        <Icon Name="chevR" />
+                    </button>
+                    <button type="button" class="today-btn" disabled="@(Shell.WeekStart == TimesheetUi.WeekStartOf(Today))"
+                            @onclick="() => Shell.SetWeek(Today)">Aujourd'hui</button>
+                </div>
+            }
+
+            @if (Shell.HeaderActions is { } actions)
+            {
+                <div class="week-head-actions">@actions</div>
+            }
+
+            <div class="m-tools">
+                <ShellTools ButtonClass="icon-btn" Tracking="Tracking" Theme="Theme"
+                            OnToggleTracking="OnToggleTracking" OnToggleTheme="OnToggleTheme" />
+            </div>
+        </div>
+
+        @if (WeekCentric)
+        {
+            var pct = ProgressPercent;
+            <div class="week-head-row week-head-progress">
+                <StepIndicator Summary="WeekSummary" Current="CurrentStep" />
+                <div class="week-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@pct"
+                     aria-label="Progression de la semaine">
+                    <span class="week-progress-track" aria-hidden="true">
+                        <span class="week-progress-bar @(pct >= 100 ? "full" : null)" style="width:@(pct)%"></span>
+                    </span>
+                    <span class="week-progress-text">
+                        @if (pct >= 100)
+                        {
+                            <Icon Name="check" Small />
+                            <span>Objectif atteint ·</span>
+                        }
+                        @(WeekSummary is { } s ? ShellFormat.HoursOf(s.ClassifiedHours, s.WeeklyTargetHours) : "—")
+                    </span>
+                </div>
+            </div>
+        }
+        <span class="visually-hidden" aria-live="polite" aria-atomic="true">@announcement</span>
+    </div>
+</header>
+
+@code {
+    private ElementReference menuButton;
+    private ElementReference titleElement;
+    private DateOnly? announcedWeek;
+    private string? announcement;
+    private bool focusTitle;
+
+    /// <summary>Destination of the current page; null outside the seven destinations.</summary>
+    [Parameter] public NavDestination? Current { get; set; }
+
+    [Parameter] public NavSummary? Summary { get; set; }
+
+    [Parameter] public bool PanelOpen { get; set; }
+
+    [Parameter] public bool DrawerOpen { get; set; }
+
+    [Parameter] public TrackingState Tracking { get; set; }
+
+    [Parameter] public ShellTheme Theme { get; set; }
+
+    [Parameter] public EventCallback OnTogglePanel { get; set; }
+
+    [Parameter] public EventCallback OnOpenDrawer { get; set; }
+
+    [Parameter] public EventCallback OnToggleTracking { get; set; }
+
+    [Parameter] public EventCallback OnToggleTheme { get; set; }
+
+    /// <summary>Time and Sending pages show the week, the stepper and the weekly progress.</summary>
+    private bool WeekCentric => Current is null || Current.Section is NavSection.Time or NavSection.Sending;
+
+    private DateOnly Today => DateOnly.FromDateTime(Time.GetLocalNow().DateTime);
+
+    /// <summary>The summary only when it describes the displayed week (null while the new week loads).</summary>
+    private NavSummary? WeekSummary => Summary?.WeekStart == Shell.WeekStart ? Summary : null;
+
+    private NavStep? CurrentStep => Current?.Route switch
+    {
+        "jour" => NavStep.Enter,
+        "" => NavStep.Review,
+        "soumettre" => NavStep.Submit,
+        _ => null,
+    };
+
+    private int ProgressPercent => WeekSummary is { WeeklyTargetHours: > 0 } s
+        ? (int)Math.Clamp(Math.Round(s.ClassifiedHours * 100m / s.WeeklyTargetHours), 0, 100)
+        : 0;
+
+    public ValueTask FocusMenuAsync() => menuButton.FocusAsync();
+
+    /// <summary>Moves the focus to the page title once it is rendered (called after a navigation).</summary>
+    public void RequestTitleFocus() => focusTitle = true;
+
+    protected override void OnParametersSet()
+    {
+        if (announcedWeek is { } previous && previous != Shell.WeekStart)
+            announcement = ShellFormat.WeekAnnouncement(Shell.WeekStart);
+        announcedWeek = Shell.WeekStart;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusTitle && Shell.PageTitle is not null)
+        {
+            focusTitle = false;
+            try
+            {
+                await titleElement.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // Title not rendered yet (prerendering): the browser keeps its default focus.
+            }
+        }
+    }
+}

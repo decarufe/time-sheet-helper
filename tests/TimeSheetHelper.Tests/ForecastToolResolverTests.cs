@@ -95,4 +95,41 @@ public class ForecastToolResolverTests
         Assert.Equal(["a", "b"], tool.ParameterNames.ToArray());
         Assert.Empty(Tool("y").ParameterNames);
     }
+
+    private static ForecastToolInfo Tool(string name, string schema)
+    {
+        using var doc = JsonDocument.Parse(schema);
+        return new ForecastToolInfo(name, null, doc.RootElement.Clone());
+    }
+
+    [Fact]
+    public void The_edit_tool_of_forecast_mcp_is_never_taken_for_changing_or_removing_a_registration()
+    {
+        // Real forecast-mcp: it shifts the date and replaces the notes of registrations, it cannot change their hours.
+        var tools = new[]
+        {
+            Tool("plan_time_registration_edit",
+                """{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"time_registration_id":{"type":"integer"},"offset_days":{"type":"integer"},"notes":{"type":"string"}}}}}}"""),
+            Tool("confirm_time_registration_edit", """{"type":"object","properties":{"action_id":{"type":"string"}}}"""),
+        };
+
+        Assert.Null(ForecastToolResolver.Resolve(tools, ForecastToolRole.UpdateTimeEntry, new ForecastToolNames()));
+        Assert.Null(ForecastToolResolver.Resolve(tools, ForecastToolRole.DeleteTimeEntry, new ForecastToolNames()));
+    }
+
+    [Fact]
+    public void Update_and_delete_tools_are_guessed_only_when_their_schema_names_the_registration()
+    {
+        var update = Tool("update_time_entry", """{"type":"object","properties":{"time_entry_id":{"type":"integer"},"minutes":{"type":"integer"}}}""");
+        var delete = Tool("delete_time_entry", """{"type":"object","properties":{"time_entry_id":{"type":"integer"}}}""");
+
+        Assert.Equal("update_time_entry", ForecastToolResolver.Resolve([update, delete], ForecastToolRole.UpdateTimeEntry, new ForecastToolNames())?.Name);
+        Assert.Equal("delete_time_entry", ForecastToolResolver.Resolve([update, delete], ForecastToolRole.DeleteTimeEntry, new ForecastToolNames())?.Name);
+        // Same names without a schema: which registration they act on is unknown.
+        Assert.Null(ForecastToolResolver.Resolve([Tool("update_time_entry")], ForecastToolRole.UpdateTimeEntry, new ForecastToolNames()));
+        Assert.Null(ForecastToolResolver.Resolve([Tool("delete_time_entry")], ForecastToolRole.DeleteTimeEntry, new ForecastToolNames()));
+        // A configured name wins.
+        Assert.Equal("delete_time_entry",
+            ForecastToolResolver.Resolve([Tool("delete_time_entry")], ForecastToolRole.DeleteTimeEntry, new ForecastToolNames { DeleteTimeEntry = "delete_time_entry" })?.Name);
+    }
 }

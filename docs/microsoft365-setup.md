@@ -40,12 +40,18 @@ Dans **Autorisations des API** → **Ajouter une autorisation** → **Microsoft 
 | `Calendars.Read`   | Lire les rendez-vous (`/me/calendarView`)                    |
 | `Mail.ReadBasic`   | Lire les métadonnées des courriels envoyés, sans le corps    |
 | `Chat.ReadBasic`   | Lister les conversations Teams et leurs membres              |
-| `ChatMessage.Read` | Lire les messages de conversation (seules l'heure et l'auteur sont utilisés) |
+| `Chat.Read`        | Lire les messages de conversation (seules l'heure et l'auteur sont utilisés) |
+
+> `ChatMessage.Read` ne convient pas : pour lire les messages d'une conversation (`GET /chats/{id}/messages`), Microsoft Graph
+> exige la permission **déléguée `Chat.Read`**. Avec `ChatMessage.Read` seulement, la synchronisation Teams échoue en « accès refusé » (403).
+> Si vous aviez déjà configuré l'application, ajoutez `Chat.Read` (Microsoft Graph › Déléguées) et accordez le consentement
+> administrateur si votre locataire l'exige, puis **reconnectez-vous** : le jeton en cache a été émis sans `Chat.Read`
+> (cliquez sur **Se connecter à Microsoft 365**, ou supprimez le fichier de cache décrit à la section 5).
 
 ## 4. Consentement administrateur
 
 Dans un locataire d'entreprise, les utilisateurs ne peuvent souvent pas consentir eux-mêmes à `Calendars.Read`,
-`Chat.ReadBasic` ou `ChatMessage.Read`. Si la connexion affiche « Approbation de l'administrateur requise » :
+`Chat.ReadBasic` ou `Chat.Read`. Si la connexion affiche « Approbation de l'administrateur requise » :
 
 - si vous êtes administrateur : dans **Autorisations des API**, cliquez sur **Accorder un consentement administrateur pour &lt;votre organisation&gt;** ;
 - sinon, voir la section [Demander le consentement au service informatique](#6-demander-le-consentement-au-service-informatique).
@@ -88,7 +94,7 @@ envoyez une demande à votre service informatique avec ces informations :
 - **Type d'application** : client public (application de bureau), sans secret, permissions **déléguées** uniquement
   (l'application ne voit que les données de l'utilisateur connecté).
 - **URI de redirection** : `http://localhost` et `ms-appx-web://microsoft.aad.brokerplugin/<ClientId>`.
-- **Permissions Microsoft Graph déléguées** : `User.Read`, `Calendars.Read`, `Mail.ReadBasic`, `Chat.ReadBasic`, `ChatMessage.Read`.
+- **Permissions Microsoft Graph déléguées** : `User.Read`, `Calendars.Read`, `Mail.ReadBasic`, `Chat.ReadBasic`, `Chat.Read`.
 - **Données conservées** : localement sur le poste, dans une base SQLite ; uniquement les métadonnées (heure, objet,
   participants) — jamais le corps des courriels ni des messages Teams.
 - **Ce qu'il faut en retour** : l'`ID d'application (client)`, l'`ID de l'annuaire (locataire)` et le consentement

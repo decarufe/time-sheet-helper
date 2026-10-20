@@ -1,0 +1,106 @@
+.stepper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+}
+
+.step-sep {
+    display: flex;
+    color: var(--muted);
+}
+
+.step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--fg);
+    text-decoration: none;
+    transition: background-color .12s;
+}
+
+.step:hover {
+    background: var(--accent-bg);
+}
+
+.step-n {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1.5px solid var(--border-strong);
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+}
+
+.step-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.step-lbl {
+    font-size: .88rem;
+    color: var(--muted);
+}
+
+.step small {
+    font-size: .78rem;
+    color: var(--muted);
+}
+
+.step.current .step-n {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+}
+
+.step.current .step-lbl {
+    color: var(--fg);
+    font-weight: 600;
+    text-decoration: underline 2px var(--accent);
+    text-underline-offset: 4px;
+}
+
+.step.done .step-n {
+    background: var(--ok-bg);
+    border-color: var(--ok);
+    color: var(--ok-text);
+}
+
+.step.done .step-lbl,
+.step.done small {
+    color: var(--ok-text);
+}
+
+.step.attn .step-n {
+    background: var(--warn-bg);
+    border-color: var(--warn);
+    color: var(--warn-text);
+}
+
+.step.attn .step-lbl,
+.step.attn small {
+    color: var(--warn-text);
+}
+
+/* The current step keeps the page colours even when done or to fix: the badge carries the state. */
+.step.current.done .step-lbl,
+.step.current.attn .step-lbl {
+    color: var(--fg);
+}
+
+@media (max-width: 860px) {
+    .step:not(.current) .step-text {
+        display: none;
+    }
+}

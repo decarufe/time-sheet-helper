@@ -1,0 +1,36 @@
+@using System.Globalization
+@using TimeSheetHelper.Core.Timesheets
+
+<details class="day-journal">
+    <summary>Journal d'envoi · @DayStateLabels.ShortDay(Date) (@CountLabel)</summary>
+    @if (Entries.Count == 0)
+    {
+        <p class="muted">Aucun envoi pour ce jour.</p>
+    }
+    else
+    {
+        <ol class="journal">
+            @foreach (var entry in Entries.OrderByDescending(e => e.TimestampUtc).ThenByDescending(e => e.Id))
+            {
+                var label = DayStateLabels.Journal(entry.Kind, entry.Outcome);
+                var utc = DateTime.SpecifyKind(entry.TimestampUtc, DateTimeKind.Utc);
+                <li>
+                    <time datetime="@utc.ToString("o", CultureInfo.InvariantCulture)">@utc.ToLocalTime().ToString("HH:mm:ss", TimesheetUi.French)</time>
+                    <span class="badge @label.Tone state"><Icon Name="@label.Icon" Small="true" /><span>@label.Label</span></span>
+                    @if (!string.IsNullOrEmpty(entry.Message))
+                    {
+                        <span class="msg">@entry.Message</span>
+                    }
+                </li>
+            }
+        </ol>
+    }
+</details>
+
+@code {
+    [Parameter, EditorRequired] public DateOnly Date { get; set; }
+
+    [Parameter] public IReadOnlyList<SubmissionJournalEntry> Entries { get; set; } = [];
+
+    private string CountLabel => Entries.Count > 1 ? $"{Entries.Count} entrées" : $"{Entries.Count} entrée";
+}

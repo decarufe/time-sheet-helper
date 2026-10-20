@@ -1,0 +1,197 @@
+@using TimeSheetHelper.Core.Timesheets
+@using TimeSheetHelper.Forecast
+@using TimeSheetHelper.Forecast.Submission
+
+<section class="day-panel" aria-labelledby="@titleId" aria-busy="@(Loading || Sending ? "true" : null)">
+    <div class="dp-head">
+        <h3 id="@titleId">@DayStateLabels.LongDay(Date)@(IsToday ? " (aujourd'hui)" : "")</h3>
+        <CellStateBadge State="DayState" />
+    </div>
+
+    @if (Error is not null)
+    {
+        <p class="alert error" role="alert">@Error</p>
+        <div class="dp-actions">
+            <button type="button" disabled="@(Sending || Busy)" @onclick="OnReplan">Réessayer la lecture de Forecast</button>
+        </div>
+    }
+    else if (Plan is null)
+    {
+        <p class="muted" role="status"><Icon Name="refresh" Small="true" Class="spin" /> Lecture de Forecast… (rien n'est écrit)</p>
+    }
+    else
+    {
+        var action = DayStateLabels.Action(Plan, Choices);
+        var help = DayStateLabels.DayHelp(Plan.Status);
+
+        @if (help is not null)
+        {
+            <p class="dp-help">@help</p>
+        }
+        @if (Plan.LockingEntries.Count > 0)
+        {
+            <p class="dp-help">Saisies Forecast qui verrouillent ce jour :</p>
+            <ul class="dp-locks">
+                @foreach (var locking in Plan.LockingEntries)
+                {
+                    <li>@DayStateLabels.LockingEntry(locking)</li>
+                }
+            </ul>
+        }
+        @if (!Plan.ForecastReadComplete)
+        {
+            <p class="alert warn">La lecture de Forecast est incomplète : rien ne sera écrit avant une lecture complète.</p>
+        }
+        @if (Loading)
+        {
+            <p class="muted" role="status"><Icon Name="refresh" Small="true" Class="spin" /> Nouvelle lecture de Forecast… (rien n'est écrit)</p>
+        }
+
+        @if (Plan.Cells.Count == 0)
+        {
+            <p class="muted">Aucune heure dans le brouillon pour ce jour.</p>
+        }
+        else
+        {
+            <p class="dp-summary">@DayStateLabels.Summary(Plan)</p>
+            <div class="dp-table">
+                <table>
+                    <caption class="visually-hidden">Cellules de @DayStateLabels.LongDay(Date) : brouillon, Forecast, envoyé et résultat de l'envoi</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Tâche</th>
+                            <th scope="col" class="num">Brouillon (h)</th>
+                            <th scope="col" class="num">Forecast (h)</th>
+                            <th scope="col" class="num">Envoyé (h)</th>
+                            <th scope="col">Résultat</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cell in Plan.Cells)
+                        {
+                            ConflictResolution? choice = Choices.TryGetValue(cell.ForecastTaskId, out var chosen) ? chosen : null;
+                            <tr class="@(cell.State == CellState.Ignored ? "ignored" : null)">
+                                <th scope="row" class="task">@cell.TaskDisplayName</th>
+                                <td class="num">@Number(cell.DraftHours)</td>
+                                <td class="num">@Number(cell.ForecastHours)</td>
+                                <td class="num">@Number(cell.SentHours)</td>
+                                <td class="result">
+                                    <CellStateBadge State="DayStateLabels.Cell(cell, Plan)" />
+                                    <div class="note">@DayStateLabels.CellNote(cell, choice)</div>
+                                    @if (cell.State == CellState.Conflict)
+                                    {
+                                        <ConflictChooser Cell="cell" Capabilities="Plan.Capabilities" Value="choice" Disabled="@(Sending || Busy)"
+                                                         OnChange="r => OnChoose.InvokeAsync((cell.ForecastTaskId, r))" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <div class="dp-actions">
+            @if (Sending)
+            {
+                <button type="button" class="primary" aria-disabled="true" aria-describedby="@reasonId">
+                    <Icon Name="refresh" Small="true" Class="spin" /> Envoi en cours…
+                </button>
+                <button type="button" @onclick="OnCancel">Annuler l'envoi</button>
+            }
+            else
+            {
+                var enabled = action.Enabled && !Busy && !Loading;
+                <button type="button" class="primary" disabled="@(!enabled)" aria-describedby="@(enabled ? null : reasonId)"
+                        @onclick="() => ActAsync(action)">
+                    <Icon Name="@(action.ReadsForecast ? "refresh" : "soumettre")" Small="true" /> @action.Label
+                </button>
+                @if (!action.ReadsForecast)
+                {
+                    <button type="button" disabled="@(Busy || Loading)" @onclick="OnReplan">Relire Forecast (simulation)</button>
+                }
+            }
+        </div>
+        <p id="@reasonId" class="dp-reason">@Reason(action)</p>
+    }
+
+    <DayJournal Date="Date" Entries="Journal" />
+</section>
+
+@if (confirmSend && Plan is not null)
+{
+    <ConfirmDialog Title="Modifier Forecast ?" Subtitle="@DayStateLabels.LongDay(Date)" ConfirmLabel="Envoyer" OnConfirm="ConfirmSendAsync"
+                   OnCancel="() => confirmSend = false">
+        <p>Cet envoi touche des saisies déjà présentes dans Forecast : @DayStateLabels.Operations(Plan, Choices).</p>
+        <p>Forecast est relu juste avant l'écriture : une saisie déjà identique n'est jamais écrite de nouveau.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private readonly string titleId = $"day-panel-{Guid.NewGuid():N}";
+    private readonly string reasonId = $"day-reason-{Guid.NewGuid():N}";
+    private bool confirmSend;
+
+    [Parameter, EditorRequired] public DateOnly Date { get; set; }
+
+    /// <summary>The day's plan; null until the first read of Forecast.</summary>
+    [Parameter] public DayPlan? Plan { get; set; }
+
+    /// <summary>Forecast is being read again (the previous plan stays shown).</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    [Parameter] public string? Error { get; set; }
+
+    [Parameter] public bool Sending { get; set; }
+
+    /// <summary>Another send (of another day or of the ready days) is running.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public bool IsToday { get; set; }
+
+    [Parameter] public IReadOnlyDictionary<int, ConflictResolution> Choices { get; set; } = new Dictionary<int, ConflictResolution>();
+
+    [Parameter] public IReadOnlyList<SubmissionJournalEntry> Journal { get; set; } = [];
+
+    [Parameter] public EventCallback<(int ForecastTaskId, ConflictResolution Resolution)> OnChoose { get; set; }
+
+    [Parameter] public EventCallback OnSend { get; set; }
+
+    [Parameter] public EventCallback OnReplan { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private StateLabel DayState =>
+        Error is not null ? DayStateLabels.ReadFailed
+        : Sending ? DayStateLabels.Day(DayStatus.InProgress, true)
+        : Plan is null ? DayStateLabels.Reading
+        : DayStateLabels.Day(Plan);
+
+    private string? Reason(DayAction action) =>
+        Sending ? "L'envoi de ce jour est en cours : « Annuler l'envoi » arrête l'envoi, ce qui n'a pas été écrit le sera au rejeu."
+        : Busy ? "Un autre envoi est en cours : attendez qu'il se termine."
+        : Loading ? "Lecture de Forecast en cours : attendez le résultat."
+        : action.Reason;
+
+    private Task ActAsync(DayAction action)
+    {
+        if (!action.Enabled || Busy || Loading || Sending)
+            return Task.CompletedTask;
+        if (action.ReadsForecast)
+            return OnReplan.InvokeAsync();
+        if (action.NeedsConfirmation)
+        {
+            confirmSend = true;
+            return Task.CompletedTask;
+        }
+        return OnSend.InvokeAsync();
+    }
+
+    private Task ConfirmSendAsync()
+    {
+        confirmSend = false;
+        return OnSend.InvokeAsync();
+    }
+
+    private static string Number(decimal? hours) => hours is { } h ? h.ToString("0.##", TimesheetUi.French) : "–";
+}

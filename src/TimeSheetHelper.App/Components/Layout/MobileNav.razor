@@ -1,0 +1,47 @@
+@inject ShellState Shell
+
+@if (SubNav)
+{
+    List<NavDestination> pages = Current is null ? [] : ShortcutMap.Destinations.Where(d => d.Section == Current.Section).ToList();
+    if (pages.Count > 1)
+    {
+        <nav class="subnav" aria-label="Pages de la section">
+            <ul>
+                @foreach (var dest in pages)
+                {
+                    var current = dest == Current;
+                    <li>
+                        <a class="subnav-pill @(current ? "current" : null)" href="@dest.Route"
+                           aria-current="@(current ? "page" : null)">@dest.Label</a>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
+}
+else
+{
+    <nav class="bottom-bar" aria-label="Sections (mobile)">
+        <ul>
+            @foreach (var section in Rail.Sections)
+            {
+                var active = section.Section == Current?.Section;
+                <li>
+                    <a class="bottom-link @(active ? "active" : null)" href="@Shell.RouteFor(section.Section)"
+                       aria-current="@(active ? "true" : null)" aria-label="@section.Name">
+                        <Icon Name="@section.Icon" />
+                        <span class="bottom-lbl" aria-hidden="true">@section.Short</span>
+                    </a>
+                </li>
+            }
+        </ul>
+    </nav>
+}
+
+@code {
+    /// <summary>Destination of the current page; null outside the seven destinations.</summary>
+    [Parameter] public NavDestination? Current { get; set; }
+
+    /// <summary>true = pills of the current section's pages (under the header); false = bottom bar of the 4 sections.</summary>
+    [Parameter] public bool SubNav { get; set; }
+}

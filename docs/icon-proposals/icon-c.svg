@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Concept C — Sablier et grille de temps</title>
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#0F766E"/>
+  <path d="M15 11H49" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M15 53H49" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M18 14H46C46 25 38 29 35 32C38 35 46 39 46 50H18C18 39 26 35 29 32C26 29 18 25 18 14Z" fill="#FFFFFF"/>
+  <path d="M24 17H40C39 22 36 24 32 27C28 24 25 22 24 17Z" fill="#14B8A6"/>
+  <rect x="22" y="43" width="20" height="4" rx="1.5" fill="#F59E0B"/>
+  <rect x="26" y="39" width="12" height="4" rx="1.5" fill="#F59E0B"/>
+</svg>

@@ -1,22 +1,321 @@
 @inherits LayoutComponentBase
+@implements IAsyncDisposable
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Plugins
+@using TimeSheetHelper.App.Services
+@inject ShellState Shell
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject INavSummaryService NavSummaries
+@inject PluginHost Plugins
+@inject TimeProvider Time
 
-<nav class="app-nav">
-    <span class="brand">Time Sheet Helper</span>
-    <NavLink href="" Match="NavLinkMatch.All">Semaine</NavLink>
-    <NavLink href="jour">Jour</NavLink>
-    <NavLink href="regles">Règles</NavLink>
-    <NavLink href="taches">Tâches</NavLink>
-    <NavLink href="sources">Sources</NavLink>
-    <NavLink href="soumettre">Soumettre</NavLink>
-    <NavLink href="activite">Activité brute</NavLink>
-</nav>
+<a class="skip-link" href="@($"{relativePath}#main")" inert="@drawerOpen" @onclick="FocusMainAsync" @onclick:preventDefault>Aller au contenu</a>
 
-<main>
-    @Body
-</main>
+<div class="app-shell @(Shell.PanelOpen ? null : "no-panel")">
+    <Rail Current="current?.Section" Tracking="tracking" Theme="Shell.Theme"
+          OnToggleTracking="ToggleTrackingAsync" OnToggleTheme="ToggleThemeAsync" />
+
+    <ContextPanel @ref="panel" Current="current" RelativePath="@relativePath" Summary="summary"
+                  Drawer="drawerOpen" Inert="!Shell.PanelOpen && !drawerOpen" OnClose="CloseDrawerAsync" />
+
+    @if (drawerOpen)
+    {
+        <div class="drawer-scrim" aria-hidden="true" @onclick="() => CloseDrawerAsync(true)"></div>
+    }
+
+    <div class="app-main" inert="@drawerOpen">
+        <WeekHeader @ref="header" Current="current" Summary="summary" PanelOpen="Shell.PanelOpen" DrawerOpen="drawerOpen"
+                    Tracking="tracking" Theme="Shell.Theme" OnTogglePanel="TogglePanelAsync" OnOpenDrawer="OpenDrawerAsync"
+                    OnToggleTracking="ToggleTrackingAsync" OnToggleTheme="ToggleThemeAsync" />
+        <MobileNav Current="current" SubNav />
+        <main class="page" id="main" tabindex="-1" @ref="mainElement">
+            @Body
+        </main>
+        <MobileNav Current="current" />
+    </div>
+</div>
 
 <div id="blazor-error-ui" data-nosnippet>
     Une erreur inattendue s'est produite.
     <a href="." class="reload">Recharger</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private const string FocusTrackerId = "focus-tracker";
+    private const string TogglePauseAction = "toggle-pause";
+
+    private ContextPanel? panel;
+    private WeekHeader? header;
+    private ElementReference mainElement;
+    private IJSObjectReference? module;
+    private DotNetObjectReference<MainLayout>? selfReference;
+    private CancellationTokenSource? summaryLoad;
+
+    private string relativePath = "";
+    private NavDestination? current;
+    private NavSummary? summary;
+    private DateOnly loadedWeek;
+    private TrackingState tracking = TrackingState.Disabled;
+    private bool drawerOpen;
+    private bool focusDrawer;
+    private bool focusMenu;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UpdateLocation(Nav.Uri);
+        Shell.Changed += OnShellChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        await Task.WhenAll(LoadSummaryAsync(), LoadTrackingAsync());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await InitShellModuleAsync();
+        }
+
+        if (focusDrawer && drawerOpen && panel is not null)
+        {
+            focusDrawer = false;
+            await panel.FocusCloseButtonAsync();
+        }
+        else if (focusMenu && !drawerOpen && header is not null)
+        {
+            focusMenu = false;
+            await header.FocusMenuAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnShortcut(KeyChord chord)
+    {
+        var action = ShortcutMap.Resolve(chord);
+        switch (action.Kind)
+        {
+            case ShortcutKind.Navigate:
+                Nav.NavigateTo(action.Route ?? "");
+                break;
+            case ShortcutKind.PreviousWeek:
+                Shell.ShiftWeek(-1);
+                break;
+            case ShortcutKind.NextWeek:
+                Shell.ShiftWeek(1);
+                break;
+            case ShortcutKind.TogglePanel:
+                await InvokeAsync(TogglePanelAsync);
+                break;
+            case ShortcutKind.ToggleTheme:
+                await InvokeAsync(ToggleThemeAsync);
+                break;
+        }
+    }
+
+    private void UpdateLocation(string uri)
+    {
+        relativePath = Nav.ToBaseRelativePath(uri).Split('?', '#')[0].Trim('/');
+        current = ShortcutMap.DestinationOf(relativePath);
+        if (current is not null)
+            Shell.RememberRoute(current, relativePath);
+
+        // jour/{date}: the shell follows the week of the displayed day.
+        var segments = relativePath.Split('/');
+        if (current?.Route == "jour" && segments.Length > 1 && TimesheetUi.TryParseIsoDate(segments[1], out var day))
+            Shell.SetWeek(day);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(async () =>
+    {
+        UpdateLocation(e.Location);
+        header?.RequestTitleFocus();
+        if (drawerOpen)
+            await SetDrawerAsync(false);
+        StateHasChanged();
+        await Task.WhenAll(LoadSummaryAsync(), LoadTrackingAsync());
+        StateHasChanged();
+    });
+
+    private void OnShellChanged() => _ = InvokeAsync(async () =>
+    {
+        StateHasChanged();
+        if (Shell.WeekStart != loadedWeek)
+        {
+            await LoadSummaryAsync();
+            StateHasChanged();
+        }
+    });
+
+    private async Task LoadSummaryAsync()
+    {
+        summaryLoad?.Cancel();
+        var cts = summaryLoad = new CancellationTokenSource();
+        var week = loadedWeek = Shell.WeekStart;
+        try
+        {
+            var loaded = await NavSummaries.GetAsync(week, cts.Token);
+            if (!cts.IsCancellationRequested)
+                summary = loaded;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            // The shell must never break a page: without a summary it shows "—" and neutral steps.
+            if (!cts.IsCancellationRequested)
+                summary = null;
+        }
+    }
+
+    private async Task LoadTrackingAsync()
+    {
+        try
+        {
+            var status = await Plugins.GetStatusAsync(FocusTrackerId);
+            tracking = status is null ? TrackingState.Disabled
+                : status.Message == "En pause" ? TrackingState.Paused
+                : TrackingState.Live;
+        }
+        catch (Exception)
+        {
+            tracking = TrackingState.Disabled;
+        }
+    }
+
+    private async Task ToggleTrackingAsync()
+    {
+        try
+        {
+            await Plugins.ExecuteActionAsync(FocusTrackerId, TogglePauseAction);
+        }
+        catch (Exception)
+        {
+            // The status reload below shows the real state.
+        }
+        await LoadTrackingAsync();
+    }
+
+    private async Task TogglePanelAsync()
+    {
+        if (drawerOpen)
+        {
+            await CloseDrawerAsync(true);
+            return;
+        }
+        Shell.SetPanel(!Shell.PanelOpen);
+        await CallModuleAsync("setPanel", Shell.PanelOpen);
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        Shell.SetTheme(Shell.Theme == ShellTheme.Dark ? ShellTheme.Light : ShellTheme.Dark);
+        await CallModuleAsync("setTheme", Shell.Theme == ShellTheme.Dark ? "dark" : "light");
+    }
+
+    private async Task OpenDrawerAsync()
+    {
+        focusDrawer = true;
+        await SetDrawerAsync(true);
+    }
+
+    private async Task CloseDrawerAsync(bool returnFocus)
+    {
+        if (!drawerOpen)
+            return;
+        // The Menu button gets the focus back after the render that removes "inert" from the main column.
+        focusMenu = returnFocus;
+        await SetDrawerAsync(false);
+    }
+
+    private async Task SetDrawerAsync(bool open)
+    {
+        drawerOpen = open;
+        await CallModuleAsync("setDrawerOpen", open);
+    }
+
+    private async Task FocusMainAsync() => await mainElement.FocusAsync();
+
+    // The shell degrades to a server-only layout (no shortcuts, default prefs) when the JS module is unavailable.
+    private static bool IsInteropFailure(Exception ex) =>
+        ex is JSDisconnectedException or JSException or OperationCanceledException;
+
+    private async Task InitShellModuleAsync()
+    {
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./shell.js");
+        }
+        catch (Exception ex) when (IsInteropFailure(ex))
+        {
+            return;
+        }
+
+        try
+        {
+            var prefs = await module.InvokeAsync<ShellPrefs>("getPrefs");
+            Shell.SetTheme(prefs.Theme == "dark" ? ShellTheme.Dark : ShellTheme.Light);
+            Shell.SetPanel(prefs.Panel);
+        }
+        catch (Exception ex) when (IsInteropFailure(ex))
+        {
+        }
+
+        try
+        {
+            selfReference = DotNetObjectReference.Create(this);
+            await module.InvokeVoidAsync("init", selfReference);
+        }
+        catch (Exception ex) when (IsInteropFailure(ex))
+        {
+        }
+    }
+
+    private async Task CallModuleAsync(string identifier, object argument)
+    {
+        if (module is null)
+            return;
+        try
+        {
+            await module.InvokeVoidAsync(identifier, argument);
+        }
+        catch (Exception ex) when (IsInteropFailure(ex))
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Shell.Changed -= OnShellChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+        summaryLoad?.Cancel();
+        try
+        {
+            if (module is not null)
+            {
+                try
+                {
+                    await module.InvokeVoidAsync("dispose");
+                }
+                catch (Exception ex) when (IsInteropFailure(ex))
+                {
+                }
+
+                try
+                {
+                    await module.DisposeAsync();
+                }
+                catch (Exception ex) when (IsInteropFailure(ex))
+                {
+                }
+            }
+        }
+        finally
+        {
+            selfReference?.Dispose();
+        }
+    }
+
+    private sealed record ShellPrefs(string Theme, bool Panel);
+}

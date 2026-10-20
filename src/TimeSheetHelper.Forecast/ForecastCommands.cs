@@ -101,6 +101,8 @@ public sealed class ForecastCommands(
         ForecastToolRole.ListTasks => "Lister les tâches",
         ForecastToolRole.ListTimeEntries => "Lister les saisies de temps",
         ForecastToolRole.CreateTimeEntry => "Créer une saisie de temps",
+        ForecastToolRole.UpdateTimeEntry => "Modifier une saisie de temps",
+        ForecastToolRole.DeleteTimeEntry => "Supprimer une saisie de temps",
         _ => "Utilisateur courant",
     };
 

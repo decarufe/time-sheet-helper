@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using TimeSheetHelper.Collectors.Microsoft365;
 
@@ -61,6 +62,43 @@ public class Microsoft365CollectorTests
         Assert.Equal(2, result.EventCount);
         Assert.Single(result.Warnings);
         Assert.DoesNotContain(handler.Requests, u => Uri.UnescapeDataString(u.ToString()).Contains("19:b@thread.v2"));
+    }
+
+    [Fact]
+    public async Task Teams_reports_one_clear_message_when_every_chat_refuses_its_messages()
+    {
+        var handler = new FakeGraphHandler(Route) { Fail = uri => uri.AbsolutePath.EndsWith("/messages", StringComparison.Ordinal) ? (HttpStatusCode.Forbidden, "Forbidden") : null };
+
+        var result = await Teams(handler, new ListSink()).SyncAsync(From, To);
+
+        Assert.Equal(0, result.EventCount);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Contains("Chat.Read", warning);
+        Assert.Contains("Forbidden", warning);
+        Assert.Contains("reconnectez", warning);
+    }
+
+    [Fact]
+    public async Task Teams_keeps_the_chats_that_answer_and_names_the_code_of_the_one_that_refuses()
+    {
+        var handler = new FakeGraphHandler(Route)
+        {
+            Fail = uri => uri.AbsolutePath.Contains("19:b@thread.v2", StringComparison.Ordinal) ? (HttpStatusCode.Forbidden, "Restricted") : null,
+        };
+
+        var result = await Teams(handler, new ListSink()).SyncAsync(From, To);
+
+        Assert.Equal(2, result.EventCount);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Contains("accès refusé (Restricted)", warning);
+        Assert.DoesNotContain("Chat.Read", warning);
+    }
+
+    [Fact]
+    public void Messages_are_read_with_Chat_Read_not_ChatMessage_Read()
+    {
+        Assert.Contains("Chat.Read", GraphAuthenticator.Scopes);
+        Assert.DoesNotContain("ChatMessage.Read", GraphAuthenticator.Scopes);
     }
 
     [Fact]

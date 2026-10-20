@@ -1,51 +1,38 @@
+/* Local tokens only; the shared ones (--ok, --warn, --danger, --accent-bg...) come from app.css and follow data-theme. */
 .week {
   --under: #bc4c00;
   --over: #8250df;
   --mid-bg: rgba(212, 167, 44, 0.18);
   --low-bg: rgba(225, 111, 36, 0.24);
   --low-fg: #953800;
-  --info-bg: rgba(9, 105, 218, 0.08);
   --error-bg: rgba(207, 34, 46, 0.1);
   --error-fg: #cf222e;
   --task-l: 48%;
   max-width: 1200px;
 }
 
+:root[data-theme="dark"] .week {
+  --under: #f0883e;
+  --over: #a371f7;
+  --mid-bg: rgba(187, 128, 9, 0.2);
+  --low-bg: rgba(219, 109, 40, 0.28);
+  --low-fg: #ffa657;
+  --error-bg: rgba(248, 81, 73, 0.14);
+  --error-fg: #ff7b72;
+  --task-l: 62%;
+}
+
 @media (prefers-color-scheme: dark) {
-  .week {
+  :root:not([data-theme="light"]) .week {
     --under: #f0883e;
     --over: #a371f7;
     --mid-bg: rgba(187, 128, 9, 0.2);
     --low-bg: rgba(219, 109, 40, 0.28);
     --low-fg: #ffa657;
-    --info-bg: rgba(68, 147, 248, 0.12);
     --error-bg: rgba(248, 81, 73, 0.14);
     --error-fg: #ff7b72;
     --task-l: 62%;
   }
-}
-
-/* Toolbar */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.toolbar h1 {
-  font-size: 1.4rem;
-  margin: 0 0 0 8px;
-}
-
-.week-nav {
-  display: flex;
-  gap: 4px;
-}
-
-.spacer {
-  flex: 1;
 }
 
 button:disabled {
@@ -90,7 +77,7 @@ button.link {
 }
 
 .notice.info {
-  background: var(--info-bg);
+  background: var(--accent-bg);
 }
 
 .notice.error {
@@ -125,6 +112,7 @@ a {
 
 /* Grid */
 .grid-wrap {
+  position: relative;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -393,7 +381,7 @@ tfoot td {
 .state-badge.to-confirm {
   border-color: var(--accent);
   color: var(--accent);
-  background: var(--info-bg);
+  background: var(--accent-bg);
   font-weight: 600;
 }
 
@@ -481,7 +469,7 @@ tfoot td {
 
 .confirm {
   border-left: 4px solid var(--accent);
-  background: var(--info-bg);
+  background: var(--accent-bg);
   border-radius: 6px;
   padding: 8px 12px;
 }
@@ -512,12 +500,6 @@ tfoot td {
 }
 
 @media (max-width: 640px) {
-  .toolbar h1 {
-    font-size: 1.15rem;
-    flex-basis: 100%;
-    margin-left: 0;
-  }
-
   .task-col {
     min-width: 160px;
   }
