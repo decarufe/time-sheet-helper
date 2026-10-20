@@ -23,6 +23,14 @@ public sealed class TimesheetUiTests
         Assert.Equal(expected, TimesheetUi.IsRemoved(Slot(kind)));
 
     [Fact]
+    public void Meeting_group_keys_propose_the_meeting_title_as_new_task_name()
+    {
+        Assert.Equal("daily standup", TimesheetUi.MeetingTitle("meeting:daily standup"));
+        Assert.Null(TimesheetUi.MeetingTitle("repo:contoso/api"));
+        Assert.Null(TimesheetUi.MeetingTitle(null));
+    }
+
+    [Fact]
     public void Consecutive_slots_have_no_gap_even_when_a_removed_slot_is_hidden_between_them()
     {
         Assert.True(TimesheetUi.AreConsecutive([Fx.Mon(9), Fx.Mon(9, 15), Fx.Mon(9, 30)]));

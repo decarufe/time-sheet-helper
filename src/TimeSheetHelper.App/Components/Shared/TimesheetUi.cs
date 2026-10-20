@@ -85,6 +85,10 @@ public static class TimesheetUi
     public static string GroupLabel(string key) =>
         GroupKey.TryParse(key, out var parsed) ? $"{GroupKindLabel(parsed.Kind)} : {parsed.Value}" : key;
 
+    /// <summary>Title of the meeting for a meeting group key, otherwise null (used to propose a new task name).</summary>
+    public static string? MeetingTitle(string? key) =>
+        key is not null && GroupKey.TryParse(key, out var parsed) && parsed.Kind == GroupKind.Meeting ? parsed.Value : null;
+
     public static string SlotKindLabel(SlotKind kind) => kind switch
     {
         SlotKind.Activity => "Activité",

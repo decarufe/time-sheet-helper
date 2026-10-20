@@ -323,6 +323,7 @@
     <TaskPicker Title="Associer à une tâche"
                 Subtitle="@TimesheetUi.GroupLabel(pickerGroupKey)"
                 SelectedTaskId="@SuggestedTaskId(pickerGroupKey)"
+                SuggestedTaskName="@TimesheetUi.MeetingTitle(pickerGroupKey)"
                 OnSelected="OnGroupTaskPickedAsync"
                 OnCancel="() => pickerGroupKey = null" />
 }

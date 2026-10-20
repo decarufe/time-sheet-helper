@@ -47,7 +47,7 @@
     }
     else if (creating)
     {
-        <NewTaskForm InitialTaskName="@query" OnCreated="SelectAsync" OnCancel="() => creating = false" />
+        <NewTaskForm InitialTaskName="@NewTaskName" OnCreated="SelectAsync" OnCancel="() => creating = false" />
     }
 
     else
@@ -140,7 +140,7 @@
         }
     </div>
     <button type="button" class="new-task-button" @onclick="() => creating = true">
-        + Nouvelle tâche@(query.Trim().Length > 0 ? $" « {query.Trim()} »" : "")
+        + Nouvelle tâche@(NewTaskName.Length > 0 ? $" « {NewTaskName} »" : "")
     </button>
     }
 </div>
@@ -168,6 +168,11 @@
 
     /// <summary>Ask for a comment (with the latest comments of the task as suggestions) after the task is chosen.</summary>
     [Parameter] public bool AllowComment { get; set; }
+
+    /// <summary>Name proposed for a new task when nothing was typed in the search box (e.g. the title of the meeting being assigned).</summary>
+    [Parameter] public string? SuggestedTaskName { get; set; }
+
+    private string NewTaskName => query.Trim().Length > 0 ? query.Trim() : SuggestedTaskName?.Trim() ?? "";
 
     [Parameter] public string SubmitLabel { get; set; } = "Assigner";
 

@@ -273,6 +273,7 @@
     <TaskPicker Title="@(picker == PickerMode.Assign ? "Assigner les créneaux à…" : "Créer une règle vers…")"
                 Subtitle="@SelectionDescription()"
                 SelectedTaskId="@SelectionTaskId()"
+                SuggestedTaskName="@SelectionSuggestedName()"
                 AllowComment="@(picker == PickerMode.Assign)"
                 @bind-Comment="assignComment"
                 OnSelected="OnTaskPickedAsync"
@@ -568,6 +569,19 @@
     {
         var ids = SelectedSlots().Where(s => s.TaskId is not null).Select(s => s.TaskId).Distinct().ToList();
         return ids.Count == 1 ? ids[0] : null;
+    }
+
+    /// <summary>Text already shown in the list for the selection (the slots' comment, else the meeting title): proposed as the name of a new task.</summary>
+    private string? SelectionSuggestedName()
+    {
+        var notes = SelectedSlots()
+            .Where(s => !string.IsNullOrWhiteSpace(s.Notes))
+            .Select(s => s.Notes!.Trim())
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (notes.Count == 1)
+            return notes[0];
+        return notes.Count == 0 ? TimesheetUi.MeetingTitle(SelectionGroupKey()) : null;
     }
 
     private string SelectionDescription()

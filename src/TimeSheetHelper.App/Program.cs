@@ -47,6 +47,7 @@ builder.Services.AddSingleton(sp => new SyncScheduler(
     sp.GetRequiredService<ILogger<SyncScheduler>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncScheduler>());
 builder.Services.AddSingleton<ForecastRunner>();
+builder.Services.AddHostedService<ForecastRefresher>();
 builder.Services.Configure<UpdateOptions>(builder.Configuration.GetSection(UpdateOptions.SectionName));
 builder.Services.AddSingleton(sp => new UpdateService(
     new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
