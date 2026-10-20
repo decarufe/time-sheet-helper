@@ -121,7 +121,7 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
           PRERELEASE: ${{ steps.ver.outputs.prerelease }}
         run: |
-          $flags = if ($env:PRERELEASE -eq 'true') { @('--prerelease') } else { @('--latest') }
+          $flags = @(if ($env:PRERELEASE -eq 'true') { '--prerelease' } else { '--latest' })
           gh release create $env:TAG `
             (Get-ChildItem artifacts/* -Include *.msi, *.zip).FullName artifacts/SHA256SUMS.txt `
             --target $env:GITHUB_SHA `
