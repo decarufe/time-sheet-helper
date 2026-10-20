@@ -500,3 +500,5 @@ appsettings.Local.json
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
 .squad/_upstream_repos/
+
+!scripts/release
