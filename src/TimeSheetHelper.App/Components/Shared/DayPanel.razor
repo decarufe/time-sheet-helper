@@ -28,6 +28,16 @@
         {
             <p class="dp-help">@help</p>
         }
+        @if (Plan.LockingEntries.Count > 0)
+        {
+            <p class="dp-help">Saisies Forecast qui verrouillent ce jour :</p>
+            <ul class="dp-locks">
+                @foreach (var locking in Plan.LockingEntries)
+                {
+                    <li>@DayStateLabels.LockingEntry(locking)</li>
+                }
+            </ul>
+        }
         @if (!Plan.ForecastReadComplete)
         {
             <p class="alert warn">La lecture de Forecast est incomplète : rien ne sera écrit avant une lecture complète.</p>

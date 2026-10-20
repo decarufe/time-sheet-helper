@@ -183,6 +183,15 @@ public sealed class DayPlannerTests
 
         Assert.All(plan.Cells, c => Assert.Equal((CellState.Locked, CellOperation.None), (c.State, c.Operation)));
         Assert.Equal((DayGate.Locked, DayStatus.Locked), (plan.Gate, plan.Status));
+        Assert.Equal(["e1"], plan.LockingEntries.Select(e => e.EntryId));
+    }
+
+    [Fact]
+    public void A_day_that_is_not_locked_names_no_locking_entry()
+    {
+        var plan = Plan([Draft(1, 4m)], Read(Remote("T1001", 3m, "e1", approval: "SUBMITTED")));
+
+        Assert.Empty(plan.LockingEntries);
     }
 
     [Fact]

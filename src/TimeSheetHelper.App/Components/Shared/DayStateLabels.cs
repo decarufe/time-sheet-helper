@@ -93,6 +93,14 @@ public static class DayStateLabels
         return Day(plan.Status, withHours.Count > 0);
     }
 
+    /// <summary>One line naming a Forecast registration that locks a day: its project, hours and why (approved or invoiced).</summary>
+    public static string LockingEntry(ForecastRemoteEntry entry)
+    {
+        var why = entry.Invoiced && entry.IsApproved ? "approuvée et facturée" : entry.Invoiced ? "facturée" : "approuvée";
+        var project = string.IsNullOrWhiteSpace(entry.ProjectName) ? "Projet inconnu" : entry.ProjectName;
+        return $"{project} — {entry.Hours.ToString("0.##", TimesheetUi.French)} h — {why}";
+    }
+
     /// <summary>Help line of a status, when the label needs one.</summary>
     public static string? DayHelp(DayStatus status) => status switch
     {

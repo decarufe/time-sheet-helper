@@ -45,9 +45,8 @@ public sealed class GapBoard
         Ignored = ignored;
         this.flat = flat;
         OpenBlockingCount = open.Count(g => g.Severity == SubmissionGapSeverity.Blocking);
-        OpenToVerify = open.Where(g => g.Severity == SubmissionGapSeverity.ToVerify).ToList();
+        OpenToVerifyCount = open.Count(g => g.Severity == SubmissionGapSeverity.ToVerify);
         OpenInfoCount = open.Count(g => g.Severity == SubmissionGapSeverity.Info);
-        FirstBlocking = open.FirstOrDefault(g => g.Severity == SubmissionGapSeverity.Blocking);
     }
 
     /// <summary>The open gaps that match the filter; empty sections are left out.</summary>
@@ -59,10 +58,7 @@ public sealed class GapBoard
     /// <summary>Open gaps (ignored ones excluded) before the filter, per severity.</summary>
     public int OpenBlockingCount { get; }
 
-    public int OpenToVerifyCount => OpenToVerify.Count;
-
-    /// <summary>Open gaps to verify (ignored ones excluded), whatever the filter: the fill confirmation lists them.</summary>
-    public IReadOnlyList<SubmissionGap> OpenToVerify { get; }
+    public int OpenToVerifyCount { get; }
 
     public int OpenInfoCount { get; }
 
@@ -71,22 +67,10 @@ public sealed class GapBoard
     /// <summary>The open gaps that match the filter, in display order.</summary>
     public IReadOnlyList<SubmissionGap> Visible => flat;
 
-    /// <summary>
-    /// Whether a gap concerns the days checked for the simulation and the fill. <paramref name="days"/> null: every day. A gap without a
-    /// day concerns the whole week (auth, global error...): it is never left out.
-    /// </summary>
-    public static bool InScope(SubmissionGap gap, IReadOnlyCollection<DateOnly>? days) =>
-        days is null || GapFilter.DayOf(gap) is not { } day || days.Contains(day);
-
-    /// <param name="days">
-    /// The days checked to simulate and fill (null: all). Gaps of the other days are out of the board altogether, counts included: they
-    /// cannot block a fill that never touches those days.
-    /// </param>
-    public static GapBoard Build(
-        IEnumerable<SubmissionGap> gaps, SessionGapState session, GapFilter? filter = null, IReadOnlyCollection<DateOnly>? days = null)
+    public static GapBoard Build(IEnumerable<SubmissionGap> gaps, SessionGapState session, GapFilter? filter = null)
     {
         filter ??= GapFilter.None;
-        var all = gaps.Where(g => InScope(g, days)).ToList();
+        var all = gaps.ToList();
         var open = all.Where(g => !session.IsIgnored(g)).ToList();
         var visible = open.Where(filter.Matches).ToList();
 
@@ -137,21 +121,5 @@ public sealed class GapBoard
 
     public SubmissionGap? Find(string id) => flat.FirstOrDefault(g => g.Id == id) ?? Ignored.FirstOrDefault(g => g.Id == id);
 
-    /// <summary>The first open blocking gap, whatever the filter (the status bar links to it).</summary>
-    public SubmissionGap? FirstBlocking { get; }
-
     private static DateOnly FilterDay(SubmissionGap gap) => GapFilter.DayOf(gap) ?? DateOnly.MaxValue;
-
-    /// <summary>The cells of a report that no gap talks about: ready, or already in Forecast.</summary>
-    public static IReadOnlyList<ForecastCellResult> CellsWithoutGap(ForecastFillReport? report, IEnumerable<SubmissionGap> gaps)
-    {
-        if (report is null)
-            return [];
-        var withGap = gaps
-            .Where(g => g.Cell is not null)
-            .SelectMany(g => g.RelatedCells.Prepend(g.Cell!))
-            .Select(c => (c.ForecastTaskId, c.Date))
-            .ToHashSet();
-        return report.Cells.Where(c => !withGap.Contains((c.ForecastTaskId, c.Date)) && SubmissionGapService.HasNothingToReport(c)).ToList();
-    }
 }

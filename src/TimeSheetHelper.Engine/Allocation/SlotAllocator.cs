@@ -120,6 +120,13 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
 
         bool IsIgnored(int? taskId) => taskId is { } id && ignoredTaskIds?.Contains(id) == true;
 
+        // The title of the calendar meeting is the comment unless the user wrote one.
+        string? MeetingTitle(Candidate? only = null) => meetings
+            .Where(m => only is null || m.Candidate == only)
+            .OrderByDescending(m => m.Window.Clip(slot).Length)
+            .Select(m => m.Activity.Subject?.Trim())
+            .FirstOrDefault(s => !string.IsNullOrEmpty(s));
+
         if (slotOverride is not null)
         {
             if (IsIgnored(slotOverride.ForecastTaskId))
@@ -128,7 +135,8 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
 
             return slotOverride.ForecastTaskId is { } taskId
                 ? new SlotAssignment(slot.Start, SlotKind.Override, taskId, null, 1.0,
-                    ranked.Where(c => c.TaskId != taskId).ToList(), evidenceIds, covered, slotOverride.Notes)
+                    ranked.Where(c => c.TaskId != taskId).ToList(), evidenceIds, covered,
+                    string.IsNullOrWhiteSpace(slotOverride.Notes) ? MeetingTitle() : slotOverride.Notes)
                 : new SlotAssignment(slot.Start, SlotKind.ExcludedByOverride, null, null, 1.0, ranked, evidenceIds, covered);
         }
 
@@ -145,7 +153,8 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
         var winnerKey = new Candidate(winner.TaskId, winner.GroupKey);
         var kind = meetingWeights.GetValueOrDefault(winnerKey) > 0 ? SlotKind.Meeting : SlotKind.Activity;
 
-        return new SlotAssignment(slot.Start, kind, winner.TaskId, winner.GroupKey, winner.Share, ranked.Skip(1).ToList(), evidenceIds, covered);
+        return new SlotAssignment(slot.Start, kind, winner.TaskId, winner.GroupKey, winner.Share, ranked.Skip(1).ToList(), evidenceIds, covered,
+            kind == SlotKind.Meeting ? MeetingTitle(winnerKey) : null);
     }
 
     private static DateTime LocalMidnightUtc(DateOnly day, TimeZoneInfo tz)

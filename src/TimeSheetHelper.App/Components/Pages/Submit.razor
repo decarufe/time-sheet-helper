@@ -12,20 +12,16 @@
 @using TimeSheetHelper.Forecast.Submission
 @using TimeSheetHelper.Storage
 @inject WeekService Weeks
-@inject ForecastTimesheetWriter Writer
 @inject ForecastRunner ForecastOps
 @inject ForecastTaskLinker Linker
 @inject ForecastTaskReader TaskReader
 @inject ForecastTaskCatalog Catalog
-@inject SubmissionTaskChoices TaskChoices
 @inject SubmissionReviewService Review
-@inject GroupAssignmentService Assignments
 @inject IDbContextFactory<TimeSheetDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject ShellState Shell
 @inject INavSummaryService NavSummaries
 @inject IDaySubmissionService DaySubmissions
-@inject DayLock DayLocks
 @inject ILogger<Submit> Logger
 
 <PageTitle>Soumettre — Time Sheet Helper</PageTitle>
@@ -37,10 +33,9 @@
     <details class="notice">
         <summary>Comment ça marche</summary>
         <p>
-            La simulation interroge Forecast par son serveur MCP : elle vérifie que chaque tâche est trouvée et indique ce qui serait saisi, sans rien enregistrer.
-            La saisie crée ensuite les entrées de temps dans votre feuille Forecast, puis relit celles de la semaine pour vérifier.
+            L'envoi crée les entrées de temps du jour dans votre feuille Forecast, puis relit celles du jour pour vérifier.
             Une cellule qui contient déjà d'autres heures n'est jamais modifiée : elle est signalée comme écart.
-            Les écarts se règlent ici ; après une correction, la simulation se relance seule.
+            Les écarts se règlent ici.
         </p>
         <p>
             <strong>L'envoi pour approbation n'est pas automatisé :</strong> une fois les heures vérifiées, ouvrez Forecast
@@ -60,13 +55,13 @@
             <p class="alert error" role="alert">@dayAlert</p>
         }
         <DayStrip Days="DayCards" Selected="selectedDay" OnSelect="SelectDayAsync" />
-        <SendReadyBar Days="StripDays" Plans="dayPlans" Errors="dayErrors" Busy="@(dayReading.Count > 0 || sendingDay is not null || fillOp.Busy)"
+        <SendReadyBar Days="StripDays" Plans="dayPlans" Errors="dayErrors" Busy="@(dayReading.Count > 0 || sendingDay is not null)"
                       Sending="sendingReady" OnPrepare="PrepareReadyAsync" OnSend="SendReadyDaysAsync" />
         @if (selectedDay is { } shownDay)
         {
             <DayPanel Date="shownDay" Plan="@(dayPlans.GetValueOrDefault(shownDay))" Loading="dayReading.Contains(shownDay)"
                       Error="@(dayErrors.GetValueOrDefault(shownDay))" Sending="sendingDay == shownDay"
-                      Busy="@(sendingReady || fillOp.Busy || (sendingDay is not null && sendingDay != shownDay))" IsToday="shownDay == Today"
+                      Busy="@(sendingReady || (sendingDay is not null && sendingDay != shownDay))" IsToday="shownDay == Today"
                       Choices="ChoicesOf(shownDay)" Journal="dayJournal" OnChoose="c => Choose(shownDay, c.ForecastTaskId, c.Resolution)"
                       OnSend="() => SendDayAsync(shownDay)" OnReplan="() => ReplanDayAsync(shownDay)" OnCancel="() => CancelDayAsync(shownDay)" />
         }
@@ -83,233 +78,7 @@
     }
     else
     {
-        var status = BuildStatus();
-
-        <SubmissionStatusBar @ref="statusBar" Status="status" Updating="Updating" Busy="AnyBusy" HasSimulation="simulation is not null" HasSelection="selectedDays.Count > 0"
-                             ShowActions="draft.SubmittedUtc is null && grid.Rows.Count > 0" OnSimulate="() => SimulateAsync()"
-                             OnFill="AskFill" OnGoToGap="GoToGap" FillButtonLabel="@SubmitDialogs.FillButtonLabel(selectedDays, monday)" />
-
-        <OpStatus State="@simulationOp" />
-        <OpStatus State="@fillOp" />
         <OpStatus State="@actionOp" />
-
-        <section class="draft" aria-labelledby="draft-title" aria-busy="@(draftRefreshing ? "true" : null)">
-            <div class="section-head">
-                <h2 id="draft-title">Brouillon — @TimesheetUi.HoursLabel(grid.GrandTotal)</h2>
-                <div class="head-actions">
-                    @if (draft.SubmittedUtc is null)
-                    {
-                        <button type="button" disabled="@AnyBusy" @onclick="LoadAsync">Recalculer</button>
-                    }
-                    <a href="@GapActionPlanner.WeekHref(monday)">Corriger dans la vue Semaine</a>
-                </div>
-            </div>
-            @if (draft.SubmittedUtc is null && grid.Rows.Count > 0)
-            {
-                <p class="muted day-selection" role="status">
-                    @if (selectedDays.Count == 0)
-                    {
-                        <text>Aucune journée cochée : cochez les jours à simuler et à saisir.</text>
-                    }
-                    else
-                    {
-                        <text>Simulation et saisie pour @SubmitDialogs.DaysLabel(selectedDays, monday).</text>
-                    }
-                    @if (!IsWholeWeek)
-                    {
-                        <button type="button" class="link" disabled="@AnyBusy" @onclick="SelectWholeWeek">Sélectionner toute la semaine</button>
-                    }
-                </p>
-            }
-            @if (draft.SubmittedUtc is null && grid.HasIgnored)
-            {
-                <p class="muted ignored-summary" role="status">
-                    @TimesheetUi.HoursLabel(grid.IgnoredTotal) de tâches ignorées ne seront pas envoyées à Forecast
-                    (elles restent comptées dans le brouillon et l'objectif) :
-                    @string.Join(", ", grid.Rows.Where(r => r.Ignored).Select(r => r.Name)).
-                </p>
-            }
-            @if (draft.SubmittedUtc is null && choices.Count > 0)
-            {
-                <p class="muted">
-                    @(choices.Count == 1 ? "1 choix mémorisé" : $"{choices.Count} choix mémorisés") pour cette semaine.
-                    <button type="button" class="link" disabled="@AnyBusy" @onclick="ResetChoicesAsync">Réinitialiser les choix de la semaine</button>
-                </p>
-            }
-            @if (draftRefreshing)
-            {
-                <p class="muted" role="status">Mise à jour du brouillon…</p>
-            }
-
-            @if (draft.SubmittedUtc is { } submittedUtc)
-            {
-                <p class="alert success">
-                    Semaine saisie dans Forecast le @UiLabels.LocalDateTime(submittedUtc) : le brouillon n'est plus recalculé.
-                    <button type="button" @onclick="ReopenAsync" disabled="@AnyBusy">Rouvrir le brouillon</button>
-                </p>
-            }
-
-            @if (grid.Rows.Count == 0 && !grid.HasUnclassified)
-            {
-                <p class="muted empty">Aucune heure classée dans ce brouillon. Attribuez les activités à des tâches dans la vue Semaine.</p>
-            }
-            else
-            {
-                <div class="@TableWrapClass">
-                    <table class="grid">
-                        <caption class="visually-hidden">Brouillon de la semaine, en heures : tâches classées, travail non classé et objectif</caption>
-                        <thead>
-                            <tr>
-                                <th scope="col">Tâche</th>
-                                @foreach (var day in grid.Days)
-                                {
-                                    <th scope="col" class="num day-col">
-                                        @if (draft.SubmittedUtc is null)
-                                        {
-                                            <label class="day-toggle">
-                                                <input type="checkbox" checked="@selectedDays.Contains(day)" disabled="@AnyBusy"
-                                                       aria-label="@($"Inclure {UiLabels.Day(day)} dans la simulation et la saisie")"
-                                                       @onchange="e => ToggleDay(day, e.Value is bool v && v)" />
-                                                @UiLabels.Day(day)
-                                            </label>
-                                        }
-                                        else
-                                        {
-                                            @UiLabels.Day(day)
-                                        }
-                                    </th>
-                                }
-                                <th scope="col" class="num">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in grid.Rows)
-                            {
-                                <tr class="@(row.Ignored ? "ignored-row" : null)">
-                                    <th scope="row" class="task-name" style="@TimesheetUi.TaskStyle(row.TaskId)">
-                                        @row.Name
-                                        @if (row.Ignored)
-                                        {
-                                            <span class="badge ignored-badge">@(row.Automatic ? "Exclue de la soumission" : "Ignorée")</span>
-                                        }
-                                        @if (draft.SubmittedUtc is null)
-                                        {
-                                            <label class="task-ignore">
-                                                <input type="checkbox" checked="@row.Ignored" disabled="@AnyBusy"
-                                                       @onchange="e => SetTaskIgnoredAsync(row.TaskId, e.Value is bool v && v)" />
-                                                Ne pas envoyer
-                                            </label>
-                                            @if (row.Flagged && !row.Ignored)
-                                            {
-                                                <span class="muted note">exclue par défaut (non saisissable via MCP), incluse pour cette semaine</span>
-                                            }
-                                            else if (row.Automatic)
-                                            {
-                                                <span class="muted note">exclue automatiquement (non saisissable via MCP) : décochez pour l'inclure pour cette semaine</span>
-                                            }
-                                        }
-                                    </th>
-                                    @foreach (var day in grid.Days)
-                                    {
-                                        var hours = row.Hours.GetValueOrDefault(day);
-                                        var gapRef = grid.GapOf(row.TaskId, day);
-                                        if (gapRef is not null && hours > 0)
-                                        {
-                                            <td class="num cell-gap @GapLabels.SeverityClass(gapRef.Severity)">
-                                                <button type="button" class="cell-btn" aria-describedby="@GapLabels.DomId(gapRef.GapId)" @onclick="() => GoToGap(gapRef.GapId)"
-                                                        aria-label="@($"{row.Name}, {UiLabels.Day(day)} : {TimesheetUi.HoursLabel(hours)}. {GapLabels.Severity(gapRef.Severity)} : {gapRef.Title}. Aller à l'écart.")">
-                                                    <span aria-hidden="true">@GapLabels.SeveritySymbol(gapRef.Severity)</span> @TimesheetUi.Hours(hours)
-                                                </button>
-                                            </td>
-                                        }
-                                        else
-                                        {
-                                            <td class="@NumClass(hours)">@HoursCell(hours)</td>
-                                        }
-                                    }
-                                    <td class="num total">@TimesheetUi.Hours(row.Total)</td>
-                                </tr>
-                            }
-                            @if (grid.HasUnclassified)
-                            {
-                                <tr class="readonly">
-                                    <th scope="row">
-                                        Non classé
-                                        <span class="muted note">hors total</span>
-                                        @if (draft.SubmittedUtc is null)
-                                        {
-                                            <a class="inline-link" href="@GapActionPlanner.WeekHref(monday, unclassified: true)">Classer dans la vue Semaine</a>
-                                        }
-                                    </th>
-                                    @foreach (var day in grid.Days)
-                                    {
-                                        var hours = grid.Unclassified.GetValueOrDefault(day);
-                                        <td class="@NumClass(hours)">@HoursCell(hours)</td>
-                                    }
-                                    <td class="num total">@TimesheetUi.Hours(grid.UnclassifiedTotal)</td>
-                                </tr>
-                            }
-                            @if (grid.HasNonProject)
-                            {
-                                <tr class="readonly">
-                                    <th scope="row">
-                                        Temps sans projet dans Forecast
-                                        <span class="muted note">exclu du total et de la saisie</span>
-                                    </th>
-                                    @foreach (var day in grid.Days)
-                                    {
-                                        var hours = grid.NonProject.GetValueOrDefault(day);
-                                        <td class="@NumClass(hours)">@HoursCell(hours)</td>
-                                    }
-                                    <td class="num total">@TimesheetUi.Hours(grid.NonProjectTotal)</td>
-                                </tr>
-                            }
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <th scope="row">Total classé</th>
-                                @foreach (var day in grid.Days)
-                                {
-                                    var flag = grid.FlagOf(day);
-                                    <th class="num @DayFlagClass(flag)">
-                                        @TimesheetUi.Hours(grid.DayTotals.GetValueOrDefault(day))
-                                        @if (flag is ObjectiveFlag.Below or ObjectiveFlag.Above)
-                                        {
-                                            <span aria-hidden="true">@(flag == ObjectiveFlag.Below ? "▼" : "▲")</span>
-                                            <span class="visually-hidden">@(flag == ObjectiveFlag.Below ? "sous l'objectif" : "au-dessus de l'objectif")</span>
-                                        }
-                                    </th>
-                                }
-                                <th class="num">@TimesheetUi.Hours(grid.GrandTotal)</th>
-                            </tr>
-                            @if (grid.HasIgnored)
-                            {
-                                <tr class="readonly ignored-total">
-                                    <th scope="row">Dont heures non envoyées <span class="muted note">tâches ignorées</span></th>
-                                    @foreach (var day in grid.Days)
-                                    {
-                                        var hours = grid.IgnoredHours(day);
-                                        <td class="@NumClass(hours)">@HoursCell(hours)</td>
-                                    }
-                                    <td class="num total">@TimesheetUi.Hours(grid.IgnoredTotal)</td>
-                                </tr>
-                            }
-                            @if (grid.Targets is { } targets)
-                            {
-                                <tr class="readonly">
-                                    <th scope="row">Objectif <span class="muted note">lecture seule</span></th>
-                                    @foreach (var day in grid.Days)
-                                    {
-                                        <td class="num">@TimesheetUi.Hours(targets.GetValueOrDefault(day))</td>
-                                    }
-                                    <td class="num total">@TimesheetUi.Hours(grid.TargetTotal ?? 0)</td>
-                                </tr>
-                            }
-                        </tfoot>
-                    </table>
-                </div>
-            }
-        </section>
 
         @if (analysisError is not null)
         {
@@ -318,8 +87,8 @@
 
         <GapList @ref="gapList" Board="board" Filter="filter" FilterChanged="OnFilterChanged"
                  ActionsFor="ActionsFor" OpenPanelFor="OpenPanelFor" Busy="AnyBusy" Updating="Updating"
-                 Analyzing="@(analysis is null && analyzing)" HasSimulation="simulation is not null" Resolved="session.Resolved"
-                 CleanCells="cleanCells" OnAction="OnGapActionAsync" OnRestore="Restore">
+                 Analyzing="@(analysis is null && analyzing)" Resolved="session.Resolved"
+                 OnAction="OnGapActionAsync" OnRestore="Restore">
             <Panel Context="gap">
                 @if (panel is { } open && open.GapId == gap.Id && gap.Cell is { } cell)
                 {
@@ -340,16 +109,6 @@
     }
 </div>
 
-@if (confirmFill && draft is not null)
-{
-    <ConfirmDialog Title="@SubmitDialogs.FillTitle(selectedDays, monday)" ConfirmLabel="Oui, saisir les heures" OnConfirm="FillAsync" OnCancel="CancelFill">
-        @foreach (var paragraph in FillParagraphs())
-        {
-            <p>@paragraph</p>
-        }
-    </ConfirmDialog>
-}
-
 @if (pendingMerge is { } merge)
 {
     <ConfirmDialog Title="@SubmitDialogs.MergeTitle(merge.Impact)" Message="@SubmitDialogs.MergeMessage(merge.Impact)" ConfirmLabel="Fusionner et supprimer la tâche locale"
@@ -357,8 +116,6 @@
 }
 
 @code {
-    private const int AutoRunDelayMs = 1500;
-
     private sealed record OpenPanel(string GapId, SubmissionGapResolution Resolution);
 
     private sealed record PendingMerge(int LocalTaskId, ForecastRemoteTask Remote, SubmitDialogs.MergeImpact Impact);
@@ -373,52 +130,22 @@
     private TimesheetDraft? draft;
     private Dictionary<int, ForecastTask> tasks = [];
 
-    private ForecastFillReport? simulation;
-    private string? simulationFingerprint;
-    private DateTime? simulationUtc;
-    private ForecastFillReport? fill;
-    private OpState simulationOp = OpState.Idle;
-    private OpState fillOp = OpState.Idle;
     private OpState actionOp = OpState.Idle;
     private bool actionBusy;
-    private bool confirmFill;
-    private PendingAssignments pendingAssignments = PendingAssignments.None;
-    private bool restoreFillFocus;
 
     private SubmissionAnalysis? analysis;
     private SubmissionGap? failureGap;
     private string? analysisError;
     private bool analyzing;
-    private bool analysisStale;
 
     private readonly SessionGapState session = new();
-    private readonly AnalysisSequencer simulations = new();
     private readonly AnalysisSequencer analyses = new();
-    private readonly SemaphoreSlim simulationGate = new(1, 1);
-    private DebouncedAction debounce = default!;
     private ShellWeekSync weekSync = default!;
     private bool disposed;
 
     private GapFilter filter = GapFilter.None;
     private GapBoard board = GapBoard.Build([], new SessionGapState());
-    private DraftGrid grid = DraftGrid.Build(new TimesheetDraft(), new Dictionary<int, ForecastTask>(), default, null);
-    private IReadOnlyList<ForecastCellResult> cleanCells = [];
     private GapActionContext actionContext = new(default, _ => true);
-
-    /// <summary>Days of the displayed week to simulate and fill; other days are left untouched. Empty = nothing to simulate or fill (never the whole week).</summary>
-    private HashSet<DateOnly> selectedDays = [];
-
-    /// <summary>The days the current simulation was made for.</summary>
-    private HashSet<DateOnly> simulatedDays = [];
-
-    /// <summary>The user's remembered choice per task for the displayed week (true = left out, false = put back in); no entry = follow the task's flag.</summary>
-    private Dictionary<int, bool> choices = [];
-
-    /// <summary>The tasks the current simulation left out.</summary>
-    private HashSet<int> simulatedIgnored = [];
-
-    /// <summary>The tasks whose hours are not sent: the flagged ones, as the user's choices for the week amend them.</summary>
-    private IReadOnlySet<int> EffectiveIgnored => SubmissionTaskScope.Effective(tasks.Values, choices);
 
     private OpenPanel? panel;
     private PendingMerge? pendingMerge;
@@ -427,11 +154,10 @@
     private string? pendingFocus;
     private bool hasPendingFocus;
     private GapList? gapList;
-    private SubmissionStatusBar? statusBar;
 
-    private bool AnyBusy => simulationOp.Busy || fillOp.Busy || actionBusy || DayBusy;
+    private bool AnyBusy => actionBusy || DayBusy;
 
-    /// <summary>A send per day (one day or the ready days) or a re-read of Forecast runs: the weekly fill must not write at the same time.</summary>
+    /// <summary>A send per day (one day or the ready days) or a re-read of Forecast runs.</summary>
     private bool DayBusy => sendingDay is not null || sendingReady || dayReading.Count > 0;
 
     private NavSummary? daySummary;
@@ -448,24 +174,10 @@
     private CancellationTokenSource daysCts = new();
 
     /// <summary>The data on screen is being replaced: the cards are greyed until the new analysis lands (the screen is never emptied).</summary>
-    private bool Updating => draftRefreshing || analyzing || analysisStale || simulationOp.Busy;
+    private bool Updating => draftRefreshing || analyzing;
 
-    private ForecastFillReport? Report => fill ?? simulation;
-
-    private bool SimulationFresh =>
-        simulation is not null && draft is not null && simulationFingerprint == FillGuard.Fingerprint(draft) && simulatedDays.SetEquals(selectedDays)
-        && simulatedIgnored.SetEquals(EffectiveIgnored);
-
-    private string TableWrapClass => draftRefreshing ? "table-wrap updating" : "table-wrap";
-
-    protected override void OnInitialized()
-    {
-        debounce = new DebouncedAction(
-            TimeSpan.FromMilliseconds(AutoRunDelayMs),
-            ct => InvokeAsync(() => SimulateAsync(auto: true, ct)),
-            ex => Logger.LogWarning("Automatic re-simulation failed ({ExceptionType}).", ex.GetType().Name));
+    protected override void OnInitialized() =>
         weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() => OnShellWeekRequested(week)));
-    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -474,9 +186,6 @@
             ? UiLabels.MondayOf(day)
             : Shell.WeekStart;
         weekSync.Show(monday);
-
-        // Days of another week never stay selected, whatever happens to the load below.
-        selectedDays = DaySelection.Prune(selectedDays, monday);
 
         // Rebuilding the draft may call the classifier: only once, in the interactive render (not the prerender).
         if (!RendererInfo.IsInteractive || loadedWeek == monday)
@@ -487,7 +196,7 @@
             await LoadDaysAsync();
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnAfterRender(bool firstRender)
     {
         if (hasPendingFocus && gapList is not null)
         {
@@ -495,12 +204,6 @@
             hasPendingFocus = false;
             pendingFocus = null;
             gapList.RequestFocus(target);
-        }
-
-        if (restoreFillFocus && statusBar is not null)
-        {
-            restoreFillFocus = false;
-            await statusBar.FocusFillAsync();
         }
     }
 
@@ -510,8 +213,6 @@
         daysCts.Cancel();
         daysCts.Dispose();
         weekSync?.Dispose();
-        debounce.Dispose();
-        simulations.Dispose();
         analyses.Dispose();
     }
 
@@ -675,7 +376,7 @@
     private async Task SendDayAsync(DateOnly day)
     {
         // One send at a time: a second click while a send runs does nothing.
-        if (sendingDay is not null || sendingReady || fillOp.Busy || !dayPlans.ContainsKey(day))
+        if (sendingDay is not null || sendingReady || !dayPlans.ContainsKey(day))
             return;
         var week = monday;
         sendingDay = day;
@@ -740,7 +441,7 @@
 
     private async Task SendReadyDaysAsync()
     {
-        if (sendingDay is not null || sendingReady || fillOp.Busy)
+        if (sendingDay is not null || sendingReady)
             return;
         var week = monday;
         sendingReady = true;
@@ -807,119 +508,22 @@
             GoToWeek(week);
     }
 
-    /// <summary>Everything the page knows about a week: dropped when the week changes or the draft is reopened.</summary>
+    /// <summary>Everything the page knows about a week: dropped when the week changes.</summary>
     private void ResetWeekState()
     {
-        debounce.Cancel();
-        simulations.Cancel();
         analyses.Cancel();
         draft = null;
-        simulation = fill = null;
-        simulationFingerprint = null;
-        simulationUtc = null;
-        simulationOp = fillOp = actionOp = OpState.Idle;
+        actionOp = OpState.Idle;
         analysis = null;
         failureGap = null;
         analysisError = null;
-        analyzing = analysisStale = actionBusy = confirmFill = false;
+        analyzing = actionBusy = false;
         session.Reset();
         filter = GapFilter.None;
         panel = null;
         pendingMerge = null;
         actedGapId = null;
-        selectedDays = DaySelection.Default(monday, DateOnly.FromDateTime(DateTime.Today));
-        simulatedDays = [];
-        choices = [];
-        simulatedIgnored = [];
         RebuildView();
-    }
-
-    /// <summary>Leaves a task out of this week's submission (or puts it back) and remembers the choice for that week.</summary>
-    private async Task SetTaskIgnoredAsync(int taskId, bool ignore)
-    {
-        if (draft?.SubmittedUtc is not null || !tasks.TryGetValue(taskId, out var task))
-            return;
-
-        var week = monday;
-        var stored = SubmissionTaskScope.ChoiceToStore(task, ignore);
-        if (stored is { } value)
-            choices[taskId] = value;
-        else
-            choices.Remove(taskId);
-
-        OnSelectionChanged();
-        try
-        {
-            await TaskChoices.SetAsync(week, taskId, stored);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "The choice for a task of the week could not be saved.");
-        }
-    }
-
-    /// <summary>Forgets the week's remembered choices so every task follows its "exclude from submission" flag again.</summary>
-    private async Task ResetChoicesAsync()
-    {
-        if (draft?.SubmittedUtc is not null || choices.Count == 0)
-            return;
-
-        var week = monday;
-        choices = [];
-        OnSelectionChanged();
-        try
-        {
-            await TaskChoices.ResetWeekAsync(week);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "The choices of the week could not be reset.");
-        }
-    }
-
-    private IReadOnlyList<SubmissionIgnoredCell> IgnoredCellsInScope() =>
-        draft is null
-            ? []
-            : SubmissionTaskScope.IgnoredCells(draft, tasks, EffectiveIgnored, SubmissionTaskScope.AutoExcluded(tasks.Values), selectedDays);
-
-    private bool IsWholeWeek => DaySelection.IsWholeWeek(selectedDays, monday);
-
-    private void ToggleDay(DateOnly day, bool include)
-    {
-        if (day < monday || day >= monday.AddDays(7))
-            return; // Only the days on screen can be selected.
-        if (include)
-            selectedDays.Add(day);
-        else
-            selectedDays.Remove(day);
-        OnSelectionChanged();
-    }
-
-    private void SelectWholeWeek()
-    {
-        selectedDays = DaySelection.WeekOf(monday).ToHashSet();
-        OnSelectionChanged();
-    }
-
-    /// <summary>
-    /// The gaps shown follow the checked days. A simulation only covers the days it was made for: another selection makes it stale
-    /// (the fill needs a simulation of exactly the days it will write), and it is redone by itself unless no day is checked.
-    /// </summary>
-    private void OnSelectionChanged()
-    {
-        RebuildView();
-        if (simulation is null || draft?.SubmittedUtc is not null)
-            return;
-
-        if (SimulationFresh || selectedDays.Count == 0)
-        {
-            debounce.Cancel();
-            analysisStale = false;
-            return;
-        }
-
-        analysisStale = true;
-        debounce.Request();
     }
 
     private async Task LoadAsync()
@@ -937,7 +541,7 @@
             if (week != monday || disposed)
                 return; // The user moved to another week meanwhile.
             await SetDraftAsync(saved.Draft);
-            await AfterDraftChangedAsync();
+            await RefreshAnalysisAsync();
         }
         catch (Exception ex)
         {
@@ -955,7 +559,6 @@
         draft = value;
         await using (var db = await DbFactory.CreateDbContextAsync())
             tasks = await db.ForecastTasks.AsNoTracking().ToDictionaryAsync(t => t.Id);
-        choices = await TaskChoices.LoadAsync(value.WeekStart);
         RebuildView();
     }
 
@@ -965,7 +568,7 @@
         return await db.TimesheetDrafts.AsNoTracking().Include(d => d.Entries).FirstOrDefaultAsync(d => d.WeekStart == week);
     }
 
-    // View model: the board, the table and the clean cells, rebuilt when their inputs change.
+    // View model: the board, rebuilt when its inputs change.
 
     private IReadOnlyList<SubmissionGap> AllGaps()
     {
@@ -975,49 +578,15 @@
 
     private void RebuildView()
     {
-        var gaps = AllGaps();
-        board = GapBoard.Build(gaps, session, filter, selectedDays);
-        cleanCells = GapBoard.CellsWithoutGap(Report, gaps).Where(c => selectedDays.Contains(c.Date)).ToList();
+        board = GapBoard.Build(AllGaps(), session, filter);
         actionContext = new GapActionContext(monday, tasks.ContainsKey);
-        if (draft is not null)
-            grid = DraftGrid.Build(draft, tasks, monday, analysis, gap => !session.IsIgnored(gap) && GapBoard.InScope(gap, selectedDays), EffectiveIgnored);
     }
-
-    private SubmissionStatus BuildStatus() =>
-        SubmissionStatusBuilder.Build(new SubmissionStatusInput(
-            analysis,
-            board.OpenBlockingCount,
-            board.OpenToVerifyCount,
-            session.IgnoredCount,
-            board.FirstBlocking?.Id,
-            draft?.SubmittedUtc is not null,
-            grid.Rows.Count > 0,
-            simulation is not null,
-            SimulationFresh,
-            simulation?.Success == true,
-            simulationUtc,
-            simulationOp.Busy,
-            fillOp.Busy || DayBusy,
-            draftRefreshing || analyzing,
-            DateTime.UtcNow,
-            selectedDays.Count > 0));
 
     private IReadOnlyList<GapActionView> ActionsFor(SubmissionGap gap) => GapActionPlanner.Plan(gap, actionContext);
 
     private SubmissionGapResolution? OpenPanelFor(SubmissionGap gap) => panel is { } open && open.GapId == gap.Id ? open.Resolution : null;
 
     private string RelinkQuery(SubmissionGapCell cell) => tasks.TryGetValue(cell.ForecastTaskId, out var task) ? task.TaskName : cell.TaskName;
-
-    private static string NumClass(decimal hours) => hours == 0 ? "num zero" : "num";
-
-    private static string HoursCell(decimal hours) => hours == 0 ? "·" : TimesheetUi.Hours(hours);
-
-    private static string DayFlagClass(ObjectiveFlag flag) => flag switch
-    {
-        ObjectiveFlag.Below => "day-below",
-        ObjectiveFlag.Above => "day-above",
-        _ => "",
-    };
 
     // Analysis
 
@@ -1032,13 +601,12 @@
         Refresh();
         try
         {
-            var result = await Review.AnalyzeAsync(draft, Report, ticket.Token);
+            var result = await Review.AnalyzeAsync(draft, null, ticket.Token);
             if (!analyses.IsCurrent(ticket) || disposed)
                 return;
             session.Reconcile(result);
             analysis = result;
             analysisError = null;
-            analysisStale = false;
             RebuildView();
             SettleActedGap();
         }
@@ -1052,7 +620,6 @@
                 return;
             Logger.LogWarning(ex, "The week could not be analysed.");
             analysisError = $"Impossible d'analyser la semaine : {ex.Message}";
-            analysisStale = false;
         }
         finally
         {
@@ -1064,21 +631,7 @@
         }
     }
 
-    /// <summary>After a change of the draft: a new simulation when one was made (the screen stays), else only the local analysis.</summary>
-    private async Task AfterDraftChangedAsync()
-    {
-        if (simulation is not null && !SimulationFresh)
-        {
-            analysisStale = true;
-            Refresh();
-            debounce.Request();
-            return;
-        }
-
-        await RefreshAnalysisAsync();
-    }
-
-    /// <summary>The identity of a task changed (linked, edited, reactivated, synchronised): what Forecast said about it no longer holds.</summary>
+    /// <summary>The identity of a task changed (linked, edited, reactivated, synchronised): the draft and the analysis are read again.</summary>
     private async Task AfterTaskChangedAsync()
     {
         var current = await ReadDraftAsync(monday);
@@ -1086,15 +639,6 @@
             await SetDraftAsync(current);
         else
             RebuildView();
-
-        if (simulation is not null)
-        {
-            simulationFingerprint = null;
-            analysisStale = true;
-            Refresh();
-            debounce.Request();
-            return;
-        }
 
         await RefreshAnalysisAsync();
     }
@@ -1112,227 +656,6 @@
         }
 
         actedGapId = null;
-    }
-
-    // Simulation and fill
-
-    /// <param name="auto">Run by the debounce after a correction (the screen is kept as it is, greyed, until the result).</param>
-    private async Task SimulateAsync(bool auto = false, CancellationToken external = default)
-    {
-        if (!FillGuard.CanSimulate(draft is not null, draft?.SubmittedUtc is not null, disposed, fillOp.Busy, selectedDays.Count > 0))
-            return;
-        if (!auto)
-            debounce.Cancel();
-
-        var ticket = simulations.Begin();
-        await simulationGate.WaitAsync(CancellationToken.None);
-        try
-        {
-            if (!simulations.IsCurrent(ticket) || disposed)
-                return;
-
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ticket.Token, external);
-            failureGap = null;
-            fill = null;
-            fillOp = OpState.Idle;
-            simulationOp = new OpState(true, auto ? "Mise à jour de la simulation…" : "Simulation en cours via le serveur MCP de Forecast…", null);
-            Refresh();
-
-            var current = await ReadDraftAsync(monday) ?? draft!;
-            var fingerprint = FillGuard.Fingerprint(current);
-            var days = DaySelection.Prune(selectedDays, monday);
-            var ignoredTasks = EffectiveIgnored.ToHashSet();
-            var report = await ForecastOps.RunAsync("simulation", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.DryRun, days, ignoredTasks, ct), linked.Token);
-            if (!simulations.IsCurrent(ticket) || disposed)
-                return;
-
-            simulation = report;
-            simulatedDays = days;
-            simulatedIgnored = ignoredTasks;
-            simulationFingerprint = fingerprint;
-            simulationUtc = DateTime.UtcNow;
-            await SetDraftAsync(current);
-            simulationOp = report.Success ? new OpState(false, report.Summary, null) : new OpState(false, null, report.Summary);
-            await RefreshAnalysisAsync();
-        }
-        catch (OperationCanceledException) when (!simulations.IsCurrent(ticket) || disposed || external.IsCancellationRequested)
-        {
-            // Replaced by a newer simulation (or the page left): the newer one reports.
-        }
-        catch (Exception ex)
-        {
-            if (simulations.IsCurrent(ticket))
-                FailOperation(ex, forSimulation: true);
-        }
-        finally
-        {
-            simulationGate.Release();
-            Refresh();
-        }
-    }
-
-    /// <summary>An operation that could not talk to Forecast: a blocking gap with its way out, or the plain message when Forecast is busy.</summary>
-    private void FailOperation(Exception ex, bool forSimulation)
-    {
-        analysisStale = false;
-        if (ex is ForecastBusyException)
-        {
-            if (forSimulation)
-                simulationOp = new OpState(false, null, ex.Message);
-            else
-                fillOp = new OpState(false, null, ex.Message);
-            return;
-        }
-
-        Logger.LogWarning("Forecast operation failed ({ExceptionType}).", ex.GetType().Name);
-        failureGap = Review.CreateFailureGap(ex, monday);
-        simulationOp = fillOp = OpState.Idle;
-        RebuildView();
-    }
-
-    private async Task AskFill()
-    {
-        var week = monday;
-        PendingAssignments pending;
-        try
-        {
-            pending = PendingAssignments.Of(await Assignments.GetPendingAsync(week));
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning("The pending group assignments could not be read ({ExceptionType}).", ex.GetType().Name);
-            pending = PendingAssignments.None;
-        }
-
-        if (!FillGuard.ResultApplies(week, monday, disposed))
-            return;
-        pendingAssignments = pending;
-        confirmFill = true;
-    }
-
-    private void CancelFill()
-    {
-        confirmFill = false;
-        restoreFillFocus = true;
-    }
-
-    private IReadOnlyList<string> FillParagraphs()
-    {
-        var ignoredCells = IgnoredCellsInScope();
-        return SubmitDialogs.FillParagraphs(
-            selectedDays.Sum(d => grid.DayTotals.GetValueOrDefault(d)) - ignoredCells.Sum(c => c.Hours), simulation?.Cells.Count ?? 0, monday,
-            board.OpenToVerify, session.IgnoredCount, analysis?.Summary, pendingAssignments, selectedDays, ignoredCells);
-    }
-
-    private async Task FillAsync()
-    {
-        confirmFill = false;
-        if (DayBusy || fillOp.Busy)
-            return; // A send per day is writing (or reading) Forecast: the weekly fill would type the same hours a second time.
-        if (draft is null || DaySelection.Prune(selectedDays, monday).Count == 0)
-            return; // Nothing checked: the writer would take an empty scope for the whole week.
-
-        var week = monday;
-        var canFill = BuildStatus().CanFill;
-        if (FillGuard.Preflight(canFill, draft, simulationFingerprint) != FillPreflight.Allowed)
-            return;
-
-        debounce.Cancel();
-        failureGap = null;
-        fillOp = new OpState(true, "Saisie en cours dans Forecast…", null);
-        Refresh();
-        try
-        {
-            var current = await ReadDraftAsync(week);
-            if (!FillGuard.ResultApplies(week, monday, disposed))
-                return;
-
-            if (current is null || FillGuard.Preflight(canFill, current, simulationFingerprint) != FillPreflight.Allowed)
-            {
-                fillOp = new OpState(false, null, FillGuard.DraftChangedMessage);
-                if (current is not null)
-                    await SetDraftAsync(current);
-                return;
-            }
-
-            var days = DaySelection.Prune(selectedDays, monday);
-            var ignoredTasks = simulatedIgnored.ToHashSet(); // The fill writes what the simulation validated, ignored tasks included.
-            // The days stay held while the fill writes: no send per day of these days, from this tab, another one or another process.
-            var hold = await DayLocks.TryHoldDaysAsync(week, days);
-            if (hold is null)
-            {
-                fillOp = new OpState(false, null, FillGuard.DayLockedMessage);
-                return;
-            }
-
-            ForecastFillReport report;
-            await using (hold)
-                report = await ForecastOps.RunAsync("saisie des heures", ct => Writer.FillWeekAsync(current, ForecastSubmitMode.Fill, days, ignoredTasks, ct));
-            if (FillGuard.ResultApplies(week, monday, disposed))
-                fill = report;
-
-            // The hours are in Forecast whatever the page shows now: the mark is stored even when the user moved to another week.
-            // Scoped to the selected day(s): the week is marked as typed only once every one of its days has been entered this way.
-            var scopeEntered = FillGuard.IsWeekFullyEntered(report, current, tasks, days, ignoredTasks);
-            var weekEntered = scopeEntered && FillGuard.IsWeekFullyEntered(report, current, tasks, null, ignoredTasks);
-            if (weekEntered)
-            {
-                await using var db = await DbFactory.CreateDbContextAsync();
-                var stored = await db.TimesheetDrafts.FirstAsync(d => d.Id == current.Id);
-                stored.SubmittedUtc = DateTime.UtcNow;
-                await db.SaveChangesAsync();
-                current.SubmittedUtc = stored.SubmittedUtc;
-                NavSummaries.Invalidate(week);
-            }
-
-            if (!FillGuard.ResultApplies(week, monday, disposed))
-                return;
-
-            var ignoredNote = report.IgnoredCells.Count > 0
-                ? $" {TimesheetUi.HoursLabel(report.IgnoredCells.Sum(c => c.Hours))} de tâches ignorées n'ont pas été envoyées à Forecast."
-                : "";
-            if (weekEntered)
-            {
-                await SetDraftAsync(current);
-                fillOp = new OpState(false, $"{report.Summary}. Toutes les cellules sont vérifiées : la semaine est marquée comme saisie.{ignoredNote} "
-                                            + "Pensez à la soumettre pour approbation dans Forecast.", null);
-            }
-            else if (scopeEntered)
-            {
-                await SetDraftAsync(current);
-                fillOp = new OpState(false, SubmitDialogs.ScopeEnteredMessage(report.Summary, days, monday) + ignoredNote, null);
-            }
-            else
-            {
-                fillOp = new OpState(false, null, SubmitDialogs.ScopeNotEnteredMessage(report.Summary, days, monday));
-            }
-
-            await RefreshAnalysisAsync();
-        }
-        catch (Exception ex)
-        {
-            if (FillGuard.ResultApplies(week, monday, disposed))
-                FailOperation(ex, forSimulation: false);
-        }
-        finally
-        {
-            Refresh();
-        }
-    }
-
-    private async Task ReopenAsync()
-    {
-        if (draft is null)
-            return;
-        await using (var db = await DbFactory.CreateDbContextAsync())
-        {
-            await db.TimesheetDrafts.Where(d => d.Id == draft.Id)
-                .ExecuteUpdateAsync(s => s.SetProperty(d => d.SubmittedUtc, (DateTime?)null));
-        }
-        NavSummaries.Invalidate(draft.WeekStart);
-
-        ResetWeekState();
-        await LoadAsync();
     }
 
     // Actions of the gap cards
@@ -1358,8 +681,10 @@
             case SubmissionGapResolution.RecalculateDraft:
                 await LoadAsync();
                 break;
-            case SubmissionGapResolution.Retry or SubmissionGapResolution.ReadAgain or SubmissionGapResolution.ResumeFill:
-                await SimulateAsync();
+            case SubmissionGapResolution.Retry:
+                failureGap = null;
+                RebuildView();
+                await RefreshAnalysisAsync();
                 break;
             case SubmissionGapResolution.IgnoreKnowingly:
                 Ignore(gap);
@@ -1410,20 +735,6 @@
         if (!session.Restore(gapId))
             return;
         RebuildView();
-        FocusGap(gapId);
-    }
-
-    /// <summary>Shows the card of a gap (the filter is lifted when it hides it) and gives it the focus.</summary>
-    private void GoToGap(string? gapId)
-    {
-        if (gapId is null)
-            return;
-        if (filter.IsActive && board.Visible.All(g => g.Id != gapId))
-        {
-            filter = GapFilter.None;
-            RebuildView();
-        }
-
         FocusGap(gapId);
     }
 
@@ -1482,7 +793,7 @@
         await RunActionAsync("Mise à jour de la tâche…", async () =>
         {
             await AfterTaskChangedAsync();
-            return "Tâche enregistrée : la simulation va être relancée.";
+            return "Tâche enregistrée.";
         });
     }
 

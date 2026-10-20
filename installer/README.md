@@ -65,6 +65,24 @@ jetons, et que l'on active, désactive, installe ou retire des plugins.
 
 ---
 
+## Publier une version
+
+Le workflow **Release** (`.github/workflows/release.yml`) se lance à la main : *Actions > Release > Run workflow*,
+sur la branche `main`. Il exécute les tests, construit le MSI et le zip, génère les notes de version, crée le tag
+`vX.Y.Z` sur le dernier commit de `main` et publie la release GitHub (MSI, zip, `SHA256SUMS.txt`).
+
+| Entrée | Rôle |
+| --- | --- |
+| `bump` | `auto` (défaut) déduit l'incrément des commits conventionnels : `feat` = minor, `fix` et autres = patch, `!` ou `BREAKING CHANGE` = major (minor tant que la version est 0.x). `patch`, `minor`, `major` forcent l'incrément. |
+| `version` | Force un numéro (`1.4.0`, `2.0.0-rc.1`) au lieu de la suggestion ; doit être supérieur à la dernière version et le tag ne doit pas exister. Un suffixe `-…` publie une pré-version. |
+| `ai_notes` | Notes rédigées par l'IA (GitHub Models, permission `models: read`) ; en cas d'échec, notes automatiques classées par type de commit. |
+| `dry_run` | Construit tout et publie les fichiers en artefact du run, sans tag ni release. |
+
+La première version est `0.1.0`. Les scripts (`scripts/release/Get-ReleaseVersion.ps1`,
+`New-ReleaseNotes.ps1`) s'exécutent aussi en local pour prévisualiser la version et les notes.
+
+---
+
 ## Archive et scripts PowerShell
 
 Ce dossier produit aussi une archive autonome (`artifacts/TimeSheetHelper-<version>.zip`) qui installe

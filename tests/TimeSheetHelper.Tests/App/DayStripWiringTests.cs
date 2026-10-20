@@ -75,24 +75,6 @@ public sealed class DayStripWiringTests
     }
 
     [Fact]
-    public void G9_WeeklyFill_NeverRunsDuringASendPerDay()
-    {
-        var page = SubmitPage();
-        var fill = Regex.Match(page, @"private async Task FillAsync\(\)\s*\{(?<body>.*?)\n    \}", RegexOptions.Singleline).Groups["body"].Value;
-
-        // The page-wide busy flag (status bar, « Recalculer », day selection, week change) and the fill button include the sends per day.
-        Assert.Matches(new Regex(@"private bool DayBusy => sendingDay is not null \|\| sendingReady \|\| dayReading\.Count > 0;"), page);
-        Assert.Matches(new Regex(@"private bool AnyBusy => [^;]*\bDayBusy;"), page);
-        Assert.Contains("fillOp.Busy || DayBusy,", page);
-        // The fill itself refuses to start, then holds its days (other tabs and processes) around the only write to Forecast.
-        var order = new[] { "if (DayBusy", "DayLocks.TryHoldDaysAsync(week, days)", "if (hold is null)", "await using (hold)", "ForecastSubmitMode.Fill" }
-            .Select(s => fill.IndexOf(s, StringComparison.Ordinal)).ToList();
-        Assert.DoesNotContain(-1, order);
-        Assert.Equal(order.Order(), order);
-        Assert.Equal(1, Count(page, "ForecastSubmitMode.Fill"));
-    }
-
-    [Fact]
     public void G9_SendReadyBar_ListsTheDaysItWillNotSend_WithTheirReason()
     {
         var bar = Component("SendReadyBar");

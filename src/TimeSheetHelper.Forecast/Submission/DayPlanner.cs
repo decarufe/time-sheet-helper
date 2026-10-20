@@ -63,8 +63,12 @@ public sealed record DayPlan(
     IReadOnlyList<CellPlan> Cells,
     DayGate Gate,
     bool ForecastReadComplete,
-    ForecastCapabilities Capabilities)
+    ForecastCapabilities Capabilities,
+    IReadOnlyList<ForecastRemoteEntry>? LockedBy = null)
 {
+    /// <summary>The approved or invoiced Forecast registrations that lock the day (empty when it is not locked).</summary>
+    public IReadOnlyList<ForecastRemoteEntry> LockingEntries => LockedBy ?? [];
+
     public bool HasWork => Cells.Any(c => c.Operation != CellOperation.None);
 
     public bool IsReady => Gate is DayGate.Send or DayGate.SendChanges or DayGate.Resume;
@@ -128,7 +132,8 @@ public static class DayPlanner
         var status = StatusOf(previousStatus, complete, locked is not null, cells);
         var gate = GateOf(previousStatus, complete, locked is not null, cells);
 
-        return new DayPlan(weekStart, date, status, currentFingerprint, previous?.Fingerprint, cells, gate, complete, capabilities);
+        return new DayPlan(weekStart, date, status, currentFingerprint, previous?.Fingerprint, cells, gate, complete, capabilities,
+            locked is null ? null : dayEntries.Where(e => e.IsLocked).ToList());
     }
 
     private static CellPlan PlanCell(

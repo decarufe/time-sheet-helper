@@ -138,6 +138,38 @@ public class SlotAllocatorTests
     }
 
     [Fact]
+    public void Meeting_slot_carries_the_meeting_title_as_comment()
+    {
+        var slot = Slot(Fx.Mon(10),
+        [
+            Meeting(Fx.Mon(10), Fx.Mon(10, 30)),
+            Focus(Fx.Mon(10), Fx.Mon(10, 15), "contoso/a"),
+        ]);
+        Assert.Equal("Daily standup", slot.Notes);
+    }
+
+    [Fact]
+    public void Override_without_comment_gets_the_meeting_title_but_the_users_comment_wins()
+    {
+        var meeting = Meeting(Fx.Mon(10), Fx.Mon(10, 30));
+        var start = Fx.Mon(10);
+
+        var bare = Slot(start, [meeting], [new SlotOverride { SlotStartUtc = start, ForecastTaskId = TaskB }]);
+        Assert.Equal(SlotKind.Override, bare.Kind);
+        Assert.Equal("Daily standup", bare.Notes);
+
+        var commented = Slot(start, [meeting], [new SlotOverride { SlotStartUtc = start, ForecastTaskId = TaskB, Notes = "Mon commentaire" }]);
+        Assert.Equal("Mon commentaire", commented.Notes);
+    }
+
+    [Fact]
+    public void Non_meeting_slot_has_no_comment()
+    {
+        var slot = Slot(Fx.Mon(9), [Focus(Fx.Mon(9), Fx.Mon(9, 15), "contoso/a")]);
+        Assert.Null(slot.Notes);
+    }
+
+    [Fact]
     public void Heavy_vs_code_editing_beats_the_meeting()
     {
         var slot = Slot(Fx.Mon(10),
