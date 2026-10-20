@@ -18,6 +18,8 @@ html[data-panel="0"] .app-shell {
     height: 100vh;
     height: 100dvh;
     overflow-y: auto;
+    /* Contains absolutely positioned descendants (.visually-hidden) so they scroll here, not the window. */
+    position: relative;
     /* Keeps the focused element out from under the sticky header (WCAG 2.4.11). */
     scroll-padding-top: 140px;
 }
