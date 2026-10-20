@@ -60,6 +60,24 @@ Installer une version plus récente remplace l'ancienne (mise à jour majeure) ;
 refusée. Si l'application a été installée avec les scripts, la désinstaller d'abord
 (`uninstall.ps1 -KeepData`) : les deux méthodes écrivent dans le même dossier.
 
+### Mise à jour automatique
+
+L'application interroge les releases GitHub 30 secondes après son démarrage, puis toutes les heures. Quand une
+version plus récente (avec un `.msi`) existe :
+
+- l'icône de la zone de notification reçoit une pastille rouge, une bulle l'annonce, et le menu propose
+  **Mettre à jour vers X.Y.Z** (sinon **Rechercher une mise à jour**, qui force une vérification) ;
+- l'application web affiche un bandeau avec un lien vers les notes de version et le bouton **Mettre à jour**.
+
+La mise à jour télécharge le MSI dans le dossier de données (`updates`), vérifie son SHA-256 d'après
+`SHA256SUMS.txt` (sans somme valide, rien n'est installé), ferme l'application, installe le MSI puis la relance.
+Les préversions ne sont proposées qu'à une version déjà en préversion. Réglage dans `appsettings.json` :
+
+```json
+"Update": { "Enabled": true, "Interval": "01:00:00", "Repository": "decarufe/time-sheet-helper" }
+```
+
+`Enabled: false` désactive la vérification automatique ; la vérification manuelle reste possible.
 Après l'installation, ouvrez la page **Sources** : c'est là que se règlent Microsoft 365, Azure DevOps, les
 jetons, et que l'on active, désactive, installe ou retire des plugins.
 

@@ -1,0 +1,52 @@
+@implements IDisposable
+@using TimeSheetHelper.App.Updates
+@inject UpdateService Updates
+
+@if (Updates.Phase == UpdatePhase.Failed && Updates.Available is not null && !dismissed)
+{
+    <div class="update-banner failed" role="alert">
+        <span class="message">@Updates.Error</span>
+        <button type="button" class="primary" @onclick="InstallAsync">Réessayer</button>
+        <button type="button" @onclick="Dismiss">Fermer</button>
+    </div>
+}
+else if (Updates.Available is { } release && !dismissed)
+{
+    var busy = Updates.IsBusy;
+    <div class="update-banner" role="status">
+        <span class="message">
+            <strong>Version @release.Version disponible</strong> (version actuelle : @Updates.CurrentVersion).
+            <a href="@release.PageUrl" target="_blank" rel="noopener">Notes de version</a>
+        </span>
+        <button type="button" class="primary" disabled="@busy" @onclick="InstallAsync">
+            @(Updates.Phase switch
+            {
+                UpdatePhase.Downloading => "Téléchargement…",
+                UpdatePhase.Installing => "Redémarrage…",
+                _ => "Mettre à jour",
+            })
+        </button>
+        @if (!busy)
+        {
+            <button type="button" @onclick="Dismiss">Plus tard</button>
+        }
+    </div>
+}
+
+@code {
+    private bool dismissed;
+
+    protected override void OnInitialized() => Updates.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task InstallAsync()
+    {
+        dismissed = false;
+        await Updates.InstallAsync();
+    }
+
+    private void Dismiss() => dismissed = true;
+
+    public void Dispose() => Updates.Changed -= OnChanged;
+}

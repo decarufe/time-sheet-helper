@@ -5,6 +5,7 @@ using TimeSheetHelper.App.Components.Shared;
 using TimeSheetHelper.App.Plugins;
 using TimeSheetHelper.App.Services;
 using TimeSheetHelper.App.Sync;
+using TimeSheetHelper.App.Updates;
 using TimeSheetHelper.Core;
 using TimeSheetHelper.Core.Activities;
 using TimeSheetHelper.Storage;
@@ -46,6 +47,13 @@ builder.Services.AddSingleton(sp => new SyncScheduler(
     sp.GetRequiredService<ILogger<SyncScheduler>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SyncScheduler>());
 builder.Services.AddSingleton<ForecastRunner>();
+builder.Services.Configure<UpdateOptions>(builder.Configuration.GetSection(UpdateOptions.SectionName));
+builder.Services.AddSingleton(sp => new UpdateService(
+    new HttpClient { Timeout = TimeSpan.FromMinutes(5) },
+    sp.GetRequiredService<IOptions<UpdateOptions>>(),
+    sp.GetRequiredService<IHostApplicationLifetime>(),
+    sp.GetRequiredService<ILogger<UpdateService>>()));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UpdateService>());
 builder.Services.AddSingleton<TrayIcon>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 
