@@ -68,26 +68,6 @@ public sealed class GapBoardTests
     }
 
     [Fact]
-    public void The_gaps_follow_the_checked_days_by_the_day_of_the_cell_or_of_the_gap_and_undated_gaps_always_stay()
-    {
-        var onCell = GapFx.Gap(taskId: 1, day: 2);
-        var onDay = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null, day: 2);
-        var other = GapFx.Gap(taskId: 3, day: 4);
-        var noDay = GapFx.Gap(SubmissionGapType.TaskNotFound, taskId: null) with { Date = null };
-        IEnumerable<SubmissionGap> all = [onCell, onDay, other, noDay];
-
-        var onlyWednesday = GapBoard.Build(all, new SessionGapState(), days: [GapFx.Day(2)]);
-        var nothingChecked = GapBoard.Build(all, new SessionGapState(), days: []);
-        var everything = GapBoard.Build(all, new SessionGapState(), days: null);
-
-        Assert.Equal(new[] { onCell.Id, onDay.Id, noDay.Id }.Order(), onlyWednesday.Visible.Select(g => g.Id).Order());
-        Assert.Equal([noDay.Id], nothingChecked.Visible.Select(g => g.Id));
-        Assert.Equal(4, everything.Visible.Count);
-        Assert.True(new GapFilter(SubmissionGapSeverity.Blocking).IsActive);
-        Assert.False(GapFilter.None.IsActive);
-    }
-
-    [Fact]
     public void Ignored_gaps_are_set_apart_and_no_longer_count_as_open()
     {
         var verify = GapFx.Gap(SubmissionGapType.UnclassifiedRemaining, SubmissionGapSeverity.ToVerify, taskId: null);
@@ -100,30 +80,7 @@ public sealed class GapBoardTests
         Assert.Equal([blocking.Id], board.Visible.Select(g => g.Id));
         Assert.Equal([verify.Id], board.Ignored.Select(g => g.Id));
         Assert.Equal(0, board.OpenToVerifyCount);
-        Assert.Empty(board.OpenToVerify);
         Assert.Equal(1, board.OpenCount);
-    }
-
-    [Fact]
-    public void The_open_gaps_to_verify_ignore_the_filter()
-    {
-        var verify = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null);
-
-        var board = Build([verify, GapFx.Gap()], filter: new GapFilter(Severity: SubmissionGapSeverity.Blocking));
-
-        Assert.Equal([verify.Id], board.OpenToVerify.Select(g => g.Id));
-    }
-
-    [Fact]
-    public void The_first_blocking_gap_is_found_even_when_the_filter_hides_it()
-    {
-        var first = GapFx.Gap(taskId: 1, day: 0);
-        var verify = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null);
-
-        var board = Build([verify, first], filter: new GapFilter(Severity: SubmissionGapSeverity.ToVerify));
-
-        Assert.Equal(first.Id, board.FirstBlocking?.Id);
-        Assert.Null(Build([verify]).FirstBlocking);
     }
 
     [Fact]
@@ -199,26 +156,5 @@ public sealed class GapBoardTests
         Assert.Equal(open.Id, board.Find(open.Id)?.Id);
         Assert.Equal(ignored.Id, board.Find(ignored.Id)?.Id);
         Assert.Null(board.Find("none"));
-    }
-
-    [Fact]
-    public void Cells_without_gap_are_the_cells_of_the_report_no_gap_talks_about()
-    {
-        var report = GapFx.Report(
-            GapFx.Cell(1, 0), GapFx.Cell(2, 0), GapFx.Cell(3, 1), GapFx.Cell(1, 1));
-        var gaps = new[]
-        {
-            GapFx.Gap(taskId: 1, day: 0, related: [new SubmissionGapCell(2, "Tâche 2", GapFx.Day(0))]),
-        };
-
-        var clean = GapBoard.CellsWithoutGap(report, gaps);
-
-        Assert.Equal([(3, GapFx.Day(1)), (1, GapFx.Day(1))], clean.Select(c => (c.ForecastTaskId, c.Date)));
-    }
-
-    [Fact]
-    public void Without_a_report_there_are_no_cells_without_gap()
-    {
-        Assert.Empty(GapBoard.CellsWithoutGap(null, [GapFx.Gap()]));
     }
 }

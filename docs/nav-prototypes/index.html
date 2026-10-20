@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototypes de navigation · Time Sheet Helper</title>
+<link rel="stylesheet" href="shared/base.css">
+<style>
+  body { padding: 32px 24px 64px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.7rem; }
+  .lead { color: var(--muted); max-width: 70ch; margin: 8px 0 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .proto { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; background: var(--bg); }
+  .proto.reco { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .proto h2 { margin: 0 0 2px; font-size: 1.15rem; }
+  .proto .tag { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .proto ul { margin: 4px 0 10px; padding-left: 20px; }
+  .proto li { margin: 2px 0; }
+  .proto h3 { margin: 10px 0 2px; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .proto .pro li::marker { color: var(--ok); content: "＋ "; }
+  .proto .con li::marker { color: var(--danger); content: "－ "; }
+  .proto .spacer { flex: 1; }
+  .proto .btn { align-self: flex-start; margin-top: 8px; }
+  .sketch { width: 100%; height: auto; margin: 4px 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--row-alt); }
+  .sketch .f { fill: var(--bg); stroke: var(--border); } .sketch .a { fill: var(--accent); } .sketch .m { fill: var(--border); } .sketch .s { fill: var(--surface); stroke: var(--border); }
+  table { margin: 8px 0 0; }
+  section { margin-top: 36px; }
+  .reco-box { border: 1px solid var(--accent); background: var(--accent-bg); border-radius: 12px; padding: 16px 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Prototypes de navigation</h1>
+  <p class="lead">Trois pistes pour remplacer la barre de liens unique du haut (7 liens à plat). Chaque prototype simule les <strong>7 pages réelles</strong> (Semaine, Jour, Soumettre, Règles, Tâches, Sources, Activité brute) avec des données factices, en clair et en sombre (même palette que l'application). Ouvrez-les par double-clic ; le dossier <code>shared\</code> doit rester à côté. Ajouter <code>?theme=dark</code> à l'adresse force le thème sombre.</p>
+
+  <div class="grid">
+    <article class="proto reco">
+      <h2>A — Barre latérale</h2>
+      <div class="tag"><span class="badge info">Navigation classique</span><span class="badge accent">Ctrl+K</span></div>
+      <svg class="sketch" viewBox="0 0 200 110" aria-hidden="true"><rect class="f" x="4" y="4" width="192" height="102" rx="6"/><rect class="s" x="4" y="4" width="48" height="102" rx="6"/><rect class="a" x="10" y="26" width="36" height="8" rx="3"/><rect class="m" x="10" y="40" width="30" height="6" rx="3"/><rect class="m" x="10" y="52" width="34" height="6" rx="3"/><rect class="m" x="10" y="72" width="28" height="6" rx="3"/><rect class="m" x="62" y="16" width="80" height="10" rx="3"/><rect class="m" x="62" y="38" width="124" height="52" rx="3"/></svg>
+      <p>Menu vertical regroupé en sections (Ma semaine · Envoi · Configuration · Avancé), icônes, pastilles de compteur, repliable en icônes, palette de commandes <kbd>Ctrl K</kbd>. Tiroir sur mobile.</p>
+      <h3>Pour</h3>
+      <ul class="pro"><li>Le plus familier ; passe à l'échelle si on ajoute des pages</li><li>Regroupement clair : le quotidien est séparé de la configuration</li><li>Pastilles visibles en permanence (trous, source en erreur)</li><li>Le contenu garde toute la hauteur</li></ul>
+      <h3>Contre</h3>
+      <ul class="con"><li>Prend 250 px de largeur (64 px replié)</li><li>Plus de code et de CSS à porter dans la mise en page</li></ul>
+      <span class="spacer"></span>
+      <a class="btn primary" href="a-sidebar/index.html">Ouvrir le prototype A</a>
+    </article>
+
+    <article class="proto">
+      <h2>B — Barre du haut à onglets</h2>
+      <div class="tag"><span class="badge info">Évolution minimale</span><span class="badge accent">Menus déroulants</span></div>
+      <svg class="sketch" viewBox="0 0 200 110" aria-hidden="true"><rect class="f" x="4" y="4" width="192" height="102" rx="6"/><rect class="a" x="48" y="14" width="22" height="3" rx="1"/><rect class="m" x="10" y="9" width="30" height="7" rx="3"/><rect class="m" x="48" y="9" width="22" height="7" rx="3" opacity=".5"/><rect class="m" x="76" y="9" width="22" height="7" rx="3"/><rect class="m" x="104" y="9" width="30" height="7" rx="3"/><rect class="s" x="4" y="22" width="192" height="22"/><rect class="m" x="12" y="28" width="60" height="10" rx="3"/><rect class="m" x="12" y="54" width="176" height="46" rx="3"/></svg>
+      <p>Trois onglets pour le quotidien (Semaine · Jour · Soumettre), deux menus « Configuration ▾ » et « Plus ▾ » pour le reste, fil d'Ariane et actions sous la barre. Barre d'onglets fixe en bas sur mobile avec feuille « Plus ».</p>
+      <h3>Pour</h3>
+      <ul class="pro"><li>Reste proche de l'existant : la migration est la plus simple</li><li>Toute la largeur reste pour les tableaux</li><li>La config n'a plus le même poids que la saisie</li></ul>
+      <h3>Contre</h3>
+      <ul class="con"><li>Pages secondaires cachées derrière un clic</li><li>Peu d'espace pour de nouvelles entrées</li><li>Menus déroulants à soigner au clavier</li></ul>
+      <span class="spacer"></span>
+      <a class="btn primary" href="b-topbar/index.html">Ouvrir le prototype B</a>
+    </article>
+
+    <article class="proto">
+      <h2>C — Rail + panneau contextuel</h2>
+      <div class="tag"><span class="badge info">Centré sur la semaine</span><span class="badge accent">Parcours guidé</span></div>
+      <svg class="sketch" viewBox="0 0 200 110" aria-hidden="true"><rect class="f" x="4" y="4" width="192" height="102" rx="6"/><rect class="s" x="4" y="4" width="16" height="102" rx="6"/><rect class="a" x="8" y="22" width="8" height="8" rx="2"/><rect class="m" x="8" y="36" width="8" height="8" rx="2"/><rect class="m" x="8" y="50" width="8" height="8" rx="2"/><rect class="f" x="20" y="4" width="46" height="102"/><rect class="m" x="26" y="16" width="34" height="6" rx="3"/><rect class="m" x="26" y="30" width="34" height="6" rx="3"/><rect class="m" x="26" y="44" width="34" height="6" rx="3"/><rect class="m" x="74" y="12" width="60" height="8" rx="3"/><rect class="a" x="74" y="26" width="26" height="8" rx="4"/><rect class="m" x="104" y="26" width="26" height="8" rx="4"/><rect class="m" x="74" y="46" width="114" height="52" rx="3"/></svg>
+      <p>Rail d'icônes (Temps · Envoi · Config · Avancé) et panneau qui change selon la section : jours de la semaine avec heures, liste de vérification avant envoi, pages de config. En-tête avec parcours « Saisir → Vérifier → Soumettre » et progression en heures.</p>
+      <h3>Pour</h3>
+      <ul class="pro"><li>Raconte le vrai flux de travail (saisir, vérifier, soumettre)</li><li>Progression et trous toujours visibles</li><li>Le rail ne mange que 60 px ; le panneau se masque (<kbd>Ctrl B</kbd>)</li></ul>
+      <h3>Contre</h3>
+      <ul class="con"><li>Le plus ambitieux : état partagé et panneaux par section</li><li>Moins évident au premier regard</li><li>Les données du panneau doivent venir d'un service</li></ul>
+      <span class="spacer"></span>
+      <a class="btn primary" href="c-rail/index.html">Ouvrir le prototype C</a>
+    </article>
+  </div>
+
+  <section>
+    <h2>C+ — Soumission jour par jour <span class="badge accent">Nouveau</span></h2>
+    <div class="card">
+      <p style="margin:0 0 8px">Extension du prototype C : une <strong>bande de jours</strong> (Non saisi · Brouillon · Prêt · Envoyé · Modifié depuis l'envoi · Écart) et, sous elle, une <strong>simulation par jour</strong> avant tout envoi, avec garde-fous anti-doublon (empreinte, verrou, bouton désactivé « Rien de nouveau à envoyer », confirmation seulement pour le risqué, annuler / rejouer, journal par jour). Les étiquettes <em>Existe</em>, <em>Existe (semaine)</em> et <em>À construire</em> distinguent le réel du proposé.</p>
+      <p style="margin:0 0 8px"><a class="btn primary" href="c-rail/index.html#/soumettre">Ouvrir C+ (page Soumettre)</a></p>
+      <p style="margin:0 0 4px"><strong>Scénarios</strong> (aussi dans la carte « Scénarios de démonstration », ou via <code>?scenario=…</code>) :</p>
+      <ul style="margin:0 0 8px">
+        <li><a href="c-rail/index.html?scenario=neuf#/soumettre"><code>neuf</code></a> : rien n'est encore envoyé ; jours prêts</li>
+        <li><a href="c-rail/index.html?scenario=inchange#/soumettre"><code>inchange</code></a> : tout est déjà dans Forecast ; envoi désactivé</li>
+        <li><a href="c-rail/index.html?scenario=modifie#/soumettre"><code>modifie</code></a> : brouillon modifié depuis l'envoi ; mise à jour optionnelle</li>
+        <li><a href="c-rail/index.html?scenario=conflit#/soumettre"><code>conflit</code></a> : Forecast modifié ailleurs ; résolution à choisir</li>
+        <li><a href="c-rail/index.html?scenario=partielle#/soumettre"><code>partielle</code></a> : envoi interrompu ; cellules non tentées à rejouer</li>
+        <li><a href="c-rail/index.html?scenario=double#/soumettre"><code>double</code></a> : double clic / deuxième envoi ; aucune écriture en double</li>
+      </ul>
+      <h3 style="margin:10px 0 2px;font-size:.8rem;text-transform:uppercase;color:var(--muted)">Déjà dans l'application</h3>
+      <p style="margin:0 0 6px">Sélection des jours à envoyer (aujourd'hui par défaut), simulation (DryRun), préflight FillGuard, verrou du ForecastRunner, idempotence « déjà dans Forecast », conflit jamais écrasé, reprise après interruption, « Ne pas envoyer » par semaine et tâche, cellules verrouillées / approuvées.</p>
+      <h3 style="margin:10px 0 2px;font-size:.8rem;text-transform:uppercase;color:var(--muted)">À construire</h3>
+      <p style="margin:0">Statut, empreinte et horodatage <em>par jour</em> (aujourd'hui : semaine seulement), détection « modifié depuis l'envoi », mise à jour d'une valeur existante, suppression dans Forecast, résolutions de conflit, journal d'envoi, annulation, bouton « Soumettre les jours prêts », bande de jours.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="reco-box">
+      <h2 style="margin-top:0">Recommandation : A, avec l'en-tête de semaine de C</h2>
+      <p style="margin:0">La barre latérale (A) règle d'emblée les vrais défauts actuels : 7 liens de même poids, aucun regroupement, pas de pastilles, rien pour le mobile. Elle coûte peu en plus de la mise en page existante. On y ajoute ensuite, à moindre risque, le bandeau « Saisir → Vérifier → Soumettre » de C sur les pages Temps et Envoi. B est le bon choix si on veut un changement minimal.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Comparaison rapide</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Critère</th><th>A · Latérale</th><th>B · Haut</th><th>C · Rail</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Découvrabilité des pages</th><td>Excellente</td><td>Bonne</td><td>Bonne</td></tr>
+        <tr><th scope="row">Largeur laissée au contenu</th><td>Moyenne (64 px replié)</td><td>Totale</td><td>Bonne (rail 60 px)</td></tr>
+        <tr><th scope="row">Mobile</th><td>Tiroir</td><td>Barre du bas + feuille</td><td>Barre du bas + onglets de section</td></tr>
+        <tr><th scope="row">Coût de portage Blazor</th><td>Moyen</td><td>Faible</td><td>Élevé</td></tr>
+        <tr><th scope="row">Aide au flux hebdomadaire</th><td>Moyenne</td><td>Faible</td><td>Forte</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Raccourcis communs</h2>
+    <ul>
+      <li><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>7</kbd> : aller à la page (dans l'ordre Semaine, Jour, Soumettre, Règles, Tâches, Sources, Activité brute)</li>
+      <li><kbd>[</kbd> / <kbd>]</kbd> : semaine précédente / suivante · <kbd>Alt</kbd>+<kbd>T</kbd> : thème clair/sombre</li>
+      <li>A : <kbd>Ctrl</kbd>+<kbd>K</kbd> ou <kbd>/</kbd> palette, <kbd>Ctrl</kbd>+<kbd>B</kbd> replier · B : <kbd>↓</kbd> <kbd>↑</kbd> <kbd>Échap</kbd> dans les menus · C : <kbd>Ctrl</kbd>+<kbd>B</kbd> masque le panneau</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

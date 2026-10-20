@@ -1,0 +1,148 @@
+@using TimeSheetHelper.Forecast.Submission
+
+@* Sends every ready day of the week; Forecast is read again first, and the confirmation lists the days sent and those left aside with why. *@
+<div class="send-ready">
+    @if (Sending)
+    {
+        <button type="button" class="primary" aria-disabled="true" aria-describedby="@noteId" @ref="trigger">
+            <Icon Name="refresh" Small="true" Class="spin" /> Envoi des jours prêts en cours…
+        </button>
+    }
+    else
+    {
+        var count = ReadyDays.Count;
+        var enabled = !Busy && !preparing && count > 0;
+        <button type="button" class="primary" disabled="@(!enabled)" aria-describedby="@noteId" @ref="trigger" @onclick="PrepareAsync">
+            @if (preparing)
+            {
+                <Icon Name="refresh" Small="true" Class="spin" /> <text>Lecture de Forecast…</text>
+            }
+            else
+            {
+                <Icon Name="soumettre" Small="true" /> <text>Soumettre les jours prêts (@count)</text>
+            }
+        </button>
+    }
+    <p id="@noteId" class="sr-note">@Note</p>
+</div>
+
+@if (confirming)
+{
+    <ConfirmDialog Title="Soumettre les jours prêts ?" Subtitle="@WeekLabel" ConfirmLabel="@ConfirmLabel" OnConfirm="ConfirmAsync"
+                   OnCancel="CloseConfirm">
+        <p><strong>Seront envoyés :</strong></p>
+        <ul>
+            @foreach (var (date, plan) in ReadyDays)
+            {
+                <li>@DayStateLabels.ShortDay(date) — @DayStateLabels.Operations(plan, NoChoices)</li>
+            }
+        </ul>
+        @if (OtherDays.Count > 0)
+        {
+            <p><strong>Ne seront pas envoyés :</strong></p>
+            <ul>
+                @foreach (var (date, reason) in OtherDays)
+                {
+                    <li>@DayStateLabels.ShortDay(date) — @reason</li>
+                }
+            </ul>
+        }
+        <p>Chaque jour est relu dans Forecast juste avant l'écriture : une saisie déjà présente n'est jamais créée de nouveau.
+            Les conflits ne sont pas résolus ici : traitez-les jour par jour.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private static readonly IReadOnlyDictionary<int, ConflictResolution> NoChoices = new Dictionary<int, ConflictResolution>();
+    private readonly string noteId = $"send-ready-{Guid.NewGuid():N}";
+    private bool preparing;
+    private bool confirming;
+    private bool restoreFocus;
+    private ElementReference trigger;
+    private string? emptyNote;
+
+    /// <summary>The days of the week shown, in order.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<DateOnly> Days { get; set; } = [];
+
+    [Parameter, EditorRequired] public IReadOnlyDictionary<DateOnly, DayPlan> Plans { get; set; } = new Dictionary<DateOnly, DayPlan>();
+
+    [Parameter] public IReadOnlyDictionary<DateOnly, string> Errors { get; set; } = new Dictionary<DateOnly, string>();
+
+    /// <summary>Another send or a read of Forecast is running.</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public bool Sending { get; set; }
+
+    /// <summary>Reads Forecast again for the whole week (writes nothing).</summary>
+    [Parameter] public EventCallback OnPrepare { get; set; }
+
+    [Parameter] public EventCallback OnSend { get; set; }
+
+    private List<(DateOnly Date, DayPlan Plan)> ReadyDays =>
+        Days.Where(d => !Errors.ContainsKey(d) && Plans.TryGetValue(d, out var p) && p.IsReady).Select(d => (d, Plans[d])).ToList();
+
+    private List<(DateOnly Date, string Reason)> OtherDays =>
+        Days.Select(d => (Date: d, Reason: NotSentReason(d))).Where(x => x.Reason is not null).Select(x => (x.Date, x.Reason!)).ToList();
+
+    private string WeekLabel => Days.Count == 0 ? "" : $"Semaine du {DayStateLabels.LongDay(Days[0]).ToLowerInvariant()}";
+
+    private string ConfirmLabel => ReadyDays.Count > 1 ? $"Envoyer {ReadyDays.Count} jours" : "Envoyer 1 jour";
+
+    private string? Note =>
+        Sending ? "Les jours prêts sont envoyés un à un ; le résultat s'affiche ensuite."
+        : Busy ? "Un envoi ou une lecture de Forecast est en cours : attendez qu'il se termine."
+        : emptyNote ?? (ReadyDays.Count == 0 ? "Rien de nouveau à envoyer : aucun jour prêt cette semaine." : null);
+
+    private string? NotSentReason(DateOnly date)
+    {
+        if (Errors.TryGetValue(date, out var error))
+            return error;
+        if (!Plans.TryGetValue(date, out var plan))
+            return "pas encore lu dans Forecast";
+        if (plan.IsReady || plan.Gate == DayGate.NothingToSend)
+            return null;
+        return DayStateLabels.Action(plan, NoChoices).Reason ?? DayStateLabels.Gate(plan.Gate).Label;
+    }
+
+    private async Task PrepareAsync()
+    {
+        if (preparing || Busy || Sending)
+            return;
+        preparing = true;
+        emptyNote = null;
+        try
+        {
+            await OnPrepare.InvokeAsync();
+        }
+        finally
+        {
+            preparing = false;
+        }
+        if (ReadyDays.Count == 0)
+            emptyNote = "Rien de nouveau à envoyer : après relecture de Forecast, aucun jour n'est prêt.";
+        else
+            confirming = true;
+    }
+
+    // Focus goes back to the button that opened the confirmation, whichever way it closes.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!restoreFocus)
+            return;
+        restoreFocus = false;
+        try { await trigger.FocusAsync(); }
+        catch (Exception) { /* disconnected circuit: focus is a nicety */ }
+    }
+
+    private void CloseConfirm()
+    {
+        confirming = false;
+        restoreFocus = true;
+    }
+
+    private Task ConfirmAsync()
+    {
+        CloseConfirm();
+        return OnSend.InvokeAsync();
+    }
+}

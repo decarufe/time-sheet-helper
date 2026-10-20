@@ -23,9 +23,17 @@ internal sealed class FakeGraphHandler(Func<Uri, string?> route) : HttpMessageHa
 {
     public List<Uri> Requests { get; } = [];
 
+    /// <summary>Answers a request with a Graph error instead of its fixture: (status, error code), or null to serve the fixture.</summary>
+    public Func<Uri, (HttpStatusCode Status, string Code)?>? Fail { get; init; }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Requests.Add(request.RequestUri!);
+        if (Fail?.Invoke(request.RequestUri!) is { } failure)
+            return Task.FromResult(new HttpResponseMessage(failure.Status)
+            {
+                Content = new StringContent($$$"""{"error":{"code":"{{{failure.Code}}}","message":"refused"}}""", Encoding.UTF8, "application/json"),
+            });
         var fixture = route(request.RequestUri!);
         var response = fixture is null
             ? new HttpResponseMessage(HttpStatusCode.NotFound)

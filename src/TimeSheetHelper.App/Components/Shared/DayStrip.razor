@@ -1,0 +1,38 @@
+@* The days of the week with their send state (icon + words + tone); choosing a day shows its panel. *@
+<div class="day-strip" role="group" aria-label="État d'envoi par jour">
+    <ul class="ds-list" style="--ds-count: @Math.Max(1, Days.Count)">
+        @foreach (var day in Days)
+        {
+            var date = day.Date;
+            <li>
+                <button type="button" class="ds-day t-@day.State.Tone @(day.IsToday ? "today" : null)" aria-pressed="@(date == Selected ? "true" : "false")"
+                        @onclick="() => OnSelect.InvokeAsync(date)">
+                    <span class="ds-name">
+                        @DayStateLabels.ShortDay(date)
+                        @if (day.IsToday)
+                        {
+                            <span class="ds-today">aujourd'hui</span>
+                        }
+                    </span>
+                    <span class="badge @day.State.Tone ds-chip"><Icon Name="@day.State.Icon" Small="true" /><span>@day.State.Label</span></span>
+                    <span class="ds-hours">@HoursLabel(day)</span>
+                </button>
+            </li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<DayCard> Days { get; set; } = [];
+
+    [Parameter] public DateOnly? Selected { get; set; }
+
+    [Parameter] public EventCallback<DateOnly> OnSelect { get; set; }
+
+    private static string HoursLabel(DayCard day) => day switch
+    {
+        { Hours: { } h, TargetHours: { } t } when t > 0 => $"{DayStateLabels.Hours(h)} / {DayStateLabels.Hours(t)}",
+        { Hours: { } h } => DayStateLabels.Hours(h),
+        _ => "–",
+    };
+}

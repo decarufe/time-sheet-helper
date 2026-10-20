@@ -7,19 +7,20 @@
 @inject ActivityStore Store
 @inject PluginHost Plugins
 
-<PageTitle>Time Sheet Helper</PageTitle>
+<PageTitle>Activité brute — Time Sheet Helper</PageTitle>
 
-<header class="toolbar">
-    <h1>Activité du jour</h1>
-    <button @onclick="() => ChangeDay(-1)" aria-label="Jour précédent">‹</button>
-    <input type="date" @bind="day" @bind:after="LoadAsync" />
-    <button @onclick="() => ChangeDay(1)" aria-label="Jour suivant">›</button>
-    <button @onclick="LoadAsync">Rafraîchir</button>
-    @if (PauseAction is { } pause)
-    {
-        <button @onclick="TogglePause">@pause.Label</button>
-    }
-</header>
+<PageHeader Title="Activité brute">
+    <Actions>
+        <button @onclick="() => ChangeDay(-1)" aria-label="Jour précédent">‹</button>
+        <input type="date" @bind="day" @bind:after="LoadAsync" aria-label="Jour" />
+        <button @onclick="() => ChangeDay(1)" aria-label="Jour suivant">›</button>
+        <button @onclick="LoadAsync">Rafraîchir</button>
+        @if (PauseAction is { } pause)
+        {
+            <button @onclick="TogglePause">@pause.Label</button>
+        }
+    </Actions>
+</PageHeader>
 
 <section class="status">
     @if (tracking is null)

@@ -1,0 +1,37 @@
+.day-journal {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  background: var(--bg);
+}
+.day-journal summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.journal {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.journal li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+.journal time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.journal .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.journal .msg {
+  color: var(--fg);
+}

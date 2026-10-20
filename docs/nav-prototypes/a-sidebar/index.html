@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype A — Barre latérale · Time Sheet Helper</title>
+<link rel="stylesheet" href="../shared/base.css">
+<style>
+  :root { --sb-w: 252px; --sb-w-collapsed: 64px; }
+  body { overflow: hidden; }
+  .shell { display: grid; grid-template-columns: var(--sb-w) 1fr; height: 100vh; transition: grid-template-columns .18s ease; }
+  .shell.collapsed { grid-template-columns: var(--sb-w-collapsed) 1fr; }
+
+  .sidebar { display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); min-width: 0; z-index: 60; }
+  .sb-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; min-height: 56px; }
+  .logo { width: 28px; height: 28px; flex: none; }
+  .brand { font-weight: 600; white-space: nowrap; overflow: hidden; flex: 1; }
+  .sb-toggle { margin-left: auto; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; flex: none; }
+  .icon-btn:hover { background: var(--row-alt); color: var(--fg); border-color: var(--border); }
+
+  .sb-search { margin: 4px 12px 8px; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--muted); font: inherit; cursor: pointer; text-align: left; }
+  .sb-search:hover { border-color: var(--accent); }
+  .sb-search span { flex: 1; white-space: nowrap; overflow: hidden; }
+  .sb-search #ico-search { flex: none; display: inline-flex; }
+
+  .sb-nav { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
+  .sb-section { margin: 12px 0 0; }
+  .sb-section h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0; padding: 6px 10px; white-space: nowrap; overflow: hidden; }
+  .sb-link { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin: 1px 0; border-radius: 8px; color: var(--fg); text-decoration: none; white-space: nowrap; }
+  .sb-link .label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .sb-link:hover { background: var(--row-alt); }
+  .sb-link[aria-current="page"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .sb-link[aria-current="page"]::before { content: ""; position: absolute; left: -8px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .sb-link .badge { padding: 0 7px; font-size: .72rem; }
+  .sb-link .key { font-size: .7rem; color: var(--muted); opacity: 0; }
+  .sb-link:hover .key, .sb-link:focus-visible .key { opacity: 1; }
+
+  .sb-foot { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; }
+  .track { display: inline-flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: inherit; font-size: .82rem; cursor: pointer; white-space: nowrap; overflow: hidden; }
+  .track:hover { border-color: var(--accent); }
+  .track .dot { color: var(--ok); }
+  .track.paused .dot { color: var(--warn); }
+
+  /* Replié : icônes seules + info-bulles */
+  .collapsed .brand, .collapsed .sb-link .label, .collapsed .sb-link .key, .collapsed .sb-search span, .collapsed .sb-search kbd, .collapsed .track .t-label { display: none; }
+  .collapsed .sb-head { flex-direction: column; padding: 12px 0 6px; gap: 6px; }
+  .collapsed .sb-toggle { margin: 0; }
+  .collapsed .sb-section h2 { height: 1px; padding: 0; margin: 10px 14px 6px; background: var(--border); font-size: 0; }
+  .collapsed .sb-link { justify-content: center; padding: 10px 0; }
+  .collapsed .sb-link .badge { position: absolute; top: 2px; right: 6px; padding: 0 5px; font-size: .65rem; }
+  .collapsed .sb-search { margin: 4px 12px 8px; justify-content: center; padding: 8px 0; }
+  .collapsed .sb-foot { flex-direction: column; }
+  .collapsed .track { flex: none; padding: 7px; }
+  .collapsed [data-tip]:hover::after, .collapsed [data-tip]:focus-visible::after {
+    content: attr(data-tip); position: fixed; left: calc(var(--sb-w-collapsed) + 6px); background: var(--fg); color: var(--bg); padding: 4px 10px; border-radius: 6px; font-size: .82rem; font-weight: 400; z-index: 200; pointer-events: none; transform: translateY(-4px); white-space: nowrap;
+  }
+
+  .content { overflow-y: auto; min-width: 0; }
+  .mobile-bar { display: none; }
+  .page { max-width: 1120px; margin: 0 auto; padding: 24px 32px 48px; }
+  .page-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .page-head .crumb { width: 100%; color: var(--muted); font-size: .82rem; margin: 0; }
+  .page-head h1 { outline: none; }
+  .page-head .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+
+  /* Palette de commandes */
+  .scrim { position: fixed; inset: 0; background: rgba(1, 4, 9, .5); z-index: 50; display: none; }
+  .palette-wrap { position: fixed; inset: 0; z-index: 150; display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; background: rgba(1, 4, 9, .5); }
+  .palette-wrap.open { display: flex; }
+  .palette { width: min(600px, 92vw); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .palette input { width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 14px 16px; font-size: 1rem; outline: none; }
+  .palette ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow-y: auto; }
+  .palette li { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+  .palette li[aria-selected="true"] { background: var(--accent-bg); color: var(--accent); }
+  .palette li .hint { margin-left: auto; color: var(--muted); font-size: .8rem; }
+  .palette .grp { padding: 8px 12px 2px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); cursor: default; }
+  .palette .foot { border-top: 1px solid var(--border); padding: 8px 14px; font-size: .78rem; color: var(--muted); display: flex; gap: 14px; }
+
+  @media (max-width: 860px) {
+    body { overflow: auto; }
+    .shell, .shell.collapsed { display: block; height: auto; }
+    .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 86vw); transform: translateX(-100%); transition: transform .2s ease; box-shadow: var(--shadow); }
+    body.nav-open .sidebar { transform: none; }
+    body.nav-open .scrim { display: block; }
+    .collapsed .brand, .collapsed .sb-link .label, .collapsed .sb-link .key, .collapsed .sb-search span, .collapsed .sb-search kbd, .collapsed .track .t-label { display: revert; }
+    .collapsed .sb-head { flex-direction: row; padding: 14px 14px 10px; }
+    .collapsed .sb-link { justify-content: flex-start; padding: 8px 10px; }
+    .collapsed .sb-section h2 { height: auto; padding: 6px 10px; margin: 0; background: none; font-size: .72rem; }
+    .collapsed .sb-foot { flex-direction: row; }
+    .collapsed .sb-search { justify-content: flex-start; padding: 7px 10px; margin: 4px 12px 8px; }
+    .collapsed .track { flex: 1; padding: 5px 10px; }
+    .collapsed .sb-link .badge { position: static; }
+    .sb-toggle { display: none; }
+    .content { overflow: visible; }
+    .mobile-bar { display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 40; background: var(--bg); border-bottom: 1px solid var(--border); padding: 8px 12px; }
+    .mobile-bar .t { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .page { padding: 16px 14px 40px; }
+    .page-head .acts { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Aller au contenu</a>
+<div class="scrim" id="scrim"></div>
+<div class="shell" id="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Barre latérale">
+    <div class="sb-head">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="30" fill="#1D4ED8"/><circle cx="32" cy="32" r="22" fill="#fff"/><path d="M32 17V32L22 38" fill="none" stroke="#1D4ED8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="47" r="15" fill="#16A34A" stroke="#fff" stroke-width="3"/><path d="M40 47.5l5 5 9-10.5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brand">Time Sheet Helper</span>
+      <button class="icon-btn sb-toggle" id="collapse" type="button" aria-label="Replier la barre latérale" aria-expanded="true" title="Replier / déplier (Ctrl+B)"></button>
+    </div>
+    <button class="sb-search" id="open-palette" type="button" data-tip="Rechercher (Ctrl+K)" aria-label="Rechercher une page ou une action">
+      <span id="ico-search"></span><span>Rechercher…</span><kbd>Ctrl K</kbd>
+    </button>
+    <nav class="sb-nav" id="nav" aria-label="Pages"></nav>
+    <div class="sb-foot">
+      <button class="track" id="track" type="button" data-tip="Surveillance"></button>
+      <button class="icon-btn" id="theme" type="button" data-tip="Thème (Alt+T)"></button>
+    </div>
+  </aside>
+  <div class="content" id="content">
+    <div class="mobile-bar">
+      <button class="icon-btn" id="burger" type="button" aria-label="Ouvrir le menu" aria-controls="sidebar" aria-expanded="false"></button>
+      <span class="t" id="m-title"></span>
+      <span id="m-badge"></span>
+    </div>
+    <main class="page" id="main"></main>
+  </div>
+</div>
+
+<div class="palette-wrap" id="pal-wrap">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Palette de commandes">
+    <input id="pal-input" type="text" placeholder="Aller à une page ou lancer une action…" role="combobox" aria-expanded="true" aria-controls="pal-list" autocomplete="off">
+    <ul id="pal-list" role="listbox"></ul>
+    <div class="foot"><span><kbd>↑</kbd> <kbd>↓</kbd> naviguer</span><span><kbd>Entrée</kbd> ouvrir</span><span><kbd>Échap</kbd> fermer</span></div>
+  </div>
+</div>
+
+<script src="../shared/pages.js"></script>
+<script>
+(function () {
+  const T = window.TSH, $ = (s) => document.querySelector(s);
+  const shell = $("#shell");
+  const SB_KEY = "tsh-proto-a-collapsed";
+  let lastId = null;
+
+  const setCollapsed = (v) => {
+    shell.classList.toggle("collapsed", v);
+    const b = $("#collapse");
+    b.setAttribute("aria-expanded", String(!v));
+    b.setAttribute("aria-label", v ? "Déplier la barre latérale" : "Replier la barre latérale");
+    b.innerHTML = T.icon("panel");
+    try { localStorage.setItem(SB_KEY, v ? "1" : "0"); } catch (_) {}
+  };
+  const isNarrow = () => matchMedia("(max-width: 860px)").matches;
+  const openNav = (v) => {
+    document.body.classList.toggle("nav-open", v);
+    $("#burger").setAttribute("aria-expanded", String(v));
+    if (v) { const a = $("#nav a[aria-current='page']") || $("#nav a"); a && a.focus(); } else if (isNarrow()) $("#burger").focus();
+  };
+
+  function renderNav(cur) {
+    $("#nav").innerHTML = T.GROUPS.map((g) => {
+      const pages = T.PAGES.filter((p) => p.group === g.id);
+      return `<div class="sb-section" role="group" aria-labelledby="g-${g.id}"><h2 id="g-${g.id}">${g.label}</h2>${pages.map((p) =>
+        `<a class="sb-link" href="#/${p.id}" data-tip="${p.label}" ${p.id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon)}<span class="label">${p.label}</span>${p.badge ? `<span class="badge ${p.badge.tone}" title="${p.badge.label}">${p.badge.text}<span class="visually-hidden"> — ${p.badge.label}</span></span>` : ""}<span class="key">Alt+${p.key}</span></a>`).join("")}</div>`;
+    }).join("");
+  }
+
+  function render() {
+    const cur = T.current();
+    renderNav(cur);
+    const group = T.GROUPS.find((g) => g.id === cur.group);
+    const weekNav = cur.id === "semaine" || cur.id === "soumettre" ? T.weekNavHtml() : "";
+    $("#main").innerHTML = `<header class="page-head"><p class="crumb">${group.label}</p><h1 id="h1" tabindex="-1">${cur.title()}</h1><div class="acts">${weekNav}${cur.actions.map(T.actionButton).join("")}</div></header>${cur.body()}`;
+    document.title = `${cur.label} — Time Sheet Helper`;
+    $("#m-title").textContent = cur.label;
+    $("#m-badge").innerHTML = cur.badge ? `<span class="badge ${cur.badge.tone}">${cur.badge.text}</span>` : "";
+    const paused = T.state.paused;
+    const track = $("#track");
+    track.className = "track" + (paused ? " paused" : "");
+    track.innerHTML = `<span class="dot"></span><span class="t-label">${paused ? "En pause" : "Surveillance active"}</span>`;
+    track.dataset.tip = paused ? "En pause — reprendre" : "Surveillance active — mettre en pause";
+    track.setAttribute("aria-label", paused ? "Surveillance en pause, cliquer pour reprendre" : "Surveillance active, cliquer pour mettre en pause");
+    $("#theme").innerHTML = T.icon(T.effectiveTheme() === "dark" ? "sun" : "moon");
+    $("#theme").setAttribute("aria-label", "Basculer le thème clair/sombre");
+    if (lastId !== null && lastId !== cur.id) { $("#h1").focus({ preventScroll: true }); $("#content").scrollTop = 0; window.scrollTo(0, 0); }
+    lastId = cur.id;
+    openNavClose();
+  }
+  const openNavClose = () => { if (document.body.classList.contains("nav-open")) { document.body.classList.remove("nav-open"); $("#burger").setAttribute("aria-expanded", "false"); } };
+
+  /* ---- Palette ---- */
+  const wrap = $("#pal-wrap"), input = $("#pal-input"), list = $("#pal-list");
+  let items = [], sel = 0, returnFocus = null;
+  const norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const commands = () => [
+    ...T.PAGES.map((p) => ({ g: "Pages", label: p.label, hint: p.desc, icon: p.icon, kw: p.keywords, run: () => T.go(p.id) })),
+    { g: "Actions", label: "Semaine précédente", hint: "[", icon: "chevL", kw: "précédente reculer", run: () => T.runAction("prev-week") },
+    { g: "Actions", label: "Semaine suivante", hint: "]", icon: "chevR", kw: "suivante avancer", run: () => T.runAction("next-week") },
+    { g: "Actions", label: "Revenir à cette semaine", hint: "", icon: "cal", kw: "aujourd'hui courante", run: () => T.runAction("this-week") },
+    { g: "Actions", label: "Recalculer la semaine", hint: "", icon: "refresh", kw: "recalculer rafraîchir", run: () => T.runAction("recompute") },
+    { g: "Actions", label: T.state.paused ? "Reprendre la surveillance" : "Mettre la surveillance en pause", hint: "", icon: T.state.paused ? "play" : "pause", kw: "pause surveillance capture", run: () => T.runAction("toggle-pause") },
+    { g: "Actions", label: "Basculer le thème clair/sombre", hint: "Alt+T", icon: "moon", kw: "thème sombre clair", run: () => T.runAction("toggle-theme") },
+  ];
+  function filter() {
+    const q = norm(input.value.trim());
+    items = commands().filter((c) => !q || norm(c.label + " " + (c.kw || "")).includes(q));
+    sel = Math.min(sel, Math.max(items.length - 1, 0));
+    let g = null, html = "";
+    items.forEach((c, i) => {
+      if (c.g !== g) { g = c.g; html += `<li class="grp" role="presentation">${g}</li>`; }
+      html += `<li role="option" id="opt-${i}" data-i="${i}" aria-selected="${i === sel}">${T.icon(c.icon, "sm")}<span>${c.label}</span><span class="hint">${c.hint || ""}</span></li>`;
+    });
+    list.innerHTML = html || `<li class="grp" role="presentation">Aucun résultat</li>`;
+    input.setAttribute("aria-activedescendant", items.length ? "opt-" + sel : "");
+    const s = list.querySelector('[aria-selected="true"]'); s && s.scrollIntoView({ block: "nearest" });
+  }
+  const openPalette = () => { returnFocus = document.activeElement; wrap.classList.add("open"); input.value = ""; sel = 0; filter(); input.focus(); };
+  const closePalette = () => { wrap.classList.remove("open"); returnFocus && returnFocus.focus && returnFocus.focus(); };
+  const choose = (i) => { const c = items[i]; if (!c) return; wrap.classList.remove("open"); c.run(); if (c.g === "Pages") { const h1 = $("#h1"); h1 && h1.focus({ preventScroll: true }); } else returnFocus && returnFocus.focus && returnFocus.focus(); };
+  input.addEventListener("input", () => { sel = 0; filter(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = (sel + 1) % items.length; filter(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = (sel - 1 + items.length) % items.length; filter(); }
+    else if (e.key === "Enter") { e.preventDefault(); choose(sel); }
+    else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+    else if (e.key === "Tab") { e.preventDefault(); }
+  });
+  list.addEventListener("click", (e) => { const li = e.target.closest("[data-i]"); li && choose(+li.dataset.i); });
+  wrap.addEventListener("mousedown", (e) => { if (e.target === wrap) closePalette(); });
+  $("#open-palette").addEventListener("click", openPalette);
+  $("#ico-search").innerHTML = T.icon("search");
+
+  /* ---- Câblage ---- */
+  $("#collapse").addEventListener("click", () => setCollapsed(!shell.classList.contains("collapsed")));
+  $("#burger").innerHTML = T.icon("menu");
+  $("#burger").addEventListener("click", () => openNav(!document.body.classList.contains("nav-open")));
+  $("#scrim").addEventListener("click", () => openNav(false));
+  $("#track").addEventListener("click", () => T.runAction("toggle-pause"));
+  $("#theme").addEventListener("click", () => T.runAction("toggle-theme"));
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); wrap.classList.contains("open") ? closePalette() : openPalette(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") { e.preventDefault(); isNarrow() ? openNav(!document.body.classList.contains("nav-open")) : setCollapsed(!shell.classList.contains("collapsed")); }
+    else if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) { e.preventDefault(); openPalette(); }
+    else if (e.key === "Escape" && document.body.classList.contains("nav-open")) openNav(false);
+  });
+  let c0 = false; try { c0 = localStorage.getItem(SB_KEY) === "1"; } catch (_) {}
+  if (new URLSearchParams(location.search).get("collapsed") === "1") c0 = true;
+  setCollapsed(c0);
+  T.on(render);
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,21 +1,31 @@
-﻿<!DOCTYPE html>
+@using Microsoft.AspNetCore.Http
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <script>try{var t=localStorage.getItem("tsh.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;var p=localStorage.getItem("tsh.panel");if(p==="0")document.documentElement.dataset.panel="0"}catch(e){}</script>
+    <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["TimeSheetHelper.styles.css"]" />
     <ImportMap />
-    <HeadOutlet />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
-    <Routes />
+    <Routes @rendermode="PageRenderMode" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 
 </html>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Global interactivity so the shell (rail, panel, shortcuts) stays live across navigations; static SSR pages opt out with [ExcludeFromInteractiveRouting].
+    private IComponentRenderMode? PageRenderMode => HttpContext.AcceptsInteractiveRouting() ? InteractiveServer : null;
+}

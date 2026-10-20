@@ -1,0 +1,28 @@
+.send-ready {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.send-ready button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.sr-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.sr-note:empty {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .send-ready button {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}

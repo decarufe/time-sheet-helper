@@ -1,0 +1,140 @@
+.week-head {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.week-head-in {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 14px 32px 12px;
+    box-sizing: border-box;
+}
+
+.week-head-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+
+.week-head-titles {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.kicker {
+    margin: 0;
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+
+.week-head-title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.week-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.today-btn {
+    min-height: 32px;
+}
+
+.week-head-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.menu-btn,
+.m-tools {
+    display: none;
+}
+
+.m-tools {
+    gap: 6px;
+}
+
+.week-head-progress {
+    justify-content: space-between;
+    margin-top: 10px;
+}
+
+.week-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: .88rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.week-progress-track {
+    position: relative;
+    display: block;
+    width: 140px;
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--border);
+}
+
+.week-progress-bar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width .18s ease;
+}
+
+.week-progress-bar.full {
+    background: var(--ok);
+}
+
+.week-progress-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+    .week-head-in {
+        padding: 10px 16px;
+    }
+
+    .toggle-panel {
+        display: none;
+    }
+
+    .menu-btn {
+        display: inline-flex;
+    }
+
+    .m-tools {
+        display: flex;
+    }
+
+    .week-head-title {
+        font-size: 1.2rem;
+    }
+
+    .week-progress {
+        flex: 1 1 100%;
+    }
+
+    .week-progress-track {
+        flex: 1;
+        width: auto;
+    }
+}

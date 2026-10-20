@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype C — Rail d'icônes + panneau contextuel · Time Sheet Helper</title>
+<link rel="stylesheet" href="../shared/base.css">
+<style>
+  :root { --rail-w: 60px; --panel-w: 248px; }
+  body { overflow: hidden; }
+  .shell { display: grid; grid-template-columns: var(--rail-w) var(--panel-w) 1fr; height: 100vh; transition: grid-template-columns .18s ease; }
+  .shell.no-panel { grid-template-columns: var(--rail-w) 0 1fr; }
+
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; background: var(--surface); border-right: 1px solid var(--border); z-index: 60; }
+  .logo { width: 30px; height: 30px; margin: 2px 0 12px; }
+  .r-link { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 48px; height: 52px; border-radius: 10px; color: var(--muted); text-decoration: none; font-size: .66rem; background: none; border: 0; font-family: inherit; cursor: pointer; }
+  .r-link:hover { background: var(--row-alt); color: var(--fg); }
+  .r-link[aria-current="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .r-link[aria-current="true"]::before { content: ""; position: absolute; left: -6px; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .r-link .badge { position: absolute; top: 2px; right: 0; padding: 0 5px; font-size: .64rem; }
+  .r-link[data-tip]:hover::after, .r-link[data-tip]:focus-visible::after, .r-foot [data-tip]:hover::after, .r-foot [data-tip]:focus-visible::after {
+    content: attr(data-tip); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); background: var(--fg); color: var(--bg); padding: 4px 10px; border-radius: 6px; font-size: .82rem; font-weight: 400; white-space: nowrap; z-index: 200; pointer-events: none;
+  }
+  .rail-gap { flex: 1; }
+  .r-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .r-foot button { position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 0; background: none; color: var(--muted); cursor: pointer; }
+  .r-foot button:hover { background: var(--row-alt); color: var(--fg); }
+  .r-foot .track.on { color: var(--ok); }
+  .r-foot .track.paused { color: var(--warn); }
+
+  .panel { background: var(--bg); border-right: 1px solid var(--border); overflow: hidden auto; min-width: 0; }
+  .no-panel .panel { visibility: hidden; border: 0; }
+  .p-in { width: var(--panel-w); padding: 16px 12px; }
+  .p-title { display: flex; align-items: center; justify-content: space-between; margin: 0 6px 10px; }
+  .p-title h2 { margin: 0; font-size: .95rem; }
+  .p-sub { margin: 14px 8px 4px; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .p-link { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; margin: 1px 0; }
+  .p-link:hover { background: var(--row-alt); }
+  .p-link[aria-current="page"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .p-link .grow { flex: 1; min-width: 0; }
+  .p-link .d { display: block; font-size: .76rem; color: var(--muted); font-weight: 400; }
+  .p-link .badge { padding: 0 7px; font-size: .72rem; }
+  .day-link { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--fg); text-decoration: none; }
+  .day-link:hover { background: var(--row-alt); }
+  .day-link .dot.ok { color: var(--ok); } .day-link .dot.warn { color: var(--warn); } .day-link .dot.none { color: var(--border); }
+  .day-link .today-tag { font-size: .7rem; color: var(--accent); margin-left: 6px; }
+  .check { display: flex; gap: 10px; padding: 8px 10px; align-items: flex-start; font-size: .9rem; }
+  .check .ico { margin-top: 1px; }
+  .check.ok { color: var(--ok); } .check.todo { color: var(--warn); }
+  .check .t { color: var(--fg); }
+  .check .t small { display: block; color: var(--muted); }
+
+  .content { overflow-y: auto; min-width: 0; }
+  .head { position: sticky; top: 0; z-index: 40; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .head-in { max-width: 1120px; margin: 0 auto; padding: 14px 32px 12px; }
+  .head-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .head h1 { outline: none; }
+  .head .acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .head .kicker { color: var(--muted); font-size: .82rem; width: 100%; margin: 0 0 2px; }
+  .toggle-panel { margin-right: -4px; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; }
+  .icon-btn:hover { background: var(--row-alt); color: var(--fg); border-color: var(--border); }
+
+  .stepper { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; flex-wrap: wrap; }
+  .step { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); text-decoration: none; font-size: .88rem; background: var(--bg); }
+  .step:hover { border-color: var(--accent); color: var(--fg); }
+  .step .n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--info-bg); color: var(--info); font-size: .76rem; font-weight: 600; }
+  .step.done .n { background: var(--ok-bg); color: var(--ok); }
+  .step.attn .n { background: var(--warn-bg); color: var(--warn); }
+  .step[aria-current="step"] { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); font-weight: 600; }
+  .step[aria-current="step"] .n { background: var(--accent); color: #fff; }
+  .step small { color: var(--muted); font-weight: 400; }
+  .sep-arrow { color: var(--border); display: inline-flex; }
+  .progress { display: flex; align-items: center; gap: 10px; margin-left: auto; font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar { width: 140px; height: 8px; border-radius: 999px; background: var(--info-bg); overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--ok); }
+
+  .subnav { display: none; }
+  main.page { max-width: 1120px; margin: 0 auto; padding: 22px 32px 56px; }
+  .bottom-bar { display: none; }
+
+  @media (max-width: 860px) {
+    body { overflow: auto; }
+    .shell, .shell.no-panel { display: block; height: auto; }
+    .rail, .panel { display: none; }
+    .content { overflow: visible; }
+    .head-in { padding: 10px 14px 10px; }
+    .head .acts { margin-left: 0; width: 100%; }
+    .toggle-panel { display: none; }
+    .step .lbl, .step small { display: none; }
+    .step { padding: 5px 8px 5px 5px; }
+    .step[aria-current="step"] .lbl { display: inline; }
+    .progress { margin-left: 0; width: 100%; }
+    .subnav { display: flex; gap: 6px; overflow-x: auto; padding: 0 14px 10px; margin: 0 auto; max-width: 1120px; scrollbar-width: none; }
+    .subnav a { flex: none; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--fg); text-decoration: none; font-size: .88rem; white-space: nowrap; }
+    .subnav a[aria-current="page"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+    main.page { padding: 16px 14px 96px; }
+    .bottom-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; background: var(--surface); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+    .bottom-bar a { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px 7px; color: var(--muted); text-decoration: none; font-size: .72rem; }
+    .bottom-bar a[aria-current="true"] { color: var(--accent); font-weight: 600; }
+    .bottom-bar a[aria-current="true"]::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent); }
+    .bottom-bar .badge { position: absolute; top: 3px; left: calc(50% + 6px); padding: 0 5px; font-size: .65rem; }
+    .m-tools { display: flex; }
+  }
+  .m-tools { display: none; gap: 8px; width: 100%; }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Aller au contenu</a>
+<div class="shell" id="shell">
+  <nav class="rail" aria-label="Sections">
+    <svg class="logo" viewBox="0 0 64 64" role="img" aria-label="Time Sheet Helper"><circle cx="32" cy="32" r="30" fill="#1D4ED8"/><circle cx="32" cy="32" r="22" fill="#fff"/><path d="M32 17V32L22 38" fill="none" stroke="#1D4ED8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47" cy="47" r="15" fill="#16A34A" stroke="#fff" stroke-width="3"/><path d="M40 47.5l5 5 9-10.5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div id="rail-links" style="display:contents"></div>
+    <span class="rail-gap"></span>
+    <div class="r-foot">
+      <button type="button" class="track" id="track" data-tip="Surveillance"></button>
+      <button type="button" id="theme" data-tip="Thème (Alt+T)"></button>
+    </div>
+  </nav>
+  <aside class="panel" id="panel" aria-label="Panneau de section"><div class="p-in" id="panel-in"></div></aside>
+  <div class="content" id="content">
+    <header class="head"><div class="head-in" id="head"></div></header>
+    <div class="subnav" id="subnav" aria-label="Pages de la section"></div>
+    <main class="page" id="main"></main>
+  </div>
+</div>
+<nav class="bottom-bar" id="bottom" aria-label="Sections (mobile)"></nav>
+
+<link rel="stylesheet" href="submit.css">
+<script src="../shared/pages.js"></script>
+<script src="submit.js"></script>
+<script>
+(function () {
+  const T = window.TSH, $ = (s) => document.querySelector(s);
+  const shell = $("#shell");
+  const PK = "tsh-proto-c-panel";
+  const SECTIONS = [
+    { id: "temps", label: "Temps", icon: "semaine", home: "semaine" },
+    { id: "envoi", label: "Envoi", icon: "soumettre", home: "soumettre" },
+    { id: "config", label: "Config", icon: "regles", home: "regles", full: "Configuration" },
+    { id: "avance", label: "Avancé", icon: "activite", home: "activite", full: "Avancé" },
+  ];
+  const lastIn = {};
+  let lastId = null;
+  const badgeOf = (p) => (p.badge ? `<span class="badge ${p.badge.tone}" title="${p.badge.label}">${p.badge.text}<span class="visually-hidden"> — ${p.badge.label}</span></span>` : "");
+  const secBadge = (s) => { const p = T.PAGES.find((x) => x.group === s.id && x.badge); return p ? badgeOf(p) : ""; };
+  const pagesOf = (g) => T.PAGES.filter((p) => p.group === g);
+  const total = () => T.classifiedTotal();
+  const goalTotal = () => T.GOAL * 5;
+
+  function renderRail(cur) {
+    const html = SECTIONS.map((s) => {
+      const target = lastIn[s.id] || s.home;
+      const label = s.full || (s.id === "temps" ? "Ma semaine" : "Soumettre");
+      return `<a class="r-link" href="#/${target}" data-tip="${label}" ${s.id === cur.group ? 'aria-current="true"' : ""} aria-label="${label}">${T.icon(s.icon)}<span aria-hidden="true">${s.label}</span>${secBadge(s)}</a>`;
+    }).join("");
+    $("#rail-links").innerHTML = html;
+    $("#bottom").innerHTML = html.replace(/ data-tip="[^"]*"/g, "");
+  }
+
+  function dayStatus(i) {
+    const v = T.dayTotals()[i];
+    if (T.state.weekOffset > 0) return ["none", "Pas encore saisi"];
+    const S = window.TSHS && window.TSHS.status(i);
+    if (S && S.key !== "none") return [{ sent: "ok", ready: "info", draft: "info", modified: "warn", gap: "warn" }[S.tone] || "none", S.label];
+    if (v >= T.GOAL) return ["ok", "Complet"];
+    return ["warn", "Incomplet"];
+  }
+
+  function renderPanel(cur) {
+    const sec = SECTIONS.find((s) => s.id === cur.group);
+    const pageLink = (p) => `<a class="p-link" href="#/${p.id}" ${p.id === cur.id ? 'aria-current="page"' : ""}>${T.icon(p.icon, "sm")}<span class="grow">${p.label}<span class="d">${p.desc}</span></span>${badgeOf(p)}</a>`;
+    let html;
+    if (cur.group === "temps") {
+      const days = T.DAYS.map((d, i) => {
+        const [st, lab] = dayStatus(i);
+        const dt = T.addDays(T.monday(), i);
+        const today = T.state.weekOffset === 0 && i === 2;
+        return `<a class="day-link" href="#/jour" title="${lab}"><span class="dot ${st}"></span><span>${d} ${dt.getDate()}${today ? '<span class="today-tag">aujourd\'hui</span>' : ""}</span><span class="num muted">${T.state.weekOffset > 0 ? "–" : T.hh(T.dayTotals()[i])}</span></a>`;
+      }).join("");
+      html = `<div class="p-title"><h2>Ma semaine</h2><span class="muted">S${T.weekNumber()}</span></div>${pagesOf("temps").map(pageLink).join("")}<div class="p-sub">Jours de la semaine</div>${days}`;
+    } else if (cur.group === "envoi") {
+      const unc = T.unclassifiedTotal();
+      const nTodo = window.TSHS ? window.TSHS.todoCount() : 0;
+      const todoLine = nTodo ? `<div class="check todo">${T.icon("warn", "sm")}<span class="t">${nTodo} jour${nTodo > 1 ? "s" : ""} à traiter<small>Voir la bande de jours</small></span></div>` : `<div class="check ok">${T.icon("check", "sm")}<span class="t">Aucun jour à traiter<small>Tout est à jour</small></span></div>`;
+      html = `<div class="p-title"><h2>Avant d'envoyer</h2></div>${pagesOf("envoi").map(pageLink).join("")}<div class="p-sub">Liste de vérification</div>
+        ${window.TSHS ? todoLine : `<div class="check todo">${T.icon("warn", "sm")}<span class="t">${T.GAPS} trous à combler<small>Mar, Mer, Ven</small></span></div>`}
+        <div class="check todo">${T.icon("warn", "sm")}<span class="t">${T.hh(unc)} non classées<small>Règles à compléter</small></span></div>
+        <div class="check ok">${T.icon("check", "sm")}<span class="t">Connexion Forecast<small>Session active</small></span></div>
+        <div class="check todo">${T.icon("warn", "sm")}<span class="t">${T.hh(total())} sur ${T.hh(goalTotal())}<small>Objectif non atteint</small></span></div>`;
+    } else if (cur.group === "config") {
+      html = `<div class="p-title"><h2>Configuration</h2></div>${pagesOf("config").map(pageLink).join("")}`;
+    } else {
+      html = `<div class="p-title"><h2>Avancé</h2></div>${pagesOf("avance").map(pageLink).join("")}<p class="muted" style="margin:14px 10px;font-size:.84rem">Journal brut des segments : utile pour comprendre une classification, pas pour la saisie quotidienne.</p>`;
+    }
+    $("#panel-in").innerHTML = html;
+  }
+
+  function stepper(cur) {
+    const pct = Math.min(100, Math.round((total() / goalTotal()) * 100));
+    const ss = window.TSHS ? window.TSHS.stepSub() : { cls: "", sub: "" };
+    const steps = [
+      { id: "jour", n: 1, label: "Saisir", sub: "Jour", cls: "done" },
+      { id: "semaine", n: 2, label: "Vérifier", sub: "Semaine", cls: "attn" },
+      { id: "soumettre", n: 3, label: "Soumettre", sub: ss.sub || `${T.GAPS} trous`, cls: ss.cls },
+    ];
+    const arrow = `<li class="sep-arrow" aria-hidden="true">${T.icon("chevR", "sm")}</li>`;
+    return `<ol class="stepper" aria-label="Parcours de la semaine">${steps.map((s) =>
+      `<li><a class="step ${s.cls}" href="#/${s.id}" ${s.id === cur.id ? 'aria-current="step"' : ""}><span class="n">${s.cls === "done" ? T.icon("check", "sm") : s.n}</span><span class="lbl">${s.label}</span> <small>${s.sub}</small></a></li>`).join(arrow)}</ol>`;
+  }
+
+  function render() {
+    const cur = T.current();
+    lastIn[cur.group] = cur.id;
+    const sec = SECTIONS.find((s) => s.id === cur.group);
+    renderRail(cur);
+    renderPanel(cur);
+    const weekCentric = cur.group === "temps" || cur.group === "envoi";
+    const pct = Math.min(100, Math.round((total() / goalTotal()) * 100));
+    const weekNav = cur.id === "semaine" || cur.id === "soumettre" ? T.weekNavHtml() : "";
+    const sectionName = sec.full || (cur.group === "temps" ? "Ma semaine" : "Envoi");
+    $("#head").innerHTML = `<div class="head-row"><p class="kicker">${weekCentric ? `Semaine ${T.weekNumber()} · ${T.weekRange()}` : sectionName}</p>
+      <button class="icon-btn toggle-panel" id="toggle-panel" type="button" aria-label="Afficher / masquer le panneau" aria-expanded="${!shell.classList.contains("no-panel")}" title="Panneau (Ctrl+B)">${T.icon("panel")}</button>
+      <h1 id="h1" tabindex="-1">${cur.title()}</h1><div class="acts">${weekNav}${cur.actions.map(T.actionButton).join("")}</div></div>
+      ${weekCentric ? `<div class="head-row">${stepper(cur)}<div class="progress" role="group" aria-label="Progression de la semaine"><span>${T.hh(total())} / ${T.hh(goalTotal())}</span><span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></span></div></div>${window.TSHS && cur.id !== "jour" ? window.TSHS.dayStrip(cur) : ""}` : ""}
+      <div class="m-tools"><button type="button" class="btn" data-action="toggle-pause">${T.icon(T.state.paused ? "play" : "pause", "sm")}<span>${T.state.paused ? "Reprendre" : "Pause"}</span></button><button type="button" class="btn" data-action="toggle-theme">${T.icon(T.effectiveTheme() === "dark" ? "sun" : "moon", "sm")}<span>Thème</span></button></div>`;
+    $("#subnav").innerHTML = pagesOf(cur.group).length > 1 ? pagesOf(cur.group).map((p) => `<a href="#/${p.id}" ${p.id === cur.id ? 'aria-current="page"' : ""}>${p.label}</a>`).join("") : "";
+    $("#main").innerHTML = cur.body();
+    document.title = `${cur.label} — Time Sheet Helper`;
+    const paused = T.state.paused;
+    const track = $("#track");
+    track.className = "track " + (paused ? "paused" : "on");
+    track.innerHTML = `${T.icon(paused ? "pause" : "play")}`;
+    track.dataset.tip = paused ? "En pause — reprendre" : "Surveillance active — mettre en pause";
+    track.setAttribute("aria-label", paused ? "Surveillance en pause, cliquer pour reprendre" : "Surveillance active, cliquer pour mettre en pause");
+    $("#theme").innerHTML = T.icon(T.effectiveTheme() === "dark" ? "sun" : "moon");
+    $("#theme").setAttribute("aria-label", "Basculer le thème clair/sombre");
+    $("#toggle-panel").addEventListener("click", togglePanel);
+    if (lastId !== null && lastId !== cur.id) { $("#h1").focus({ preventScroll: true }); $("#content").scrollTop = 0; window.scrollTo(0, 0); }
+    lastId = cur.id;
+  }
+
+  function setPanel(show) {
+    shell.classList.toggle("no-panel", !show);
+    const b = $("#toggle-panel"); b && b.setAttribute("aria-expanded", String(show));
+    try { localStorage.setItem(PK, show ? "1" : "0"); } catch (_) {}
+  }
+  function togglePanel() { setPanel(shell.classList.contains("no-panel")); }
+
+  $("#track").addEventListener("click", () => T.runAction("toggle-pause"));
+  $("#theme").addEventListener("click", () => T.runAction("toggle-theme"));
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") { e.preventDefault(); togglePanel(); }
+  });
+  let show = true; try { show = localStorage.getItem(PK) !== "0"; } catch (_) {}
+  if (new URLSearchParams(location.search).get("panel") === "0") show = false;
+  shell.classList.toggle("no-panel", !show);
+  T.on(render);
+  render();
+})();
+</script>
+</body>
+</html>

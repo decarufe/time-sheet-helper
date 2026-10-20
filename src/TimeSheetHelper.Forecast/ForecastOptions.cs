@@ -119,4 +119,10 @@ public sealed class ForecastToolNames
     public string? ListTimeEntries { get; set; }
     public string? CreateTimeEntry { get; set; }
     public string? CurrentUser { get; set; }
+
+    /// <summary>Tool that changes the hours of one registration ("Forecast:Tools:UpdateTimeEntry"); forecast-mcp has none.</summary>
+    public string? UpdateTimeEntry { get; set; }
+
+    /// <summary>Tool that removes one registration ("Forecast:Tools:DeleteTimeEntry"); forecast-mcp has none.</summary>
+    public string? DeleteTimeEntry { get; set; }
 }

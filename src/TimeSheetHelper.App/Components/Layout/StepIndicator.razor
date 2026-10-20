@@ -1,0 +1,86 @@
+@using TimeSheetHelper.App.Services
+
+<ol class="stepper" aria-label="Parcours de la semaine">
+    @for (var i = 0; i < Steps.Length; i++)
+    {
+        var step = Steps[i];
+        var state = StateOf(step.Step);
+        var current = step.Step == Current;
+        if (i > 0)
+        {
+            <li class="step-sep" aria-hidden="true"><Icon Name="chevR" Small /></li>
+        }
+        <li>
+            <a class="step @state.Css @(current ? "current" : null)" href="@step.Route"
+               aria-current="@(current ? "step" : null)"
+               aria-label="@($"Étape {i + 1} : {step.Label}{(state.Spoken is null ? "" : ", " + state.Spoken)}")">
+                <span class="step-n">
+                    @if (state.Css == "done")
+                    {
+                        <Icon Name="check" Small />
+                    }
+                    else if (state.Css == "attn")
+                    {
+                        <Icon Name="warn" Small />
+                    }
+                    else
+                    {
+                        @(i + 1)
+                    }
+                </span>
+                <span class="step-text">
+                    <span class="step-lbl">@step.Label</span>
+                    @if (state.Subtitle is not null)
+                    {
+                        <small>@state.Subtitle</small>
+                    }
+                </span>
+            </a>
+        </li>
+    }
+</ol>
+
+@code {
+    private static readonly (NavStep Step, string Label, string Route)[] Steps =
+    [
+        (NavStep.Enter, "Saisir", "jour"),
+        (NavStep.Review, "Vérifier", ""),
+        (NavStep.Submit, "Soumettre", "soumettre"),
+    ];
+
+    /// <summary>Week summary; null while loading (every step is then "to come").</summary>
+    [Parameter] public NavSummary? Summary { get; set; }
+
+    /// <summary>Step of the current page (Jour = Enter, Semaine = Review, Soumettre = Submit); null elsewhere.</summary>
+    [Parameter] public NavStep? Current { get; set; }
+
+    private readonly record struct StepState(string? Css, string? Subtitle, string? Spoken);
+
+    private StepState StateOf(NavStep step)
+    {
+        if (Summary is not { } s)
+            return default;
+        if (s.IsSubmitted)
+            return new("done", step == NavStep.Submit ? "tout envoyé" : "terminé", "terminé");
+
+        var unclassified = s.Days.Sum(d => d.UnclassifiedHours);
+        var entered = s.ClassifiedHours > 0 && unclassified == 0;
+        switch (step)
+        {
+            case NavStep.Enter when unclassified > 0:
+                var toClassify = $"{ShellFormat.Hours(unclassified)} à classer";
+                return new("attn", toClassify, "à traiter : " + toClassify);
+            case NavStep.Enter when entered:
+                return new("done", ShellFormat.HoursOf(s.ClassifiedHours, s.WeeklyTargetHours), "terminé");
+            case NavStep.Review when s.BlockingGapCount > 0:
+                var gaps = s.BlockingGapCount == 1 ? "1 écart" : $"{s.BlockingGapCount} écarts";
+                return new("attn", gaps, "à traiter : " + gaps);
+            case NavStep.Review when entered:
+                return new("done", "aucun écart", "terminé");
+            case NavStep.Submit when entered && s.BlockingGapCount == 0:
+                return new(null, "prêt à envoyer", "prêt à envoyer");
+            default:
+                return default;
+        }
+    }
+}

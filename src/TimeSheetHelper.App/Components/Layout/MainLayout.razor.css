@@ -1,3 +1,64 @@
+.app-shell {
+    --rail-w: 60px;
+    --panel-w: 248px;
+    display: grid;
+    grid-template-columns: var(--rail-w) var(--panel-w) 1fr;
+    height: 100vh;
+    height: 100dvh;
+    transition: grid-template-columns .18s ease;
+}
+
+.app-shell.no-panel,
+html[data-panel="0"] .app-shell {
+    --panel-w: 0px;
+}
+
+.app-main {
+    min-width: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    /* Keeps the focused element out from under the sticky header (WCAG 2.4.11). */
+    scroll-padding-top: 140px;
+}
+
+main.page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 22px 32px 56px;
+    box-sizing: border-box;
+}
+
+main.page:focus {
+    outline: none;
+}
+
+.drawer-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 75;
+    background: var(--scrim);
+}
+
+@media (min-width: 861px) {
+    .drawer-scrim {
+        display: none;
+    }
+}
+
+@media (max-width: 860px) {
+    .app-shell,
+    .app-shell.no-panel,
+    html[data-panel="0"] .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+        transition: none;
+    }
+
+    main.page {
+        padding: 16px 16px 96px;
+    }
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;

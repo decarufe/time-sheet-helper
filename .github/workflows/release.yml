@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Incrément SemVer suggéré (auto = déduit des commits conventionnels)
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      version:
+        description: Forcer la version (ex. 1.4.0 ou 2.0.0-rc.1). Vide = utiliser la suggestion
+        type: string
+        required: false
+        default: ''
+      ai_notes:
+        description: Générer les notes de version avec l'IA (GitHub Models)
+        type: boolean
+        default: true
+      dry_run:
+        description: Simulation - construit et génère les notes sans créer de tag ni de release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      models: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Require main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          Write-Error "Une release ne peut être lancée que depuis main (branche sélectionnée : $env:GITHUB_REF_NAME)."
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute version
+        id: ver
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION_OVERRIDE: ${{ inputs.version }}
+        run: ./scripts/release/Get-ReleaseVersion.ps1 -Bump $env:BUMP -Override $env:VERSION_OVERRIDE
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet test tests/TimeSheetHelper.Tests -c Release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Build MSI
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: ./installer/build-msi.ps1 -Version $env:VERSION
+
+      - name: Build portable zip
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: ./installer/build-installer.ps1 -Version $env:VERSION
+
+      - name: Checksums
+        run: |
+          Get-ChildItem artifacts/* -Include *.msi, *.zip |
+            ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
+
+      - name: Release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          PREVIOUS_TAG: ${{ steps.ver.outputs.previous_tag }}
+          AI_NOTES: ${{ inputs.ai_notes }}
+        run: |
+          ./scripts/release/New-ReleaseNotes.ps1 -Version $env:VERSION -Tag $env:TAG `
+            -PreviousTag $env:PREVIOUS_TAG -Ref $env:GITHUB_SHA `
+            -OutputFile artifacts/RELEASE_NOTES.md -UseAi ($env:AI_NOTES -eq 'true')
+          Get-Content artifacts/RELEASE_NOTES.md | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.ver.outputs.version }}
+          path: |
+            artifacts/*.msi
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+            artifacts/RELEASE_NOTES.md
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          $flags = if ($env:PRERELEASE -eq 'true') { @('--prerelease') } else { @('--latest') }
+          gh release create $env:TAG `
+            (Get-ChildItem artifacts/* -Include *.msi, *.zip).FullName artifacts/SHA256SUMS.txt `
+            --target $env:GITHUB_SHA `
+            --title "Time Sheet Helper $env:VERSION" `
+            --notes-file artifacts/RELEASE_NOTES.md `
+            @flags
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create a échoué.' }
