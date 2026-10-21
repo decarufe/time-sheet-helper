@@ -22,9 +22,6 @@ public sealed record ForecastRemoteEntry(
     public bool IsApproved => string.Equals(ApprovalStatus, "APPROVED", StringComparison.OrdinalIgnoreCase);
 
     public bool IsSubmitted => string.Equals(ApprovalStatus, "SUBMITTED", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Approved or invoiced: Forecast no longer expects changes to it.</summary>
-    public bool IsLocked => IsApproved || Invoiced;
 }
 
 /// <summary>State of a task as "list_project_tasks" describes it (<paramref name="Code"/> is the "T…" number).</summary>

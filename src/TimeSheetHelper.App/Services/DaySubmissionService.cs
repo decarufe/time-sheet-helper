@@ -28,6 +28,21 @@ public interface IDaySubmissionService
     Task<DayPlan> PlanAsync(DateOnly date, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Same plan, for display only: uses the last read of Forecast kept by the application (shared by every window) when it is recent,
+    /// and reads Forecast otherwise. A send never relies on it.
+    /// </summary>
+    Task<DayPlan> PlanCachedAsync(DateOnly date, CancellationToken cancellationToken = default);
+
+    /// <summary>When Forecast was last read successfully by the application, or null when it never was.</summary>
+    DateTime? LastSyncedUtc { get; }
+
+    /// <summary>Raised after <see cref="SyncWeekAsync"/> and after a send: the windows can plan again from the cache.</summary>
+    event Action? Synced;
+
+    /// <summary>Reads the working days of the week (and the cached weekend days) in Forecast and keeps them. False when no day could be read.</summary>
+    Task<bool> SyncWeekAsync(DateOnly weekStart, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Takes the day's lock, plans again (Forecast is read before any write), applies the operations and the conflict resolutions, and
     /// keeps a journal. Nothing new or nothing to send: no write. Lock not obtained: <see cref="DayStatus.InProgress"/>, no write.
     /// </summary>
@@ -57,19 +72,76 @@ public sealed class DaySubmissionService(
 
     public static DateOnly WeekStartOf(DateOnly date) => date.AddDays(-(((int)date.DayOfWeek + 6) % 7));
 
+    /// <summary>A cached read older than this is read again.</summary>
+    public static readonly TimeSpan MaxCacheAge = TimeSpan.FromMinutes(15);
+
+    private const string UnknownCapabilitiesPrefix = "Capacités de Forecast inconnues";
+
+    private readonly ConcurrentDictionary<DateOnly, (ForecastDayRead Read, DateTime AtUtc)> cachedReads = new();
+    private readonly object cacheLock = new();
+    private ForecastCapabilities? cachedCapabilities;
+    private DateTime? lastSyncedUtc;
+
+    public event Action? Synced;
+
+    public DateTime? LastSyncedUtc
+    {
+        get
+        {
+            lock (cacheLock)
+                return lastSyncedUtc;
+        }
+    }
+
     public Task<ForecastCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) =>
-        writer.GetCapabilitiesAsync(cancellationToken);
+        FetchCapabilitiesAsync(cancellationToken);
 
     public async Task<DayPlan> PlanAsync(DateOnly date, CancellationToken cancellationToken = default)
     {
-        var capabilities = await writer.GetCapabilitiesAsync(cancellationToken);
-        return await PlanAsync(date, capabilities, cancellationToken);
+        var capabilities = await FetchCapabilitiesAsync(cancellationToken);
+        return await PlanAsync(date, capabilities, null, cancellationToken);
     }
 
-    private async Task<DayPlan> PlanAsync(DateOnly date, ForecastCapabilities capabilities, CancellationToken cancellationToken)
+    public async Task<DayPlan> PlanCachedAsync(DateOnly date, CancellationToken cancellationToken = default)
+    {
+        ForecastCapabilities? capabilities;
+        lock (cacheLock)
+            capabilities = cachedCapabilities;
+        if (capabilities is not null && cachedReads.TryGetValue(date, out var hit)
+            && timeProvider.GetUtcNow().UtcDateTime - hit.AtUtc <= MaxCacheAge)
+            return await PlanAsync(date, capabilities, hit.Read, cancellationToken);
+        return await PlanAsync(date, cancellationToken);
+    }
+
+    public async Task<bool> SyncWeekAsync(DateOnly weekStart, CancellationToken cancellationToken = default)
+    {
+        var monday = WeekStartOf(weekStart);
+        await FetchCapabilitiesAsync(cancellationToken);
+        var anyRead = false;
+        for (var i = 0; i < 7; i++)
+        {
+            var date = monday.AddDays(i);
+            if (i >= 5 && !cachedReads.ContainsKey(date))
+                continue;
+            anyRead |= (await ReadAsync(date, cancellationToken)).IsComplete;
+        }
+        Synced?.Invoke();
+        return anyRead;
+    }
+
+    private async Task<ForecastCapabilities> FetchCapabilitiesAsync(CancellationToken cancellationToken)
+    {
+        var capabilities = await writer.GetCapabilitiesAsync(cancellationToken);
+        if (capabilities.UnavailableReason?.StartsWith(UnknownCapabilitiesPrefix, StringComparison.Ordinal) != true)
+            lock (cacheLock)
+                cachedCapabilities = capabilities;
+        return capabilities;
+    }
+
+    private async Task<DayPlan> PlanAsync(DateOnly date, ForecastCapabilities capabilities, ForecastDayRead? cached, CancellationToken cancellationToken)
     {
         var context = await LoadAsync(date, cancellationToken);
-        var read = await ReadAsync(date, cancellationToken);
+        var read = cached ?? await ReadAsync(date, cancellationToken);
         var previous = context.Previous;
         if (previous is { Status: DayStatus.InProgress, InProgressSinceUtc: { } since }
             && since <= timeProvider.GetUtcNow().UtcDateTime - DayLock.StaleAfter)
@@ -87,6 +159,7 @@ public sealed class DaySubmissionService(
 
         await using (lease)
         {
+            cachedReads.TryRemove(date, out _);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             running[date] = cts;
             try
@@ -96,6 +169,7 @@ public sealed class DaySubmissionService(
             finally
             {
                 running.TryRemove(KeyValuePair.Create(date, cts));
+                Synced?.Invoke();
             }
         }
     }
@@ -119,7 +193,7 @@ public sealed class DaySubmissionService(
     public async Task<SendReadyResult> SendReadyAsync(DateOnly weekStart, CancellationToken cancellationToken = default)
     {
         var monday = WeekStartOf(weekStart);
-        var capabilities = await writer.GetCapabilitiesAsync(cancellationToken);
+        var capabilities = await FetchCapabilitiesAsync(cancellationToken);
         var sent = new List<DaySendResult>();
         var skipped = new List<(DateOnly Date, string Reason)>();
         for (var i = 0; i < 7; i++)
@@ -127,7 +201,7 @@ public sealed class DaySubmissionService(
             var date = monday.AddDays(i);
             try
             {
-                var plan = await PlanAsync(date, capabilities, cancellationToken);
+                var plan = await PlanAsync(date, capabilities, null, cancellationToken);
                 if (plan.IsReady)
                     sent.Add(await SendAsync(date, new Dictionary<int, ConflictResolution>(), cancellationToken));
                 else if (plan.Gate != DayGate.NothingToSend)
@@ -181,7 +255,7 @@ public sealed class DaySubmissionService(
         Dictionary<int, (decimal Hours, string? EntryId)> sent;
         try
         {
-            var capabilities = await writer.GetCapabilitiesAsync(token);
+            var capabilities = await FetchCapabilitiesAsync(token);
             context = await LoadAsync(date, token);
             var read = await ReadAsync(date, token);
             sent = (context.Previous?.Cells ?? []).GroupBy(c => c.ForecastTaskId).ToDictionary(g => g.Key, g => (g.First().SentHours, g.First().ForecastEntryId));
@@ -561,7 +635,15 @@ public sealed class DaySubmissionService(
     {
         try
         {
-            return ForecastDayRead.From(date, await writer.ReadDayAsync(date, cancellationToken));
+            var read = ForecastDayRead.From(date, await writer.ReadDayAsync(date, cancellationToken));
+            if (read.IsComplete)
+            {
+                var now = timeProvider.GetUtcNow().UtcDateTime;
+                cachedReads[date] = (read, now);
+                lock (cacheLock)
+                    lastSyncedUtc = now;
+            }
+            return read;
         }
         catch (Exception ex) when (ForecastErrors.IsRecoverable(ex, cancellationToken))
         {
@@ -611,7 +693,6 @@ public sealed class DaySubmissionService(
     private static string Label(ForecastCellStatus status) => status switch
     {
         ForecastCellStatus.Mismatch => "Forecast a changé entre-temps",
-        ForecastCellStatus.Locked => "jour approuvé ou facturé",
         ForecastCellStatus.Unknown => "résultat inconnu",
         ForecastCellStatus.RowNotFound => "tâche introuvable dans Forecast",
         _ => "erreur de Forecast",
@@ -626,7 +707,6 @@ public sealed class DaySubmissionService(
         DayStatus.Modified => "modifié depuis l'envoi",
         DayStatus.Partial => "envoi partiel",
         DayStatus.Conflict => "conflit avec Forecast",
-        DayStatus.Locked => "verrouillé dans Forecast",
         _ => "erreur",
     };
 
@@ -637,7 +717,6 @@ public sealed class DaySubmissionService(
         DayGate.ReadForecastFirst => "Lecture de Forecast incomplète : relisez Forecast avant d'envoyer.",
         DayGate.ResolveConflicts => "Des conflits ou des cellules bloquées sont à régler d'abord.",
         DayGate.InProgress => "Un envoi de ce jour est déjà en cours.",
-        DayGate.Locked => "Jour approuvé ou facturé dans Forecast : rien n'est modifié.",
         _ => "Prêt à envoyer.",
     };
 }

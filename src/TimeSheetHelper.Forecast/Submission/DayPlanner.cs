@@ -6,7 +6,7 @@ namespace TimeSheetHelper.Forecast.Submission;
 /// <summary>
 /// State of one (task, day) cell. D = hours of the draft, F = hours read in Forecast, S = <see cref="DaySubmissionCell.SentHours"/>.
 /// Equal = within <see cref="ForecastFillPlanner.Tolerance"/>. Evaluated in this order:
-/// Ignored &gt; Locked &gt; NotAttempted &gt; Deleted &gt; Unchanged &gt; New &gt; Modified &gt; Conflict.
+/// Ignored &gt; NotAttempted &gt; Deleted &gt; Unchanged &gt; New &gt; Modified &gt; Conflict.
 /// </summary>
 public enum CellState
 {
@@ -27,9 +27,6 @@ public enum CellState
 
     /// <summary>Task left out of the submission (flag, choice of the week, or ignored by the caller).</summary>
     Ignored,
-
-    /// <summary>The day holds registrations Forecast approved or invoiced.</summary>
-    Locked,
 
     /// <summary>The send stopped before this cell, or Forecast could not be read whole (G4).</summary>
     NotAttempted,
@@ -52,7 +49,7 @@ public sealed record CellPlan(
     int? AmbiguousGroup = null);
 
 /// <summary>What the send button of a day offers (labels: contracts §3.2).</summary>
-public enum DayGate { NothingToSend, NothingNew, ReadForecastFirst, ResolveConflicts, Send, SendChanges, Resume, InProgress, Locked }
+public enum DayGate { NothingToSend, NothingNew, ReadForecastFirst, ResolveConflicts, Send, SendChanges, Resume, InProgress }
 
 public sealed record DayPlan(
     DateOnly WeekStart,
@@ -63,12 +60,8 @@ public sealed record DayPlan(
     IReadOnlyList<CellPlan> Cells,
     DayGate Gate,
     bool ForecastReadComplete,
-    ForecastCapabilities Capabilities,
-    IReadOnlyList<ForecastRemoteEntry>? LockedBy = null)
+    ForecastCapabilities Capabilities)
 {
-    /// <summary>The approved or invoiced Forecast registrations that lock the day (empty when it is not locked).</summary>
-    public IReadOnlyList<ForecastRemoteEntry> LockingEntries => LockedBy ?? [];
-
     public bool HasWork => Cells.Any(c => c.Operation != CellOperation.None);
 
     public bool IsReady => Gate is DayGate.Send or DayGate.SendChanges or DayGate.Resume;
@@ -115,31 +108,29 @@ public static class DayPlanner
 
         var dayEntries = forecast.Entries.Where(e => e.Date == date).ToList();
         var complete = forecast.IsComplete;
-        var locked = complete ? dayEntries.FirstOrDefault(e => e.IsLocked) : null;
         var attribution = complete
             ? Attribute(dayEntries, ids.Where(id => !ignoredTaskIds.Contains(id)).ToList(), draft, sent.Values, tasks)
             : Attribution.Empty;
 
         var cells = ids
-            .Select(id => PlanCell(id, date, draft, sent, ignoredTaskIds, tasks, capabilities, forecast, locked, attribution))
+            .Select(id => PlanCell(id, date, draft, sent, ignoredTaskIds, tasks, capabilities, forecast, attribution))
             .OrderBy(c => c.TaskDisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(c => c.ForecastTaskId)
             .ToList();
 
         var currentFingerprint = DayFingerprint.Compute(date,
             draft.Where(c => !ignoredTaskIds.Contains(c.Key)).Select(c => (c.Key, c.Value)));
-        var previousStatus = previous?.Status ?? DayStatus.NotAttempted;
-        var status = StatusOf(previousStatus, complete, locked is not null, cells);
-        var gate = GateOf(previousStatus, complete, locked is not null, cells);
+        var previousStatus = Normalize(previous);
+        var status = StatusOf(previousStatus, complete, cells);
+        var gate = GateOf(previousStatus, complete, cells);
 
-        return new DayPlan(weekStart, date, status, currentFingerprint, previous?.Fingerprint, cells, gate, complete, capabilities,
-            locked is null ? null : dayEntries.Where(e => e.IsLocked).ToList());
+        return new DayPlan(weekStart, date, status, currentFingerprint, previous?.Fingerprint, cells, gate, complete, capabilities);
     }
 
     private static CellPlan PlanCell(
         int id, DateOnly date, Dictionary<int, decimal> draft, Dictionary<int, DaySubmissionCell> sent, IReadOnlySet<int> ignored,
         IReadOnlyDictionary<int, ForecastTask> tasks, ForecastCapabilities capabilities, ForecastDayRead forecast,
-        ForecastRemoteEntry? locked, Attribution attribution)
+        Attribution attribution)
     {
         var d = draft.GetValueOrDefault(id);
         decimal? s = sent.TryGetValue(id, out var sentCell) ? sentCell.SentHours : null;
@@ -159,10 +150,6 @@ public static class DayPlanner
             return Cell(CellState.NotAttempted, CellOperation.None,
                 "Lecture de Forecast incomplète : cellule non comparée, rien n'est écrit. Relisez Forecast."
                 + (forecast.Detail is { } detail ? $" (Détail : {detail})" : ""));
-
-        if (locked is not null)
-            return Cell(CellState.Locked, CellOperation.None,
-                $"Le {date:yyyy-MM-dd} contient des saisies {(locked.Invoiced ? "facturées" : "approuvées")} dans Forecast : rien n'est écrit ni modifié.");
 
         if (attribution.Ambiguous.TryGetValue(id, out var ambiguous))
             return Cell(CellState.Conflict, CellOperation.None,
@@ -226,14 +213,19 @@ public static class DayPlanner
                 ? $"La saisie de Forecast n'est pas identifiable seule (plusieurs saisies ou tâche reconnue par son projet) : rien n'est écrit. {advice}"
                 : $"Rien n'est écrit. {advice}";
 
-    private static DayStatus StatusOf(DayStatus previous, bool complete, bool locked, IReadOnlyList<CellPlan> cells)
+    private static DayStatus Normalize(DaySubmission? previous) => previous?.Status switch
+    {
+        null => DayStatus.NotAttempted,
+        DayStatus.LegacyLocked => previous.Cells.Count > 0 ? DayStatus.Sent : DayStatus.NotAttempted,
+        var status => status.Value,
+    };
+
+    private static DayStatus StatusOf(DayStatus previous, bool complete, IReadOnlyList<CellPlan> cells)
     {
         if (previous == DayStatus.InProgress)
             return DayStatus.InProgress;
         if (!complete)
             return previous;
-        if (locked)
-            return DayStatus.Locked;
         if (cells.Any(c => c.State == CellState.Conflict))
             return DayStatus.Conflict;
 
@@ -246,14 +238,12 @@ public static class DayPlanner
         };
     }
 
-    private static DayGate GateOf(DayStatus previous, bool complete, bool locked, IReadOnlyList<CellPlan> cells)
+    private static DayGate GateOf(DayStatus previous, bool complete, IReadOnlyList<CellPlan> cells)
     {
         if (previous == DayStatus.InProgress)
             return DayGate.InProgress;
         if (!complete)
             return DayGate.ReadForecastFirst;
-        if (locked)
-            return DayGate.Locked;
         if (cells.Any(c => c.State == CellState.Conflict))
             return DayGate.ResolveConflicts;
 

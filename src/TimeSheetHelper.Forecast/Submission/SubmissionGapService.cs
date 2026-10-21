@@ -319,20 +319,6 @@ public sealed class SubmissionGapService : ISubmissionGapService
                 break;
             }
 
-            case ForecastCellStatus.Locked:
-                yield return CellGap(SubmissionGapType.CellLocked, SubmissionGapSeverity.Blocking, cell,
-                    "Jour verrouillé dans Forecast",
-                    cell.Message ?? "Le jour est approuvé ou facturé dans Forecast : la cellule n'est pas saisie.",
-                    [
-                        new(SubmissionGapResolution.OpenInForecast, IsRecommended: true),
-                        new(SubmissionGapResolution.MarkNotWork),
-                        new(SubmissionGapResolution.ReadAgain),
-                        new(SubmissionGapResolution.IgnoreKnowingly, IsAvailable: false, UnavailableReason: AdjustmentsLater),
-                    ],
-                    forecastHours: cell.Actual,
-                    removalPreview: Removal(cell, totals, weekTotal, "Si ces heures passent en « Pas du travail »"));
-                break;
-
             case ForecastCellStatus.Unknown when cell.Issue == ForecastCellIssue.ReadIncomplete:
                 // Covered by the single "read incomplete" gap.
                 break;
@@ -396,8 +382,6 @@ public sealed class SubmissionGapService : ISubmissionGapService
             : $"Forecast contient {Hours(forecast)} le {DayName(first.Date)} pour {cellLabel}, {Hours(-delta)} de moins que les {Hours(expected)} du brouillon.";
         if (approximate)
             message += " Comparaison approximative : faite par projet et par jour, les heures d'une autre tâche du même projet peuvent s'y mêler.";
-        if (first.ExistingEntries.Any(e => e.IsLocked))
-            message += " Certaines de ces saisies sont approuvées ou facturées.";
 
         SubmissionGapPreview preview;
         List<SubmissionGapAction> actions;

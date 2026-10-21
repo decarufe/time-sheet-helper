@@ -47,7 +47,7 @@
     }
     else if (creating)
     {
-        <NewTaskForm InitialTaskName="@query" OnCreated="SelectAsync" OnCancel="() => creating = false" />
+        <NewTaskForm InitialTaskName="@NewTaskName" OnCreated="SelectAsync" OnCancel="() => creating = false" />
     }
 
     else
@@ -55,7 +55,7 @@
     <input @ref="searchInput" type="search" class="search" placeholder="Rechercher une tâche, un projet ou un client…"
            aria-label="Rechercher une tâche" @onkeydown="OnSearchKeyDownAsync" @bind="query" @bind:event="oninput" @bind:after="StateHasChanged" />
 
-    @if (IgnoredTask() is { } ignored && (query.Trim().Length == 0 || Contains(ForecastTask.IgnoredLabel, query.Trim())))
+    @if (IgnoredTask() is { } ignored && (query.Trim().Length == 0 || TaskPickerView.Contains(ForecastTask.IgnoredLabel, query.Trim())))
     {
         <button type="button" class="@(ignored.Id == SelectedTaskId ? "task ignored current" : "task ignored")"
                 title="Retire ces créneaux ou ces réunions de la feuille de temps" @onclick="() => SelectAsync(ignored.Id)">
@@ -64,6 +64,46 @@
             <span class="code">Hors feuille de temps</span>
         </button>
     }
+
+    <div class="toolbar" role="group" aria-label="Affichage des tâches">
+        <div class="chips" role="radiogroup" aria-label="Afficher">
+            @foreach (var scope in Enum.GetValues<TaskScope>())
+            {
+                <button type="button" role="radio" aria-checked="@(options.Scope == scope ? "true" : "false")"
+                        class="@(options.Scope == scope ? "chip active" : "chip")" @onclick="() => SetOptions(options with { Scope = scope })">
+                    @TaskPickerView.ScopeLabel(scope)
+                </button>
+            }
+        </div>
+        <label>
+            Projet
+            <select value="@(options.Project ?? "")" @onchange="e => SetOptions(options with { Project = e.Value as string is { Length: > 0 } p ? p : null })">
+                <option value="">Tous</option>
+                @foreach (var project in tasks is null ? [] : TaskPickerView.Projects(tasks))
+                {
+                    <option value="@project">@project</option>
+                }
+            </select>
+        </label>
+        <label>
+            Regrouper
+            <select value="@options.Grouping" @onchange="e => SetOptions(options with { Grouping = Enum.Parse<TaskGrouping>((string)e.Value!) })">
+                @foreach (var grouping in Enum.GetValues<TaskGrouping>())
+                {
+                    <option value="@grouping">@TaskPickerView.GroupingLabel(grouping)</option>
+                }
+            </select>
+        </label>
+        <label>
+            Trier
+            <select value="@options.Sort" @onchange="e => SetOptions(options with { Sort = Enum.Parse<TaskSort>((string)e.Value!) })">
+                @foreach (var sort in Enum.GetValues<TaskSort>())
+                {
+                    <option value="@sort">@TaskPickerView.SortLabel(sort)</option>
+                }
+            </select>
+        </label>
+    </div>
 
     <div class="list">
         @if (tasks is null)
@@ -76,60 +116,37 @@
         }
         else
         {
-            var favorites = query.Trim().Length == 0
-                ? Filtered().Where(t => t.IsFavorite).OrderBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase).ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase).ToList()
-                : [];
-            var favoriteIds = favorites.Select(t => t.Id).ToHashSet();
-            var groups = Filtered()
-                .Where(t => !favoriteIds.Contains(t.Id))
-                .GroupBy(t => (Client: t.ClientName ?? t.ProjectName, t.ProjectName))
-                .OrderBy(g => g.Key.Client, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(g => g.Key.ProjectName, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-            if (groups.Count == 0 && favorites.Count == 0)
+            var groups = Groups();
+            if (groups.Count == 0)
             {
-                <p class="muted">Aucune tâche ne correspond à « @query ».</p>
-            }
-            @if (favorites.Count > 0)
-            {
-                <section>
-                    <h3>★ Favoris</h3>
-                    <ul>
-                        @foreach (var task in favorites)
-                        {
-                            <li>
-                                <button type="button" class="@(task.Id == SelectedTaskId ? "task current" : "task")"
-                                        style="@TimesheetUi.TaskStyle(task.Id)" @onclick="() => SelectAsync(task.Id)">
-                                    <span class="swatch" aria-hidden="true"></span>
-                                    <span class="name">@task.TaskName</span>
-                                    <span class="code">@task.ProjectName</span>
-                                </button>
-                            </li>
-                        }
-                    </ul>
-                </section>
+                <p class="muted">@(query.Trim().Length > 0 ? $"Aucune tâche ne correspond à « {query.Trim()} »." : "Aucune tâche ne correspond à ces filtres.")</p>
             }
             @foreach (var group in groups)
             {
+                var showProject = group.IsFavorites || options.Grouping == TaskGrouping.None;
                 <section>
-                    <h3>
-                        @group.Key.Client
-                        @if (!string.Equals(group.Key.Client, group.Key.ProjectName, StringComparison.Ordinal))
-                        {
-                            <span class="project">· @group.Key.ProjectName</span>
-                        }
-                    </h3>
+                    @if (group.Title is not null)
+                    {
+                        <h3>
+                            @group.Title
+                            @if (group.Detail is not null)
+                            {
+                                <span class="project">· @group.Detail</span>
+                            }
+                        </h3>
+                    }
                     <ul>
-                        @foreach (var task in group.OrderBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase))
+                        @foreach (var task in group.Tasks)
                         {
+                            var taskDetail = showProject ? task.ProjectName : task.ProjectCode;
                             <li>
                                 <button type="button" class="@(task.Id == SelectedTaskId ? "task current" : "task")"
-                                        style="@TimesheetUi.TaskStyle(task.Id)" @onclick="() => SelectAsync(task.Id)">
+                                        style="@TimesheetUi.TaskStyle(task.Id)" title="@UsageTitle(task)" @onclick="() => SelectAsync(task.Id)">
                                     <span class="swatch" aria-hidden="true"></span>
                                     <span class="name">@task.TaskName</span>
-                                    @if (!string.IsNullOrEmpty(task.ProjectCode))
+                                    @if (!string.IsNullOrEmpty(taskDetail))
                                     {
-                                        <span class="code">@task.ProjectCode</span>
+                                        <span class="code">@taskDetail</span>
                                     }
                                 </button>
                             </li>
@@ -140,7 +157,7 @@
         }
     </div>
     <button type="button" class="new-task-button" @onclick="() => creating = true">
-        + Nouvelle tâche@(query.Trim().Length > 0 ? $" « {query.Trim()} »" : "")
+        + Nouvelle tâche@(NewTaskName.Length > 0 ? $" « {NewTaskName} »" : "")
     </button>
     }
 </div>
@@ -148,7 +165,11 @@
 @code {
     private readonly string titleId = $"picker-{Guid.NewGuid():N}";
     private readonly string commentId = $"picker-comment-{Guid.NewGuid():N}";
+    // Remembered for the session so the picker reopens with the same view.
+    private static TaskPickerOptions lastOptions = new();
+    private TaskPickerOptions options = lastOptions;
     private List<ForecastTask>? tasks;
+    private IReadOnlyDictionary<int, TaskUsage> usage = new Dictionary<int, TaskUsage>();
     private string query = "";
     private bool creating;
     private ElementReference searchInput;
@@ -168,6 +189,11 @@
 
     /// <summary>Ask for a comment (with the latest comments of the task as suggestions) after the task is chosen.</summary>
     [Parameter] public bool AllowComment { get; set; }
+
+    /// <summary>Name proposed for a new task when nothing was typed in the search box (e.g. the title of the meeting being assigned).</summary>
+    [Parameter] public string? SuggestedTaskName { get; set; }
+
+    private string NewTaskName => query.Trim().Length > 0 ? query.Trim() : SuggestedTaskName?.Trim() ?? "";
 
     [Parameter] public string SubmitLabel { get; set; } = "Assigner";
 
@@ -189,6 +215,7 @@
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         tasks = await db.ForecastTasks.AsNoTracking().Where(t => t.IsActive).ToListAsync();
+        usage = await Weeks.GetTaskUsageAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -206,19 +233,17 @@
         }
     }
 
-    private IEnumerable<ForecastTask> Filtered()
-    {
-        if (tasks is null)
-            return [];
-        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return tasks.Where(t => !t.IsIgnored).Where(t => terms.All(term =>
-            Contains(t.TaskName, term) || Contains(t.ProjectName, term) || Contains(t.ClientName, term) || Contains(t.ProjectCode, term)));
-    }
+    private IReadOnlyList<TaskPickerGroup> Groups() =>
+        tasks is null ? [] : TaskPickerView.Build(tasks, query, options, usage, DateOnly.FromDateTime(DateTime.Now));
+
+    private void SetOptions(TaskPickerOptions value) => options = lastOptions = value;
+
+    private string? UsageTitle(ForecastTask task) =>
+        usage.TryGetValue(task.Id, out var u)
+            ? $"Utilisée {u.Days} jour{(u.Days > 1 ? "s" : "")}, dernière fois le {u.LastUsed.ToString("d MMMM yyyy", TimesheetUi.French)}"
+            : null;
 
     private ForecastTask? IgnoredTask() => tasks?.FirstOrDefault(t => t.IsIgnored);
-
-    private static bool Contains(string? value, string term) =>
-        value is not null && TimesheetUi.French.CompareInfo.IndexOf(value, term, System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace) >= 0;
 
     private async Task SelectAsync(int taskId)
     {
@@ -282,12 +307,8 @@
     {
         if (e.Key == "Enter" && query.Length > 0)
         {
-            // Enter in the search box picks the single (or first) match.
-            var first = Filtered()
-                .OrderBy(t => t.ClientName ?? t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(t => t.ProjectName, StringComparer.CurrentCultureIgnoreCase)
-                .ThenBy(t => t.TaskName, StringComparer.CurrentCultureIgnoreCase)
-                .FirstOrDefault();
+            // Enter in the search box picks the first listed match.
+            var first = TaskPickerView.First(Groups());
             if (first is not null)
                 await SelectAsync(first.Id);
         }

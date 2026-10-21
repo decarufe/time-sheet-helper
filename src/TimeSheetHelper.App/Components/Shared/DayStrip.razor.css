@@ -34,7 +34,6 @@
 .ds-day.t-danger { border-top-color: var(--danger); }
 .ds-day.t-info { border-top-color: var(--info); }
 .ds-day.t-accent { border-top-color: var(--accent); }
-.ds-day.t-locked { border-top-color: var(--locked); }
 .ds-day.t-neutral { border-top-color: var(--border-strong); }
 .ds-name {
   font-weight: 600;

@@ -30,21 +30,21 @@ public sealed class SendReadyDaysTests : IDisposable
     }
 
     [Fact]
-    public async Task G9_SendReady_SkipsConflictAndLockedDays()
+    public async Task G9_SendReady_SkipsConflictDays()
     {
         await WeekAsync();
 
         var result = await _host.Service().SendReadyAsync(Monday);
 
-        Assert.Equal([Monday, Friday], result.Sent.Select(s => s.Date));
+        Assert.Equal([Monday, Wednesday, Friday], result.Sent.Select(s => s.Date));
         Assert.All(result.Sent, s => Assert.Equal(DayStatus.Sent, s.Status));
-        Assert.Equal([Tuesday, Wednesday], result.SkippedDays.Select(s => s.Date));
+        Assert.Equal([Tuesday], result.SkippedDays.Select(s => s.Date));
         Assert.All(result.SkippedDays, s => Assert.False(string.IsNullOrWhiteSpace(s.Reason)));
-        Assert.Equal(3, Server.Creates);
-        Assert.Equal(3, Server.WriteCount);
+        Assert.Equal(4, Server.Creates);
+        Assert.Equal(4, Server.WriteCount);
         Assert.Equal([(200, 60), (3382, 120)], _host.ForecastOn(Monday));
         Assert.Equal([(3382, 60)], _host.ForecastOn(Tuesday));
-        Assert.Equal([(200, 240)], _host.ForecastOn(Wednesday));
+        Assert.Equal([(200, 240), (3382, 120)], _host.ForecastOn(Wednesday));
         Assert.Empty(_host.ForecastOn(Thursday));
         Assert.Equal([(5100, 90)], _host.ForecastOn(Friday));
     }

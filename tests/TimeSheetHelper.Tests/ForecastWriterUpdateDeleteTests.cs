@@ -158,17 +158,15 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
     }
 
     [Fact]
-    public async Task A_day_holding_an_approved_registration_is_left_alone()
+    public async Task A_day_holding_an_approved_registration_is_still_updated()
     {
         _server.Entries.Add(new Registration("502", Day, 60, "T3382", "APPROVED"));
 
         var update = await Writer().UpdateCellAsync(Day, _dev.Id, "501", 2m, 3m);
-        var delete = await Writer().DeleteCellAsync(Day, _dev.Id, "501", 2m);
 
-        Assert.Equal(ForecastCellStatus.Locked, update.Status);
-        Assert.Equal(ForecastCellStatus.Locked, delete.Status);
-        Assert.Equal(0, Writes);
-        Assert.Equal(120, _server.Entries[0].Minutes);
+        Assert.Equal(ForecastCellStatus.Updated, update.Status);
+        Assert.Equal(1, Writes);
+        Assert.Equal(180, _server.Entries[0].Minutes);
     }
 
     [Theory]

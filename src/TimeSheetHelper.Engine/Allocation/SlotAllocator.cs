@@ -81,6 +81,7 @@ public sealed class SlotAllocator(IOptions<EngineOptions> options, TimeProvider 
 
         void Add(ResolvedActivity a, double weight, bool fromMeeting = false)
         {
+            weight *= a.Weight;
             if (weight <= 0 || a.Candidate is not { } c)
                 return;
             weights[c] = weights.GetValueOrDefault(c) + weight;

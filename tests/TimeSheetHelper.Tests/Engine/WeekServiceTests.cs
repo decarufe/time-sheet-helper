@@ -265,6 +265,30 @@ public class WeekServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Assignments_teach_the_dominant_group_and_reassigning_or_clearing_withdraws_it()
+    {
+        await _host.AddActivitiesAsync(
+            Code(Fx.Mon(9), Fx.Mon(9, 12), "contoso/z"),     // dominant in the 9:00 slot
+            Code(Fx.Mon(9, 12), Fx.Mon(9, 15), "contoso/y"));
+
+        async Task<List<(string, int, int)>> Feedback()
+        {
+            await using var db = _host.Db();
+            return (await db.AssignmentFeedback.ToListAsync()).Select(f => (f.GroupKey, f.ForecastTaskId, f.Count)).ToList();
+        }
+
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], _support.Id);
+        var learned = Assert.Single(await Feedback());
+        Assert.Contains("contoso/z", learned.Item1);
+        Assert.Equal((_support.Id, 1), (learned.Item2, learned.Item3));
+
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], _dev.Id);
+        Assert.Equal([(learned.Item1, _dev.Id, 1)], await Feedback());
+
+        await _sut.ClearSlotStartsAsync([Fx.Mon(9)]);
+        Assert.Empty(await Feedback());
+    }
+    [Fact]
     public async Task Marking_a_slot_as_not_work_twice_keeps_a_single_override()
     {
         await _sut.AssignSlotStartsAsync([Fx.Mon(9)], null);

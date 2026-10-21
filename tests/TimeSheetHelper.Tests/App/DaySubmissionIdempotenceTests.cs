@@ -249,26 +249,20 @@ public sealed class DaySubmissionIdempotenceTests : IDisposable
     [Theory]
     [InlineData("APPROVED", false)]
     [InlineData(null, true)]
-    public async Task G7_LockedDay_NeverWritten(string? approval, bool invoiced)
+    public async Task ApprovedOrInvoicedDay_IsStillSent(string? approval, bool invoiced)
     {
         await _host.SetDraftAsync(Monday, (_host.Dev, 2m), (_host.Meetings, 1m));
         await _host.Service().SendAsync(Monday, DaySubmissionHost.NoResolutions);
         var dev = Server.Entries.Single(e => e.TaskNumber == 3382);
         Server.Entries[Server.Entries.IndexOf(dev)] = dev with { ApprovalStatus = approval, Invoiced = invoiced };
-        var writes = Server.WriteCount;
-        await _host.SetDraftAsync(Monday, (_host.Dev, 3m), (_host.Support, 1m));
+        await _host.SetDraftAsync(Monday, (_host.Dev, 2m), (_host.Meetings, 1m), (_host.Support, 1m));
 
         var plan = await _host.Service().PlanAsync(Monday);
-        var result = await _host.Service().SendAsync(Monday, new Dictionary<int, ConflictResolution> { [_host.Dev.Id] = ConflictResolution.Complement });
-        var batch = await _host.Service().SendReadyAsync(Monday);
+        var result = await _host.Service().SendAsync(Monday, DaySubmissionHost.NoResolutions);
 
-        Assert.Equal((DayGate.Locked, DayStatus.Locked), (plan.Gate, plan.Status));
-        Assert.All(plan.Cells, c => Assert.Equal(CellOperation.None, c.Operation));
-        Assert.Equal((DayStatus.Locked, 0), (result.Status, result.Written));
-        Assert.Empty(batch.Sent);
-        Assert.Contains(batch.SkippedDays, s => s.Date == Monday);
-        Assert.Equal(writes, Server.WriteCount);
-        Assert.Equal([(200, 60), (3382, 120)], _host.ForecastOn(Monday));
+        Assert.True(plan.IsReady);
+        Assert.Equal((DayStatus.Sent, 1), (result.Status, result.Written));
+        Assert.Equal([(200, 60), (3382, 120), (5100, 60)], _host.ForecastOn(Monday));
     }
 
     [Fact]

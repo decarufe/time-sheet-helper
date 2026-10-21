@@ -50,6 +50,13 @@
             et rien n'est modifié ni retiré dans Forecast sans votre confirmation.
         </p>
         <p class="cplus-live" role="status">@dayAnnouncement</p>
+        <p class="cplus-sync muted">
+            <button type="button" class="icon-btn" aria-label="Rafraîchir depuis Forecast" title="Relire Forecast maintenant"
+                    disabled="@(syncing || DayBusy)" @onclick="SyncNowAsync">
+                <Icon Name="refresh" Small="true" Class="@(syncing ? "spin" : "")" />
+            </button>
+            <span>@SyncLabel</span>
+        </p>
         @if (dayAlert is not null)
         {
             <p class="alert error" role="alert">@dayAlert</p>
@@ -171,13 +178,17 @@
     private bool sendingReady;
     private string? dayAnnouncement;
     private string? dayAlert;
+    private bool syncing;
     private CancellationTokenSource daysCts = new();
 
     /// <summary>The data on screen is being replaced: the cards are greyed until the new analysis lands (the screen is never emptied).</summary>
     private bool Updating => draftRefreshing || analyzing;
 
-    protected override void OnInitialized() =>
+    protected override void OnInitialized()
+    {
         weekSync = new ShellWeekSync(Shell, week => _ = InvokeAsync(() => OnShellWeekRequested(week)));
+        DaySubmissions.Synced += OnForecastSynced;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -210,7 +221,7 @@
     public void Dispose()
     {
         disposed = true;
-        daysCts.Cancel();
+        DaySubmissions.Synced -= OnForecastSynced;
         daysCts.Dispose();
         weekSync?.Dispose();
         analyses.Dispose();
@@ -287,10 +298,58 @@
         Refresh();
         await LoadJournalAsync(selectedDay!.Value, ct);
         foreach (var day in StripDays)
-            await PlanDayAsync(day, ct);
+            await PlanDayAsync(day, ct, cached: true);
     }
 
-    private async Task PlanDayAsync(DateOnly day, CancellationToken ct)
+    private string SyncLabel => DaySubmissions.LastSyncedUtc is { } at
+        ? $"Dernière synchro Forecast : {at.ToLocalTime():HH:mm}"
+        : "Forecast pas encore lu";
+
+    private void OnForecastSynced()
+    {
+        if (!disposed)
+            _ = InvokeAsync(ReplanFromCacheAsync);
+    }
+
+    private async Task ReplanFromCacheAsync()
+    {
+        if (disposed || sendingDay is not null || sendingReady || loadedWeek != monday)
+            return;
+        var ct = daysCts.Token;
+        foreach (var day in StripDays)
+        {
+            if (!dayReading.Contains(day))
+                await PlanDayAsync(day, ct, cached: true);
+        }
+        Refresh();
+    }
+
+    private async Task SyncNowAsync()
+    {
+        if (syncing || DayBusy)
+            return;
+        syncing = true;
+        dayAlert = null;
+        Refresh();
+        try
+        {
+            var week = monday;
+            var ok = await ForecastOps.RunAsync("synchronisation de la semaine", ct => DaySubmissions.SyncWeekAsync(week, ct));
+            dayAnnouncement = ok ? "Forecast relu : rien n'a été écrit." : "Forecast n'a pas pu être relu.";
+        }
+        catch (Exception ex)
+        {
+            dayAlert = ex is ForecastBusyException ? ex.Message : "Lecture de Forecast impossible : vérifiez la connexion à Forecast (page Sources) puis réessayez.";
+            Logger.LogWarning("Forecast sync failed ({ExceptionType}).", ex.GetType().Name);
+        }
+        finally
+        {
+            syncing = false;
+            Refresh();
+        }
+    }
+
+    private async Task PlanDayAsync(DateOnly day, CancellationToken ct, bool cached = false)
     {
         if (ct.IsCancellationRequested || disposed)
             return;
@@ -298,7 +357,7 @@
         Refresh();
         try
         {
-            var plan = await DaySubmissions.PlanAsync(day, ct);
+            var plan = cached ? await DaySubmissions.PlanCachedAsync(day, ct) : await DaySubmissions.PlanAsync(day, ct);
             if (ct.IsCancellationRequested)
                 return;
             dayPlans[day] = plan;

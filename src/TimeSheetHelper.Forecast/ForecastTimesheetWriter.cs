@@ -181,12 +181,6 @@ public sealed class ForecastTimesheetWriter(
                 continue;
             }
 
-            if (evaluation.Locked)
-            {
-                report.Cells.Add(Build(evaluation, ForecastCellStatus.Locked, evaluation.Current, evaluation.LockMessage, ForecastEntryState.NotEntered, findings));
-                continue;
-            }
-
             if (mode == ForecastSubmitMode.DryRun)
             {
                 report.Cells.Add(Build(evaluation, ForecastCellStatus.Planned, evaluation.Current, evaluation.Message, ForecastEntryState.NotApplicable, findings));
@@ -380,10 +374,6 @@ public sealed class ForecastTimesheetWriter(
         if (entry.TaskCode is { } remoteCode && localCode is not null && !string.Equals(remoteCode, localCode, StringComparison.OrdinalIgnoreCase))
             return Cell(ForecastCellStatus.Mismatch, entry.Hours,
                 $"La saisie {entryId} est sur la tâche {remoteCode}, pas sur {localCode} : rien n'est modifié.", ForecastEntryState.NotApplicable);
-
-        if (before.Entries.Any(e => e.IsLocked))
-            return Cell(ForecastCellStatus.Locked, entry.Hours,
-                $"Le {date:yyyy-MM-dd} contient des saisies approuvées ou facturées dans Forecast : rien n'est modifié.", ForecastEntryState.NotApplicable);
 
         if (!delete && Math.Abs(entry.Hours - newHours) <= ForecastFillPlanner.Tolerance)
             return Cell(ForecastCellStatus.Skipped, entry.Hours, $"Forecast contient déjà {entry.Hours:0.##} h : rien à modifier.", ForecastEntryState.Entered);

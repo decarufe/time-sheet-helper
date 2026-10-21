@@ -177,21 +177,22 @@ public sealed class DayPlannerTests
     }
 
     [Fact]
-    public void An_approved_day_is_locked()
+    public void An_approved_day_is_planned_like_any_other()
     {
-        var plan = Plan([Draft(1, 4m), Draft(2, 1m)], Read(Remote("T1001", 3m, "e1", approval: "APPROVED")));
+        var plan = Plan([Draft(1, 3m), Draft(2, 1m)], Read(Remote("T1001", 3m, "e1", approval: "APPROVED")));
 
-        Assert.All(plan.Cells, c => Assert.Equal((CellState.Locked, CellOperation.None), (c.State, c.Operation)));
-        Assert.Equal((DayGate.Locked, DayStatus.Locked), (plan.Gate, plan.Status));
-        Assert.Equal(["e1"], plan.LockingEntries.Select(e => e.EntryId));
+        Assert.Equal((CellState.Unchanged, CellOperation.None), (Cell(plan, 1).State, Cell(plan, 1).Operation));
+        Assert.Equal((CellState.New, CellOperation.Create), (Cell(plan, 2).State, Cell(plan, 2).Operation));
+        Assert.Equal(DayGate.Send, plan.Gate);
     }
 
     [Fact]
-    public void A_day_that_is_not_locked_names_no_locking_entry()
+    public void A_legacy_locked_status_is_read_as_not_locked()
     {
-        var plan = Plan([Draft(1, 4m)], Read(Remote("T1001", 3m, "e1", approval: "SUBMITTED")));
+        var plan = Plan([Draft(1, 4m)], Read(), Sent(DayStatus.LegacyLocked));
 
-        Assert.Empty(plan.LockingEntries);
+        Assert.NotEqual(DayStatus.LegacyLocked, plan.Status);
+        Assert.True(plan.IsReady);
     }
 
     [Fact]

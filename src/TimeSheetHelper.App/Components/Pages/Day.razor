@@ -126,8 +126,8 @@
                 var slot = row.Slot;
                 var selected = IsSelected(index);
                 var expandedRow = expanded.Contains(slot.SlotStartUtc);
-                var removedRow = TimesheetUi.IsRemoved(slot);
-                <li class="slot @KindClass(slot) @(row.Local.Minute == 0 ? "hour-start" : null) @(selected ? "selected" : null) @(removedRow ? "removed" : null)"
+                var clearable = TimesheetUi.HasContent(slot);
+                <li class="slot @KindClass(slot) @(row.Local.Minute == 0 ? "hour-start" : null) @(selected ? "selected" : null)"
                     style="@(slot.TaskId is { } tid && slot.Kind != SlotKind.Ignored ? TimesheetUi.TaskStyle(tid) : null)">
                     <div class="slot-line">
                         <button type="button" class="slot-main" aria-pressed="@(selected ? "true" : "false")"
@@ -157,11 +157,18 @@
                                 <span aria-hidden="true">@(expandedRow ? "▾" : "▸")</span> @slot.Evidence.Count
                             </button>
                         }
-                        @if (!IsSubmitted && !removedRow)
+                        @if (!IsSubmitted && PredictedTask(slot) is { } predicted)
+                        {
+                            <button type="button" class="confirm-slot" disabled="@busy"
+                                    title="Confirmer : @TaskName(predicted) (le moteur apprend de cette confirmation)"
+                                    aria-label="Confirmer @TaskName(predicted) pour le créneau de @row.Local.ToString("HH:mm")"
+                                    @onclick="() => ConfirmAsync([slot])">✓</button>
+                        }
+                        @if (!IsSubmitted && clearable)
                         {
                             <button type="button" class="remove" disabled="@busy"
-                                    title="Supprimer ce créneau et ses activités (définitif, avec confirmation)"
-                                    aria-label="Supprimer le créneau de @row.Local.ToString("HH:mm") et ses activités"
+                                    title="Effacer le contenu de ce créneau : assignation et activités (définitif, avec confirmation)"
+                                    aria-label="Effacer le contenu du créneau de @row.Local.ToString("HH:mm")"
                                     @onclick="() => AskRemove(row)">
                                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                                     <path fill="currentColor" d="M6.5 1h3l.5 1H14v1.5H2V2h4zM3.5 5h9l-.6 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" />
@@ -235,6 +242,8 @@
             </span>
             <span class="spacer"></span>
             <button type="button" class="primary" @onclick="() => picker = PickerMode.Assign" disabled="@busy">Assigner à…</button>
+            <button type="button" class="confirm" @onclick="() => ConfirmAsync(SelectedSlots().ToList())" disabled="@(busy || !SelectionHasPrediction)"
+                    title="Accepte la tâche prédite de chaque créneau sélectionné ; le moteur en tient compte pour ses prochaines prédictions.">✓ Confirmer</button>
             <button type="button" class="not-work" @onclick="() => AssignAsync(null)" disabled="@busy"
                     title="Garde les activités et les infos des créneaux, mais ne les compte pas dans la feuille de temps. Les créneaux restent réassignables plus tard.">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
@@ -246,12 +255,12 @@
             <button type="button" @onclick="() => picker = PickerMode.Rule" disabled="@(busy || !SelectionIsContiguous)"
                     title="@(SelectionIsContiguous ? null : "Sélectionnez des créneaux consécutifs pour créer une règle.")">Créer une règle à partir de cette correction</button>
             <button type="button" class="delete" @onclick="AskRemoveSelection" disabled="@(busy || RemovableSelection().Count == 0)"
-                    title="Supprimer les créneaux sélectionnés et leurs activités (définitif, avec confirmation)"
+                    title="Effacer le contenu des créneaux sélectionnés : assignation et activités (définitif, avec confirmation)"
                     aria-label="@RemoveSelectionLabel()">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
                     <path fill="currentColor" d="M6.5 1h3l.5 1H14v1.5H2V2h4zM3.5 5h9l-.6 9.1a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9z" />
                 </svg>
-                Supprimer
+                Effacer
             </button>
             <button type="button" class="ghost" @onclick="ClearSelection" aria-label="Désélectionner">✕</button>
         </div>
@@ -263,7 +272,7 @@
     <ConfirmDialog Title="@TimesheetUi.RemoveConfirmationTitle(removal.Starts.Count)"
                    Subtitle="@removal.Description"
                    Message="@TimesheetUi.RemoveConfirmationMessage(removal.Starts.Count)"
-                   ConfirmLabel="Supprimer définitivement"
+                   ConfirmLabel="Effacer définitivement"
                    OnConfirm="ConfirmRemoveAsync"
                    OnCancel="() => pendingRemoval = null" />
 }
@@ -273,6 +282,7 @@
     <TaskPicker Title="@(picker == PickerMode.Assign ? "Assigner les créneaux à…" : "Créer une règle vers…")"
                 Subtitle="@SelectionDescription()"
                 SelectedTaskId="@SelectionTaskId()"
+                SuggestedTaskName="@SelectionSuggestedName()"
                 AllowComment="@(picker == PickerMode.Assign)"
                 @bind-Comment="assignComment"
                 OnSelected="OnTaskPickedAsync"
@@ -435,7 +445,7 @@
             var midnight = day.ToDateTime(TimeOnly.MinValue);
             var from = midnight.AddHours(8);
             var to = midnight.AddHours(17);
-            var active = all.Where(v => !TimesheetUi.IsRemoved(v.Slot) && (v.Slot.Kind != SlotKind.Empty || v.Slot.Evidence.Count > 0)).ToList();
+            var active = all.Where(v => TimesheetUi.HasContent(v.Slot)).ToList();
             if (active.Count > 0)
             {
                 var first = active[0].Local.AddHours(-1);
@@ -444,7 +454,7 @@
                 var lastHour = new DateTime(last.Year, last.Month, last.Day, last.Hour, 0, 0);
                 to = Max(to, last == lastHour ? last : lastHour.AddHours(1));
             }
-            visible = all.Where(v => v.Local >= from && v.Local < to && !TimesheetUi.IsRemoved(v.Slot)).ToList();
+            visible = all.Where(v => v.Local >= from && v.Local < to).ToList();
         }
 
         selection = null;
@@ -533,7 +543,7 @@
     private SlotRange? SelectedRange() =>
         selection is { } s && SelectionIsContiguous ? new SlotRange(visible[s.Min].Slot.SlotStartUtc, visible[s.Max].Slot.SlotEndUtc) : null;
 
-    /// <summary>Hidden (removed) slots can sit between two selected rows, so contiguity is checked on time, not on row index.</summary>
+    /// <summary>Contiguity is checked on time, not on row index (Ctrl+click selections can skip rows).</summary>
     private bool SelectionIsContiguous => selection is not null && TimesheetUi.AreConsecutive(SelectedStarts());
 
     /// <summary>Time spans of the selection, one per run of consecutive slots ("09:00 – 09:30, 10:15 – 10:30").</summary>
@@ -568,6 +578,19 @@
     {
         var ids = SelectedSlots().Where(s => s.TaskId is not null).Select(s => s.TaskId).Distinct().ToList();
         return ids.Count == 1 ? ids[0] : null;
+    }
+
+    /// <summary>Text already shown in the list for the selection (the slots' comment, else the meeting title): proposed as the name of a new task.</summary>
+    private string? SelectionSuggestedName()
+    {
+        var notes = SelectedSlots()
+            .Where(s => !string.IsNullOrWhiteSpace(s.Notes))
+            .Select(s => s.Notes!.Trim())
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (notes.Count == 1)
+            return notes[0];
+        return notes.Count == 0 ? TimesheetUi.MeetingTitle(SelectionGroupKey()) : null;
     }
 
     private string SelectionDescription()
@@ -623,15 +646,44 @@
         });
     }
 
+    private int? PredictedTask(SlotAssignment slot) =>
+        timeline is null ? null : TimesheetUi.PredictedTask(slot, timeline.Tasks);
+
+    private bool SelectionHasPrediction => SelectedSlots().Any(s => PredictedTask(s) is not null);
+
+    /// <summary>Accepts the predicted task of each slot as a manual assignment; the engine learns from it for its next predictions.</summary>
+    private async Task ConfirmAsync(IEnumerable<SlotAssignment> slots)
+    {
+        var groups = slots
+            .Select(s => (s.SlotStartUtc, Task: PredictedTask(s)))
+            .Where(p => p.Task is not null)
+            .GroupBy(p => p.Task!.Value, p => p.SlotStartUtc)
+            .ToList();
+        if (groups.Count == 0)
+            return;
+        var count = groups.Sum(g => g.Count());
+
+        await RunAsync(async () =>
+        {
+            foreach (var group in groups)
+                await Weeks.AssignSlotStartsAsync(group.ToList(), group.Key, null);
+            selection = null;
+            await LoadAsync();
+            Inform(groups.Count == 1
+                ? (count > 1 ? $"{count} créneaux confirmés : {TaskName(groups[0].Key)}." : $"Créneau confirmé : {TaskName(groups[0].Key)}.")
+                : $"{count} créneaux confirmés.");
+        });
+    }
+
     private void AskRemove(VisibleSlot row) =>
         pendingRemoval = new PendingRemoval([row.Slot.SlotStartUtc], $"{row.Local:HH:mm} – {row.Local.AddMinutes(15):HH:mm}");
 
-    /// <summary>Selected rows not already deleted (those can only show in the whole-day view).</summary>
+    /// <summary>Selected rows that still have something to clear.</summary>
     private List<int> RemovableSelection() =>
-        selection is { } s ? s.Indices.Order().Where(i => !TimesheetUi.IsRemoved(visible[i].Slot)).ToList() : [];
+        selection is { } s ? s.Indices.Order().Where(i => TimesheetUi.HasContent(visible[i].Slot)).ToList() : [];
 
     private string RemoveSelectionLabel() =>
-        RemovableSelection().Count == 1 ? "Supprimer le créneau sélectionné et ses activités" : $"Supprimer les {RemovableSelection().Count} créneaux sélectionnés et leurs activités";
+        RemovableSelection().Count == 1 ? "Effacer le contenu du créneau sélectionné" : $"Effacer le contenu des {RemovableSelection().Count} créneaux sélectionnés";
 
     private void AskRemoveSelection()
     {
@@ -757,7 +809,7 @@
     private string SlotLabel(SlotAssignment slot) => slot switch
     {
         { Kind: SlotKind.ExcludedByOverride } => "Pas du travail",
-        { Kind: SlotKind.Removed } => "Supprimé",
+        { Kind: SlotKind.Removed } => "",
         { Kind: SlotKind.Ignored } => "Ignoré",
         { IsWork: true, TaskId: { } id } => TaskName(id),
         { IsWork: true, GroupKey: { } key } => $"Non classé · {TimesheetUi.GroupLabel(key)}",

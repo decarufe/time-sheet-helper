@@ -31,8 +31,12 @@ public readonly record struct Candidate(int? TaskId, string? GroupKey)
     public override string ToString() => TaskId is { } id ? $"task:{id}" : GroupKey ?? "";
 }
 
-/// <summary>An activity ready for allocation: its role, effective interval and candidate.</summary>
-public sealed record ResolvedActivity(ActivityEvent Activity, ActivityRole Role, Interval Window, Candidate? Candidate, int? RuleId = null);
+/// <summary>
+/// An activity ready for allocation: its role, effective interval and candidate. With learned feedback an activity
+/// can be split over several candidates; <paramref name="Weight"/> is then the share of the activity this candidate gets.
+/// <paramref name="GroupKey"/> is the activity's group, known even when a rule picked its task.
+/// </summary>
+public sealed record ResolvedActivity(ActivityEvent Activity, ActivityRole Role, Interval Window, Candidate? Candidate, int? RuleId = null, string? GroupKey = null, double Weight = 1.0);
 
 /// <summary>Applies rules, group keys, evidence windows and meeting filters to raw activities.</summary>
 public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilder groupKeys, IOptions<EngineOptions> options, ISourceCatalog? catalog = null)
@@ -43,7 +47,8 @@ public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilde
 
     /// <param name="activities">Activities, ideally including some before the range so commit windows can find the previous commit.</param>
     /// <param name="rules">Rules; disabled ones are skipped.</param>
-    public IReadOnlyList<ResolvedActivity> Resolve(IEnumerable<ActivityEvent> activities, IEnumerable<Rule> rules)
+    /// <param name="feedback">Learned confirmations per group key (see <see cref="Learning.PredictionFeedback"/>); null to predict from rules and groups only.</param>
+    public IReadOnlyList<ResolvedActivity> Resolve(IEnumerable<ActivityEvent> activities, IEnumerable<Rule> rules, IReadOnlyDictionary<string, IReadOnlyDictionary<int, int>>? feedback = null)
     {
         var ordered = RuleEvaluator.Prepare(rules);
         var sorted = activities.OrderBy(a => a.StartUtc).ToList();
@@ -69,10 +74,13 @@ public sealed class ActivityResolver(RuleEvaluator ruleEvaluator, GroupKeyBuilde
                 continue;
 
             var rule = ruleEvaluator.FirstMatch(activity, ordered);
+            var groupKey = rule is null || feedback is not null ? groupKeys.Build(activity) : null;
             var candidate = rule is not null
                 ? Candidate.ForTask(rule.ForecastTaskId)
-                : Candidate.ForGroup(groupKeys.Build(activity));
-            result.Add(new(activity, role.Value, window, candidate, rule?.Id));
+                : Candidate.ForGroup(groupKey!);
+            var counts = groupKey is not null ? feedback?.GetValueOrDefault(groupKey) : null;
+            foreach (var (share, weight) in Learning.PredictionFeedback.Split(candidate, rule is not null, counts))
+                result.Add(new(activity, role.Value, window, share, share == candidate ? rule?.Id : null, groupKey, weight));
         }
 
         return result;

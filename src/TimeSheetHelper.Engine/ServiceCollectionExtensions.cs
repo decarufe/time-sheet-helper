@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITaskClassifier, ClaudeClassifier>();
         services.AddSingleton<ClassificationService>();
         services.AddSingleton<CorrectionLearner>();
+        services.AddSingleton<PredictionFeedback>();
         services.AddSingleton<WeekProposalBuilder>();
         services.AddSingleton<WeekService>();
         services.AddSingleton<GroupAssignmentService>();

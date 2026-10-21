@@ -181,6 +181,9 @@ internal sealed class FakeForecastWriteApi : IForecastToolClient
     /// <summary>"get_time_analysis" times out.</summary>
     public bool ReadFails { get; set; }
 
+    /// <summary>Number of "get_time_analysis" calls received.</summary>
+    public int ReadCount { get; private set; }
+
     private int _nextId = 7001;
     private readonly Dictionary<string, JsonElement> _staged = [];
     private (int Number, bool Applied)? _timeout;
@@ -244,6 +247,7 @@ internal sealed class FakeForecastWriteApi : IForecastToolClient
 
             case "get_time_analysis":
             {
+                ReadCount++;
                 if (ReadFails)
                     throw new TimeoutException("Forecast ne répond pas.");
                 var from = DateOnly.Parse((string)arguments["start_date"]!, CultureInfo.InvariantCulture);

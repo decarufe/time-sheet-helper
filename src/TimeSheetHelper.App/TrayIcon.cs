@@ -1,11 +1,15 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using TimeSheetHelper.App.Plugins;
+using TimeSheetHelper.App.Updates;
 
 namespace TimeSheetHelper.App;
 
-/// <summary>Notification-area icon: open the UI, pause tracking, quit, weekly reminder. Runs its own STA message loop.</summary>
-public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifetime, IConfiguration configuration) : IHostedService
+/// <summary>Notification-area icon: open the UI, pause tracking, update, quit, weekly reminder. Runs its own STA message loop.</summary>
+public sealed class TrayIcon(PluginHost plugins, UpdateService updates, IHostApplicationLifetime lifetime, IConfiguration configuration) : IHostedService
 {
+    private const string BaseTooltip = "Time Sheet Helper";
+    private const string CheckLabel = "Rechercher une mise à jour";
     // Identifiers declared by the window-tracking plugin shipped with the application.
     private const string FocusTrackerId = "focus-tracker";
     private const string TogglePauseAction = "toggle-pause";
@@ -48,10 +52,70 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
 
         icon.ContextMenuStrip.Items.Add("Ouvrir la feuille de temps", null, (_, _) => OpenUi());
         icon.ContextMenuStrip.Items.Add(pause);
+        var updateItem = new ToolStripMenuItem(CheckLabel);
+        icon.ContextMenuStrip.Items.Add(updateItem);
         icon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
         icon.ContextMenuStrip.Items.Add("Quitter", null, (_, _) => lifetime.StopApplication());
         icon.ContextMenuStrip.Opening += (_, _) => RefreshPauseItem(pause, icon);
         icon.DoubleClick += (_, _) => OpenUi();
+
+        // Update badge, menu entry and balloons follow the update service; its events arrive on other threads.
+        using var plainIcon = (Icon)(appIcon ?? SystemIcons.Application).Clone();
+        using var badgedIcon = CreateBadgedIcon(plainIcon);
+        using var sync = new Control();
+        _ = sync.Handle;
+        var manualCheck = false;
+        AppVersion? notified = null;
+        updateItem.Click += (_, _) =>
+        {
+            if (updates.Available is not null)
+            {
+                _ = updates.InstallAsync();
+                return;
+            }
+            manualCheck = true;
+            _ = updates.CheckAsync();
+        };
+
+        void RefreshUpdate()
+        {
+            var available = updates.Available;
+            var phase = updates.Phase;
+            updateItem.Enabled = phase is UpdatePhase.Idle or UpdatePhase.Failed;
+            updateItem.Font = new Font(updateItem.Font, available is null ? FontStyle.Regular : FontStyle.Bold);
+            updateItem.Text = phase switch
+            {
+                UpdatePhase.Checking => "Recherche de mise à jour…",
+                UpdatePhase.Downloading => "Téléchargement de la mise à jour…",
+                UpdatePhase.Installing => "Installation de la mise à jour…",
+                _ => available is null ? CheckLabel : $"Mettre à jour vers {available.Version}",
+            };
+            icon.Icon = available is null || badgedIcon is null ? plainIcon : badgedIcon;
+            icon.Text = available is null ? BaseTooltip : Truncate($"{BaseTooltip} — mise à jour {available.Version} disponible");
+
+            if (phase is UpdatePhase.Checking or UpdatePhase.Downloading or UpdatePhase.Installing)
+                return;
+            if (available is not null && (manualCheck || available.Version != notified))
+            {
+                notified = available.Version;
+                icon.ShowBalloonTip(15_000, "Time Sheet Helper", $"La version {available.Version} est disponible. Cliquez pour la mettre à jour.", ToolTipIcon.Info);
+            }
+            else if (manualCheck)
+            {
+                var message = phase == UpdatePhase.Failed ? updates.Error : "Vous utilisez déjà la dernière version.";
+                icon.ShowBalloonTip(5_000, "Time Sheet Helper", message ?? "", phase == UpdatePhase.Failed ? ToolTipIcon.Warning : ToolTipIcon.Info);
+            }
+            manualCheck = false;
+        }
+
+        void OnUpdateChanged()
+        {
+            if (sync.IsHandleCreated && !sync.IsDisposed)
+                sync.BeginInvoke(RefreshUpdate);
+        }
+
+        updates.Changed += OnUpdateChanged;
+        RefreshUpdate();
 
         // Weekly reminder: checked every minute on this STA thread (WinForms timer), clicking the balloon opens the UI.
         var reminder = new WeeklyReminder(configuration.GetSection(ReminderOptions.SectionName).Get<ReminderOptions>() ?? new());
@@ -68,8 +132,46 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
 
         _context = new ApplicationContext();
         Application.Run(_context);
+        updates.Changed -= OnUpdateChanged;
         icon.Visible = false;
     }
+
+    private static string Truncate(string text) => text.Length <= 63 ? text : text[..62] + "…";
+
+    /// <summary>A copy of <paramref name="source"/> with a red dot in the top-right corner; null if it cannot be drawn.</summary>
+    private static Icon? CreateBadgedIcon(Icon source)
+    {
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            using var bitmap = source.ToBitmap();
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var d = Math.Max(6, bitmap.Width * 5 / 10);
+                var area = new Rectangle(bitmap.Width - d, 0, d - 1, d - 1);
+                using var ring = new SolidBrush(Color.White);
+                g.FillEllipse(ring, Rectangle.Inflate(area, 1, 1));
+                using var dot = new SolidBrush(Color.FromArgb(0xE0, 0x25, 0x25));
+                g.FillEllipse(dot, area);
+            }
+            handle = bitmap.GetHicon();
+            using var temp = Icon.FromHandle(handle);
+            return (Icon)temp.Clone();
+        }
+        catch (Exception ex) when (ex is ArgumentException or ExternalException)
+        {
+            return null;
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+                DestroyIcon(handle);
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr handle);
 
     /// <summary>The application icon embedded in the assembly, at the size the tray uses; null when it cannot be loaded.</summary>
     internal static Icon? LoadAppIcon()
@@ -92,7 +194,10 @@ public sealed class TrayIcon(PluginHost plugins, IHostApplicationLifetime lifeti
         item.Visible = action is not null;
         if (action is not null)
             item.Text = action.Label;
-        icon.Text = status?.Message == "En pause" ? "Time Sheet Helper (en pause)" : "Time Sheet Helper";
+        var tooltip = status?.Message == "En pause" ? BaseTooltip + " (en pause)" : BaseTooltip;
+        icon.Text = updates.Available is { } available
+            ? Truncate($"{tooltip} — mise à jour {available.Version} disponible")
+            : tooltip;
     }
 
     private void TogglePause()
