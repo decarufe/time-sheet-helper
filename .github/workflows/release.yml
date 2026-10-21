@@ -75,6 +75,7 @@ jobs:
           version: 10
 
       - name: Prepare code-signing certificate
+        timeout-minutes: 5
         env:
           CERT_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
           CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
@@ -95,8 +96,9 @@ jobs:
                 if ($signers.Count -ne 1 -or $signers[0].Thumbprint -ne $publicCertificate.Thumbprint) {
                   throw 'Le PFX ne correspond pas au certificat public versionné.'
                 }
-                Import-Certificate -FilePath (Join-Path $env:GITHUB_WORKSPACE 'installer\code-signing.cer') `
-                  -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+                # LocalMachine\Root: le magasin CurrentUser\Root affiche une boîte de confirmation qui bloque le runner.
+                certutil.exe -addstore -f Root (Join-Path $env:GITHUB_WORKSPACE 'installer\code-signing.cer')
+                if ($LASTEXITCODE -ne 0) { throw "certutil -addstore a échoué (code $LASTEXITCODE)." }
               }
               finally {
                 $publicCertificate.Dispose()
