@@ -28,6 +28,7 @@
         <WeekHeader @ref="header" Current="current" Summary="summary" PanelOpen="Shell.PanelOpen" DrawerOpen="drawerOpen"
                     Tracking="tracking" Theme="Shell.Theme" OnTogglePanel="TogglePanelAsync" OnOpenDrawer="OpenDrawerAsync"
                     OnToggleTracking="ToggleTrackingAsync" OnToggleTheme="ToggleThemeAsync" />
+        <UpdateBanner />
         <MobileNav Current="current" SubNav />
         <main class="page" id="main" tabindex="-1" @ref="mainElement">
             @Body

@@ -17,6 +17,7 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
     public DbSet<SlotOverride> SlotOverrides => Set<SlotOverride>();
     public DbSet<WeekTaskChoice> WeekTaskChoices => Set<WeekTaskChoice>();
     public DbSet<RemovedSlot> RemovedSlots => Set<RemovedSlot>();
+    public DbSet<AssignmentFeedback> AssignmentFeedback => Set<AssignmentFeedback>();
     public DbSet<ClassificationCacheEntry> ClassificationCache => Set<ClassificationCacheEntry>();
     public DbSet<InstalledPlugin> InstalledPlugins => Set<InstalledPlugin>();
     public DbSet<DaySubmission> DaySubmissions => Set<DaySubmission>();
@@ -81,6 +82,10 @@ public sealed class TimeSheetDbContext(DbContextOptions<TimeSheetDbContext> opti
 
         modelBuilder.Entity<SlotOverride>().HasIndex(s => s.SlotStartUtc).IsUnique();
         modelBuilder.Entity<RemovedSlot>().HasIndex(s => s.SlotStartUtc).IsUnique();
+
+        var feedback = modelBuilder.Entity<AssignmentFeedback>();
+        feedback.HasIndex(f => new { f.GroupKey, f.ForecastTaskId }).IsUnique();
+        feedback.HasOne<ForecastTask>().WithMany().HasForeignKey(f => f.ForecastTaskId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ClassificationCacheEntry>().HasIndex(c => c.Fingerprint).IsUnique();
         modelBuilder.Entity<InstalledPlugin>().HasKey(p => p.Id);
     }

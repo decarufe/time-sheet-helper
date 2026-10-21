@@ -242,20 +242,6 @@ public sealed class SubmissionGapServiceTests
     }
 
     [Fact]
-    public void A_locked_cell_is_blocking_and_shows_the_approved_registrations()
-    {
-        var entry = new ForecastRemoteEntry("1", null, Monday, 8m, "9", "740", "54896965", "Préparation", "APPROVED", false, "Nexus");
-        var cell = Cell(1, 0, 8m, ForecastCellStatus.Locked, 8m, "Des saisies du jour sont approuvées.") with { ExistingEntries = [entry] };
-
-        var gap = Single(Analyze(FullWeek(), Report(cell)), SubmissionGapType.CellLocked);
-
-        Assert.Equal(SubmissionGapSeverity.Blocking, gap.Severity);
-        var shown = Assert.Single(gap.ExistingEntries);
-        Assert.Equal(("54896965", "Préparation", 8m, "APPROVED", false), (shown.EntryId, shown.Notes, shown.Hours, shown.ApprovalStatus, shown.Invoiced));
-        Assert.Equal(SubmissionGapResolution.OpenInForecast, gap.Actions.Single(a => a.IsRecommended).Resolution);
-    }
-
-    [Fact]
     public void Forecast_higher_than_expected_is_blocking_with_the_direction_the_delta_and_an_aligned_preview()
     {
         var cell = Cell(1, 1, 8m, ForecastCellStatus.Mismatch, 10m, "écart") with { Comparison = ForecastComparisonLevel.ProjectAndDay };
@@ -522,7 +508,7 @@ public sealed class SubmissionGapServiceTests
     }
 
     [Fact]
-    public void A_conflict_on_registrations_that_are_approved_says_so_and_a_finding_on_it_is_kept()
+    public void A_conflict_on_registrations_that_are_approved_keeps_a_finding()
     {
         var locked = new ForecastRemoteEntry("1", null, Monday, 2m, "9", "740", "77", null, "APPROVED");
         var cell = Cell(1, 0, 8m, ForecastCellStatus.Mismatch, 2m) with
@@ -533,7 +519,7 @@ public sealed class SubmissionGapServiceTests
 
         var analysis = Analyze(FullWeek(), Report(cell));
 
-        Assert.Contains("approuvées ou facturées", Single(analysis, SubmissionGapType.ForecastLower).Message);
+        Single(analysis, SubmissionGapType.ForecastLower);
         Assert.Single(analysis.Gaps, g => g.Type == SubmissionGapType.TaskClosed);
         Assert.Equal(1, analysis.Summary.BlockingCount);
         Assert.Equal(1, analysis.Summary.ToVerifyCount);

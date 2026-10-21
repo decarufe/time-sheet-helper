@@ -32,6 +32,9 @@ public sealed record CorrectionTarget(SlotRange Range, string? GroupKey = null);
 /// <param name="ActivitiesKept">Activities that also touch a slot still alive: kept, but ignored inside the deleted slots.</param>
 public sealed record SlotRemovalResult(int SlotsRemoved, int ActivitiesDeleted, int ActivitiesKept);
 
+/// <summary>How much a task has been used: last day used and number of distinct days it was used on.</summary>
+public sealed record TaskUsage(int TaskId, DateOnly LastUsed, int Days);
+
 /// <summary>Façade used by the UI: week and day views, manual assignments, suggestions and learned rules.</summary>
 public sealed class WeekService(
     IDbContextFactory<TimeSheetDbContext> dbFactory,
@@ -41,7 +44,8 @@ public sealed class WeekService(
     SlotAllocator allocator,
     ClassificationService classification,
     CorrectionLearner learner,
-    RuleEvaluator ruleEvaluator)
+    RuleEvaluator ruleEvaluator,
+    PredictionFeedback feedback)
 {
     /// <summary>Week proposal (Monday of <paramref name="monday"/>'s week). Classifies new groups when Claude is enabled.</summary>
     public Task<WeekProposal> GetWeekAsync(DateOnly monday, CancellationToken cancellationToken = default) =>
@@ -57,7 +61,10 @@ public sealed class WeekService(
     public Task AssignSlotsAsync(SlotRange range, int? forecastTaskId, string? notes = null, CancellationToken cancellationToken = default) =>
         AssignSlotStartsAsync(range.SlotStarts().ToList(), forecastTaskId, notes, cancellationToken);
 
-    /// <summary>Same as <see cref="AssignSlotsAsync"/> for any set of slots (they need not be contiguous), saved in one go.</summary>
+    /// <summary>
+    /// Same as <see cref="AssignSlotsAsync"/> for any set of slots (they need not be contiguous), saved in one go.
+    /// Slots newly put on a task teach the prediction (<see cref="PredictionFeedback"/>); confirming a predicted slot goes through here too.
+    /// </summary>
     public async Task AssignSlotStartsAsync(IReadOnlyCollection<DateTime> slotStarts, int? forecastTaskId, string? notes = null, CancellationToken cancellationToken = default)
     {
         var starts = slotStarts.Distinct().Order().ToList();
@@ -71,8 +78,14 @@ public sealed class WeekService(
             .Where(o => o.SlotStartUtc >= first && o.SlotStartUtc <= last)
             .ToDictionaryAsync(o => o.SlotStartUtc, cancellationToken);
 
+        var learned = new List<DateTime>();
+        var unlearned = new List<SlotOverride>();
         foreach (var start in starts)
         {
+            if (existing.GetValueOrDefault(start) is { } previous && previous.ForecastTaskId != forecastTaskId && previous.ForecastTaskId is not null)
+                unlearned.Add(new SlotOverride { SlotStartUtc = start, ForecastTaskId = previous.ForecastTaskId });
+            if (existing.GetValueOrDefault(start)?.ForecastTaskId != forecastTaskId)
+                learned.Add(start);
             if (existing.TryGetValue(start, out var slot))
             {
                 slot.ForecastTaskId = forecastTaskId;
@@ -85,10 +98,14 @@ public sealed class WeekService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        await ForgetAsync(unlearned, cancellationToken);
+        if (forecastTaskId is { } taskId && learned.Count > 0)
+            await feedback.RecordAsync(learned, taskId, cancellationToken);
     }
 
     /// <summary>
-    /// Deletes slots for good ("Supprimer"): their manual assignment is dropped and every activity linked to them is erased.
+    /// Clears slots for good ("Effacer"): their manual assignment is dropped and every activity linked to them is erased.
     /// The slots are tombstoned, so the engine ignores whatever a later sync brings back for them (same ExternalId, growing segment).
     /// An activity that also touches a slot still alive (a long meeting, a point event whose window reaches back) is kept,
     /// but ignored inside the deleted slots. Not to be confused with <c>AssignSlotStartsAsync(starts, null)</c> ("Pas du travail"), which keeps the activities.
@@ -120,7 +137,9 @@ public sealed class WeekService(
         var overrides = await db.SlotOverrides
             .Where(o => o.SlotStartUtc >= first && o.SlotStartUtc <= last)
             .ToListAsync(cancellationToken);
-        db.SlotOverrides.RemoveRange(overrides.Where(o => wanted.Contains(o.SlotStartUtc)));
+        var dropped = overrides.Where(o => wanted.Contains(o.SlotStartUtc)).ToList();
+        db.SlotOverrides.RemoveRange(dropped);
+        await ForgetAsync(dropped, cancellationToken);
 
         var windows = resolver.Resolve(activities, rules).ToDictionary(r => r.Activity, r => r.Window);
         var doomed = new HashSet<long>();
@@ -141,6 +160,28 @@ public sealed class WeekService(
 
         await db.SaveChangesAsync(cancellationToken);
         return new SlotRemovalResult(starts.Count, doomed.Count, kept);
+    }
+
+    /// <summary>
+    /// How each task has been used so far: last day and number of distinct days with hours in a draft or a manual assignment.
+    /// Feeds the "Récents" and "Fréquence" orderings of the task picker.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, TaskUsage>> GetTaskUsageAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var entries = await db.TimesheetEntries.AsNoTracking()
+            .Where(e => e.Hours > 0)
+            .Select(e => new { e.ForecastTaskId, e.Date })
+            .ToListAsync(cancellationToken);
+        var overrides = await db.SlotOverrides.AsNoTracking()
+            .Where(o => o.ForecastTaskId != null)
+            .Select(o => new { ForecastTaskId = o.ForecastTaskId!.Value, o.SlotStartUtc })
+            .ToListAsync(cancellationToken);
+
+        return entries.Select(e => (e.ForecastTaskId, e.Date))
+            .Concat(overrides.Select(o => (o.ForecastTaskId, DateOnly.FromDateTime(o.SlotStartUtc))))
+            .GroupBy(u => u.ForecastTaskId)
+            .ToDictionary(g => g.Key, g => new TaskUsage(g.Key, g.Max(u => u.Item2), g.Select(u => u.Item2).Distinct().Count()));
     }
 
     /// <summary>The latest distinct comments given when assigning slots to a task, most recent first.</summary>
@@ -183,8 +224,17 @@ public sealed class WeekService(
             .Where(o => o.SlotStartUtc >= first && o.SlotStartUtc <= last)
             .ToListAsync(cancellationToken);
         var wanted = starts.ToHashSet();
-        db.SlotOverrides.RemoveRange(existing.Where(o => wanted.Contains(o.SlotStartUtc)));
+        var dropped = existing.Where(o => wanted.Contains(o.SlotStartUtc)).ToList();
+        db.SlotOverrides.RemoveRange(dropped);
         await db.SaveChangesAsync(cancellationToken);
+        await ForgetAsync(dropped, cancellationToken);
+    }
+
+    /// <summary>Withdraws what <see cref="PredictionFeedback"/> learned from these manual assignments (activities must still exist).</summary>
+    private async Task ForgetAsync(IEnumerable<SlotOverride> overrides, CancellationToken cancellationToken)
+    {
+        foreach (var byTask in overrides.Where(o => o.ForecastTaskId is not null).GroupBy(o => o.ForecastTaskId!.Value))
+            await feedback.ForgetAsync(byTask.Select(o => o.SlotStartUtc).ToList(), byTask.Key, cancellationToken);
     }
 
     /// <summary>

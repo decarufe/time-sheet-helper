@@ -54,7 +54,7 @@ public sealed class DayStateLabelsTests : IDisposable
     public void Labels_StatesSharingATone_AreToldApartByTheirWords()
     {
         var cells = Enum.GetValues<CellState>().Select(DayStateLabels.Cell).Append(DayStateLabels.NotCompared).ToList();
-        var days = Enum.GetValues<DayStatus>().Select(s => DayStateLabels.Day(s, hasHours: true))
+        var days = Enum.GetValues<DayStatus>().Where(s => s != DayStatus.LegacyLocked).Select(s => DayStateLabels.Day(s, hasHours: true))
             .Append(DayStateLabels.Day(DayStatus.NotAttempted, hasHours: false)).Append(DayStateLabels.ToReread).Append(DayStateLabels.NothingToSend).ToList();
 
         Assert.Equal(cells.Count, cells.Select(l => l.Label).Distinct().Count());
@@ -223,16 +223,15 @@ public sealed class DayStateLabelsTests : IDisposable
     }
 
     [Fact]
-    public async Task G7_Labels_LockedDay_HasNoSendButton()
+    public async Task Labels_ApprovedDay_CanStillBeSent()
     {
-        Server.Add(Monday, 2m, 3382, approvalStatus: "APPROVED");
+        Server.Add(Monday, 2m, 200, approvalStatus: "APPROVED");
         await _host.SetDraftAsync(Monday, (_host.Dev, 3m));
 
         var plan = await _host.Service().PlanAsync(Monday);
         var action = DayStateLabels.Action(plan, DaySubmissionHost.NoResolutions);
 
-        Assert.Equal(DayGate.Locked, plan.Gate);
-        Assert.False(action.Enabled);
-        Assert.Equal(("Verrouillé", "lock"), (DayStateLabels.Day(plan).Label, DayStateLabels.Day(plan).Icon));
+        Assert.True(action.Enabled);
+        Assert.DoesNotContain("Verrouillé", DayStateLabels.Day(plan).Label);
     }
 }

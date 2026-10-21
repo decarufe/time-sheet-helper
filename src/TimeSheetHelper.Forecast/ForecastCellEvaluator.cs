@@ -17,8 +17,6 @@ internal sealed record ForecastCellEvaluation(
     decimal? GroupExpected,
     ForecastComparisonLevel Comparison,
     IReadOnlyList<ForecastRemoteEntry> Existing,
-    bool Locked,
-    string? LockMessage,
     bool PendingApproval,
     string Message);
 
@@ -41,7 +39,6 @@ internal static class ForecastCellEvaluator
             var date = members[0].Cell.Date;
             var dayEntries = entries.Where(e => e.Date == date).ToList();
             var matched = dayEntries.Where(e => members.Any(m => Matches(e, m.Remote))).ToList();
-            var locked = dayEntries.FirstOrDefault(e => e.IsLocked);
             var pending = dayEntries.Any(e => e.IsSubmitted);
 
             var current = matched.Sum(e => e.Hours);
@@ -70,16 +67,8 @@ internal static class ForecastCellEvaluator
                     : done.Contains(member) ? ForecastCellAction.AlreadyDone
                     : ForecastCellAction.Type;
                 var message = Describe(action, member.Cell.Hours, current, groupExpected, level);
-                string? lockMessage = null;
-                if (action == ForecastCellAction.Type && locked is not null)
-                {
-                    lockMessage = $"Des saisies du {date:yyyy-MM-dd} sont déjà {(locked.Invoiced ? "facturées" : "approuvées")} dans Forecast"
-                        + (locked.ProjectName is null ? "" : $" ({locked.ProjectName})")
-                        + " : cette cellule n'est pas saisie.";
-                }
-
                 results[member] = new ForecastCellEvaluation(
-                    member, action, current, groupExpected, level, matched, lockMessage is not null, lockMessage, pending, message);
+                    member, action, current, groupExpected, level, matched, pending, message);
             }
         }
 

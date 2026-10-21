@@ -14,19 +14,19 @@ public sealed class GapBoardTests
     {
         var info = GapFx.Gap(SubmissionGapType.ForecastTimeWithoutProject, SubmissionGapSeverity.Info, taskId: null);
         var verify = GapFx.Gap(SubmissionGapType.DayBelowTarget, SubmissionGapSeverity.ToVerify, taskId: null);
-        var locked = GapFx.Gap(SubmissionGapType.CellLocked, SubmissionGapSeverity.Blocking);
+        var pending = GapFx.Gap(SubmissionGapType.CellPendingApproval, SubmissionGapSeverity.Blocking);
         var notFound = GapFx.Gap(SubmissionGapType.TaskNotFound, SubmissionGapSeverity.Blocking, taskId: 2);
 
-        var board = Build([info, verify, locked, notFound]);
+        var board = Build([info, verify, pending, notFound]);
 
         Assert.Equal(
             [SubmissionGapSeverity.Blocking, SubmissionGapSeverity.ToVerify, SubmissionGapSeverity.Info],
             board.Sections.Select(s => s.Severity));
         // Inside a severity the groups follow the declaration order of the types.
         Assert.Equal(
-            [SubmissionGapType.CellLocked, SubmissionGapType.TaskNotFound],
+            [SubmissionGapType.CellPendingApproval, SubmissionGapType.TaskNotFound],
             board.Sections[0].Groups.Select(g => g.Type));
-        Assert.Equal([locked.Id, notFound.Id, verify.Id, info.Id], board.Visible.Select(g => g.Id));
+        Assert.Equal([pending.Id, notFound.Id, verify.Id, info.Id], board.Visible.Select(g => g.Id));
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using TimeSheetHelper.Core.Timesheets;
 using TimeSheetHelper.Engine.Allocation;
 using TimeSheetHelper.Engine.Classification;
 using TimeSheetHelper.Engine.Grouping;
+using TimeSheetHelper.Engine.Learning;
 using TimeSheetHelper.Storage;
 
 namespace TimeSheetHelper.Engine.Proposals;
@@ -193,7 +194,7 @@ public sealed class WeekProposalBuilder(
 
     /// <summary>Resolves the activities, leaving out those whose every slot was deleted by the user (e.g. re-ingested by a collector).</summary>
     private IReadOnlyList<ResolvedActivity> Resolve(WeekData data) =>
-        resolver.Resolve(data.Activities, data.Rules)
+        resolver.Resolve(data.Activities, data.Rules, data.Feedback)
             .Where(r => !RemovedSlots.CoversOnly(r.Window, data.RemovedSlots))
             .ToList();
 
@@ -217,7 +218,9 @@ public sealed class WeekProposalBuilder(
             .Select(d => d.SubmittedUtc)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return new WeekData(activities, rules, tasks, overrides, submitted, removed);
+        var feedback = await PredictionFeedback.LoadAsync(db, cancellationToken);
+
+        return new WeekData(activities, rules, tasks, overrides, submitted, removed, feedback);
     }
 
     private sealed record WeekData(
@@ -226,7 +229,8 @@ public sealed class WeekProposalBuilder(
         IReadOnlyList<ForecastTask> Tasks,
         IReadOnlyList<SlotOverride> Overrides,
         DateTime? SubmittedUtc,
-        IReadOnlySet<DateTime> RemovedSlots)
+        IReadOnlySet<DateTime> RemovedSlots,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<int, int>> Feedback)
     {
         public IReadOnlySet<int> IgnoredTaskIds { get; } = Tasks.Where(t => t.IsIgnored).Select(t => t.Id).ToHashSet();
     }

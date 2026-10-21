@@ -13,7 +13,9 @@ public enum DayStatus
     Modified = 4,
     Partial = 5,
     Conflict = 6,
-    Locked = 7,
+
+    /// <summary>No longer produced (the Forecast lock was removed); rows still holding 7 are read as not locked.</summary>
+    LegacyLocked = 7,
     Error = 8,
 }
 

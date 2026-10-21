@@ -49,7 +49,6 @@ public static class UiLabels
         ForecastCellStatus.Mismatch => "Écart",
         ForecastCellStatus.RowNotFound => "Tâche introuvable",
         ForecastCellStatus.Error => "Erreur",
-        ForecastCellStatus.Locked => "Verrouillé",
         ForecastCellStatus.Unknown => "Inconnu",
         _ => status.ToString(),
     };

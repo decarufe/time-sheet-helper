@@ -19,9 +19,6 @@ public enum SubmissionGapType
     DayBelowTarget,
     DayAboveTarget,
 
-    /// <summary>The day holds registrations that Forecast approved or invoiced.</summary>
-    CellLocked,
-
     /// <summary>The day holds registrations submitted for approval.</summary>
     CellPendingApproval,
 

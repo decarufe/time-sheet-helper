@@ -23,6 +23,34 @@ public sealed class TimesheetUiTests
         Assert.Equal(expected, TimesheetUi.IsRemoved(Slot(kind)));
 
     [Fact]
+    public void Confirm_proposes_the_predicted_task_else_the_best_classified_alternative_but_never_ignore()
+    {
+        var tasks = new Dictionary<int, ForecastTask>
+        {
+            [1] = new() { Id = 1, ExternalId = "1", ProjectName = "P", TaskName = "A" },
+            [2] = new() { Id = 2, ExternalId = "2", ProjectName = "P", TaskName = "B" },
+            [9] = new() { Id = 9, ExternalId = ForecastTask.IgnoredExternalId, ProjectName = "-", TaskName = "-" },
+        };
+        SlotAssignment Predicted(SlotKind kind, int? taskId, params SlotCandidate[] alternatives) =>
+            new(Fx.Mon(9), kind, taskId, taskId is null ? "repo:x" : null, 0.5, alternatives, [], TimeSpan.Zero);
+
+        Assert.Equal(1, TimesheetUi.PredictedTask(Predicted(SlotKind.Activity, 1), tasks));
+        Assert.Equal(1, TimesheetUi.PredictedTask(Predicted(SlotKind.Meeting, 1), tasks));
+        Assert.Equal(2, TimesheetUi.PredictedTask(Predicted(SlotKind.Activity, null, new(null, "repo:y", 1, 0.3), new(9, null, 1, 0.2), new(2, null, 1, 0.1)), tasks));
+        Assert.Null(TimesheetUi.PredictedTask(Predicted(SlotKind.Activity, null, new SlotCandidate(null, "repo:y", 1, 0.5)), tasks));
+        Assert.Null(TimesheetUi.PredictedTask(Predicted(SlotKind.Override, 1), tasks));
+        Assert.Null(TimesheetUi.PredictedTask(Predicted(SlotKind.Ignored, 9), tasks));
+    }
+
+    [Fact]
+    public void Meeting_group_keys_propose_the_meeting_title_as_new_task_name()
+    {
+        Assert.Equal("daily standup", TimesheetUi.MeetingTitle("meeting:daily standup"));
+        Assert.Null(TimesheetUi.MeetingTitle("repo:contoso/api"));
+        Assert.Null(TimesheetUi.MeetingTitle(null));
+    }
+
+    [Fact]
     public void Consecutive_slots_have_no_gap_even_when_a_removed_slot_is_hidden_between_them()
     {
         Assert.True(TimesheetUi.AreConsecutive([Fx.Mon(9), Fx.Mon(9, 15), Fx.Mon(9, 30)]));
@@ -90,9 +118,20 @@ public sealed class TimesheetUiTests
     }
 
     [Theory]
-    [InlineData(1, "Supprimer ce créneau ?")]
-    [InlineData(2, "Supprimer ces 2 créneaux ?")]
-    [InlineData(12, "Supprimer ces 12 créneaux ?")]
+    [InlineData(SlotKind.Removed, 0, false)]
+    [InlineData(SlotKind.Empty, 0, false)]
+    [InlineData(SlotKind.Empty, 1, true)]
+    [InlineData(SlotKind.Activity, 1, true)]
+    [InlineData(SlotKind.Override, 0, true)]
+    [InlineData(SlotKind.ExcludedByOverride, 1, true)]
+    public void Only_a_slot_with_an_assignment_or_activities_can_be_cleared(SlotKind kind, int activities, bool expected) =>
+        Assert.Equal(expected, TimesheetUi.HasContent(new SlotAssignment(
+            Fx.Mon(9), kind, null, null, 0, [], Enumerable.Range(1, activities).Select(i => (long)i).ToList(), TimeSpan.Zero)));
+
+    [Theory]
+    [InlineData(1, "Effacer ce créneau ?")]
+    [InlineData(2, "Effacer ces 2 créneaux ?")]
+    [InlineData(12, "Effacer ces 12 créneaux ?")]
     public void Remove_confirmation_title_counts_the_slots(int count, string expected) =>
         Assert.Equal(expected, TimesheetUi.RemoveConfirmationTitle(count));
 
@@ -100,24 +139,24 @@ public sealed class TimesheetUiTests
     public void Remove_confirmation_message_warns_it_is_irreversible_and_points_to_not_work_for_keeping_activities()
     {
         var one = TimesheetUi.RemoveConfirmationMessage(1);
-        Assert.StartsWith("Ce créneau de 15 minutes sera supprimé", one);
+        Assert.StartsWith("Le contenu de ce créneau de 15 minutes sera effacé", one);
         Assert.Contains("définitivement", one);
         Assert.Contains("irréversible", one);
         Assert.Contains("d'autres créneaux", one);
         Assert.Contains("Pas du travail", one);
 
         var many = TimesheetUi.RemoveConfirmationMessage(3);
-        Assert.StartsWith("Ces 3 créneaux de 15 minutes seront supprimés", many);
+        Assert.StartsWith("Le contenu de ces 3 créneaux de 15 minutes sera effacé", many);
         Assert.Contains("irréversible", many);
     }
 
     [Theory]
-    [InlineData(0, 0, 0, "Aucun créneau à supprimer.")]
-    [InlineData(1, 0, 0, "1 créneau supprimé, aucune activité effacée.")]
-    [InlineData(1, 1, 0, "1 créneau supprimé, 1 activité effacée.")]
-    [InlineData(3, 5, 0, "3 créneaux supprimés, 5 activités effacées.")]
-    [InlineData(1, 2, 1, "1 créneau supprimé, 2 activités effacées. 1 activité conservée car elle touche aussi d'autres créneaux.")]
-    [InlineData(2, 0, 3, "2 créneaux supprimés, aucune activité effacée. 3 activités conservées car elles touchent aussi d'autres créneaux.")]
+    [InlineData(0, 0, 0, "Aucun créneau à effacer.")]
+    [InlineData(1, 0, 0, "1 créneau effacé, aucune activité effacée.")]
+    [InlineData(1, 1, 0, "1 créneau effacé, 1 activité effacée.")]
+    [InlineData(3, 5, 0, "3 créneaux effacés, 5 activités effacées.")]
+    [InlineData(1, 2, 1, "1 créneau effacé, 2 activités effacées. 1 activité conservée car elle touche aussi d'autres créneaux.")]
+    [InlineData(2, 0, 3, "2 créneaux effacés, aucune activité effacée. 3 activités conservées car elles touchent aussi d'autres créneaux.")]
     public void Removal_result_message_reports_slots_erased_and_kept_activities(int slots, int deleted, int kept, string expected) =>
         Assert.Equal(expected, TimesheetUi.RemovalResultMessage(new SlotRemovalResult(slots, deleted, kept)));
 

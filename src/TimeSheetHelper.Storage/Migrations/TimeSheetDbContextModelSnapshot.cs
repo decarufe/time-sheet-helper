@@ -188,6 +188,35 @@ namespace TimeSheetHelper.Storage.Migrations
                     b.ToTable("Rules");
                 });
 
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.AssignmentFeedback", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ForecastTaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("GroupKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ForecastTaskId");
+
+                    b.HasIndex("GroupKey", "ForecastTaskId")
+                        .IsUnique();
+
+                    b.ToTable("AssignmentFeedback");
+                });
+
             modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.ClassificationCacheEntry", b =>
                 {
                     b.Property<int>("Id")
@@ -437,6 +466,15 @@ namespace TimeSheetHelper.Storage.Migrations
                 });
 
             modelBuilder.Entity("TimeSheetHelper.Core.Rules.Rule", b =>
+                {
+                    b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
+                        .WithMany()
+                        .HasForeignKey("ForecastTaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("TimeSheetHelper.Core.Timesheets.AssignmentFeedback", b =>
                 {
                     b.HasOne("TimeSheetHelper.Core.Forecast.ForecastTask", null)
                         .WithMany()
