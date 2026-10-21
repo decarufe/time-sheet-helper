@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using TimeSheetHelper.App.About;
 using TimeSheetHelper.App.Plugins;
 using TimeSheetHelper.App.Updates;
 
 namespace TimeSheetHelper.App;
 
-/// <summary>Notification-area icon: open the UI, pause tracking, update, quit, weekly reminder. Runs its own STA message loop.</summary>
-public sealed class TrayIcon(PluginHost plugins, UpdateService updates, IHostApplicationLifetime lifetime, IConfiguration configuration) : IHostedService
+/// <summary>Notification-area icon: open the UI, pause tracking, update, about, quit, weekly reminder. Runs its own STA message loop.</summary>
+public sealed class TrayIcon(PluginHost plugins, UpdateService updates, AboutService about, IHostApplicationLifetime lifetime, IConfiguration configuration) : IHostedService
 {
     private const string BaseTooltip = "Time Sheet Helper";
     private const string CheckLabel = "Rechercher une mise à jour";
@@ -54,6 +55,8 @@ public sealed class TrayIcon(PluginHost plugins, UpdateService updates, IHostApp
         icon.ContextMenuStrip.Items.Add(pause);
         var updateItem = new ToolStripMenuItem(CheckLabel);
         icon.ContextMenuStrip.Items.Add(updateItem);
+        var aboutItem = new ToolStripMenuItem("À propos");
+        icon.ContextMenuStrip.Items.Add(aboutItem);
         icon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
         icon.ContextMenuStrip.Items.Add("Quitter", null, (_, _) => lifetime.StopApplication());
         icon.ContextMenuStrip.Opening += (_, _) => RefreshPauseItem(pause, icon);
@@ -64,6 +67,27 @@ public sealed class TrayIcon(PluginHost plugins, UpdateService updates, IHostApp
         using var badgedIcon = CreateBadgedIcon(plainIcon);
         using var sync = new Control();
         _ = sync.Handle;
+        var aboutOpen = false;
+        aboutItem.Click += async (_, _) =>
+        {
+            if (aboutOpen)
+                return;
+            aboutOpen = true;
+            try
+            {
+                var info = await Task.Run(() => about.GetAsync());
+                var text = AboutFormat.Summary(info, AboutFormat.UpdateStatus(updates.Phase, updates.Available?.Version, updates.Error));
+                MessageBox.Show(text, "À propos de " + AboutFormat.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                MessageBox.Show($"Impossible de lire les informations : {ex.Message}", "À propos de " + AboutFormat.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                aboutOpen = false;
+            }
+        };
         var manualCheck = false;
         AppVersion? notified = null;
         updateItem.Click += (_, _) =>

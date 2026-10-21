@@ -9,6 +9,9 @@
         <span class="track-dot" aria-hidden="true"></span>
     </button>
 }
+<a class="@ButtonClass shell-about" href="apropos" data-tip="À propos" aria-label="À propos">
+    <Icon Name="info" />
+</a>
 <button type="button" class="@ButtonClass shell-theme" data-tip="Thème (Alt+T)"
         aria-label="Basculer le thème clair/sombre" @onclick="OnToggleTheme">
     <Icon Name="@(Theme == ShellTheme.Dark ? "sun" : "moon")" />

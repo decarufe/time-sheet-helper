@@ -297,6 +297,7 @@ svg.ico.sm {
   background: var(--bg);
   color: var(--fg);
   cursor: pointer;
+  text-decoration: none;
 }
 .icon-btn:hover {
   background: var(--surface);

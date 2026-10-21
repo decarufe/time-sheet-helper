@@ -1,0 +1,148 @@
+@page "/apropos"
+@rendermode InteractiveServer
+@implements IDisposable
+@using TimeSheetHelper.App.About
+@using TimeSheetHelper.App.Components.Shared
+@using TimeSheetHelper.App.Updates
+@inject AboutService About
+@inject UpdateService Updates
+@inject IJSRuntime JS
+
+<PageTitle>À propos — Time Sheet Helper</PageTitle>
+
+<div class="page">
+    <PageHeader Title="À propos" />
+
+    @if (info is null)
+    {
+        <p class="muted" role="status">Chargement…</p>
+    }
+    else
+    {
+        <section class="card" aria-labelledby="about-app">
+            <h2 id="about-app">@AboutFormat.AppName</h2>
+            <dl>
+                <dt>Version</dt>
+                <dd>@info.Version</dd>
+                <dt>.NET</dt>
+                <dd>@info.RuntimeVersion</dd>
+                <dt>Licence</dt>
+                <dd>@info.License</dd>
+                <dt>Dépôt</dt>
+                <dd><a href="@info.RepositoryUrl" target="_blank" rel="noopener">@info.RepositoryUrl</a></dd>
+            </dl>
+        </section>
+
+        <section class="card" aria-labelledby="about-update">
+            <h2 id="about-update">Mise à jour</h2>
+            <p role="status">@AboutFormat.UpdateStatus(Updates.Phase, Updates.Available?.Version, Updates.Error)</p>
+            @if (Updates.Available is { } release)
+            {
+                <p><a href="@release.PageUrl" target="_blank" rel="noopener">Notes de version</a></p>
+            }
+            <div class="actions">
+                <button type="button" disabled="@Updates.IsBusy" @onclick="CheckAsync">Rechercher une mise à jour</button>
+                @if (Updates.Available is not null)
+                {
+                    <button type="button" class="primary" disabled="@Updates.IsBusy" @onclick="InstallAsync">Installer la mise à jour</button>
+                }
+            </div>
+        </section>
+
+        <section class="card" aria-labelledby="about-data">
+            <h2 id="about-data">Données locales</h2>
+            <dl>
+                <dt>Dossier</dt>
+                <dd>
+                    <code>@info.DataFolder</code>
+                    <button type="button" class="link" @onclick="CopyFolderAsync">@(copied ? "Copié" : "Copier le chemin")</button>
+                </dd>
+                <dt>Activités</dt>
+                <dd>@AboutFormat.ActivityCount(info.ActivityCount)@(info.ActivityCount > 0 ? $" ({AboutFormat.Size(info.ActivityBytes)})" : "")</dd>
+                <dt>Base de données</dt>
+                <dd>@AboutFormat.Size(info.DatabaseBytes)</dd>
+            </dl>
+            <p class="muted">@AboutFormat.ClearNote</p>
+            <div class="actions">
+                @foreach (var choice in AboutFormat.ClearChoices)
+                {
+                    var days = choice.Days;
+                    <button type="button" class="danger-outline" disabled="@(clearing || info.ActivityCount == 0)"
+                            @onclick="() => pending = new Clearing(days)">@choice.Label</button>
+                }
+            </div>
+            @if (clearResult is not null)
+            {
+                <p role="status">@clearResult</p>
+            }
+        </section>
+    }
+
+    @if (pending is { } clear)
+    {
+        <ConfirmDialog Title="Effacer l'activité ?" Message="@AboutFormat.ClearConfirmation(clear.Days)" ConfirmLabel="Effacer"
+                       OnConfirm="ClearAsync" OnCancel="() => pending = null" />
+    }
+</div>
+
+@code {
+    private sealed record Clearing(int? Days);
+
+    private AboutInfo? info;
+    private Clearing? pending;
+    private string? clearResult;
+    private bool clearing;
+    private bool copied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Updates.Changed += OnUpdateChanged;
+        info = await About.GetAsync();
+    }
+
+    private void OnUpdateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private Task CheckAsync() => Updates.CheckAsync();
+
+    private Task InstallAsync() => Updates.InstallAsync();
+
+    private async Task ClearAsync()
+    {
+        var request = pending;
+        pending = null;
+        if (request is null || clearing)
+            return;
+
+        clearing = true;
+        try
+        {
+            clearResult = AboutFormat.ClearResult(await About.ClearAsync(request.Days));
+            info = await About.GetAsync();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            clearResult = "Impossible d'effacer l'activité : " + ex.Message;
+        }
+        finally
+        {
+            clearing = false;
+        }
+    }
+
+    private async Task CopyFolderAsync()
+    {
+        if (info is null)
+            return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", info.DataFolder);
+            copied = true;
+        }
+        catch (JSException)
+        {
+            // Clipboard refused (insecure context or no permission): the path stays visible to copy by hand.
+        }
+    }
+
+    public void Dispose() => Updates.Changed -= OnUpdateChanged;
+}
