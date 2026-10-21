@@ -68,7 +68,8 @@ l'absence d'avertissement SmartScreen.
 
 Le certificat **public uniquement** est versionné dans `installer/code-signing.cer`. Le workflow vérifie que
 le PFX fourni par les secrets correspond à ce certificat, puis approuve le `.cer` dans
-`Cert:\CurrentUser\Root` sur le runner Windows GitHub **éphémère**. Cette approbation permet à
+`Cert:\LocalMachine\Root` du runner Windows GitHub **éphémère** (le magasin `CurrentUser\Root` affiche une
+boîte de confirmation qui bloquerait le job). Cette approbation permet à
 `signtool verify /pa` de vérifier les signatures self-signed; elle ne modifie pas les postes des utilisateurs
 et ne donne aucune réputation SmartScreen publique.
 
