@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TimeSheetHelper.App;
+using TimeSheetHelper.App.About;
 using TimeSheetHelper.App.Components;
 using TimeSheetHelper.App.Components.Shared;
 using TimeSheetHelper.App.Plugins;
@@ -55,6 +56,7 @@ builder.Services.AddSingleton(sp => new UpdateService(
     sp.GetRequiredService<IHostApplicationLifetime>(),
     sp.GetRequiredService<ILogger<UpdateService>>()));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UpdateService>());
+builder.Services.AddSingleton<AboutService>();
 builder.Services.AddSingleton<TrayIcon>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayIcon>());
 

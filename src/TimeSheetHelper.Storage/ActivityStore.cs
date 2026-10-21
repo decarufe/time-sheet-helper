@@ -41,6 +41,38 @@ public sealed class ActivityStore(IDbContextFactory<TimeSheetDbContext> dbFactor
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>Number of stored activities and an estimate of the bytes they occupy (text columns plus a fixed per-row overhead).</summary>
+    public async Task<ActivityFootprint> GetFootprintAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var count = await db.Activities.LongCountAsync(cancellationToken);
+        if (count == 0)
+            return new ActivityFootprint(0, 0);
+
+        var textBytes = await db.Database.SqlQuery<long>($"""
+            SELECT COALESCE(SUM(
+                LENGTH(CAST(Source AS BLOB)) + LENGTH(CAST(COALESCE(Kind, '') AS BLOB)) + LENGTH(CAST(COALESCE(ProcessName, '') AS BLOB))
+                + LENGTH(CAST(COALESCE(Title, '') AS BLOB)) + LENGTH(CAST(COALESCE(FilePath, '') AS BLOB)) + LENGTH(CAST(COALESCE(Folder, '') AS BLOB))
+                + LENGTH(CAST(COALESCE(Url, '') AS BLOB)) + LENGTH(CAST(COALESCE(Repo, '') AS BLOB)) + LENGTH(CAST(COALESCE(Project, '') AS BLOB))
+                + LENGTH(CAST(COALESCE(Subject, '') AS BLOB)) + LENGTH(CAST(COALESCE(Participants, '') AS BLOB)) + LENGTH(CAST(COALESCE(ExternalId, '') AS BLOB))
+            ), 0) AS Value FROM Activities
+            """).SingleAsync(cancellationToken);
+        return new ActivityFootprint(count, textBytes + count * ActivityFootprint.RowOverheadBytes);
+    }
+
+    /// <summary>
+    /// Erases stored activities that started before <paramref name="beforeUtc"/> (all of them when null) and returns how many were removed.
+    /// Manual assignments, rules, drafts and submissions are not touched.
+    /// </summary>
+    public async Task<int> DeleteOlderThanAsync(DateTime? beforeUtc, CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var query = db.Activities.AsQueryable();
+        if (beforeUtc is { } cutoff)
+            query = query.Where(a => a.StartUtc < cutoff);
+        return await query.ExecuteDeleteAsync(cancellationToken);
+    }
+
     /// <summary>Activities overlapping [fromUtc, toUtc), ordered by start.</summary>
     public async Task<IReadOnlyList<ActivityEvent>> GetRangeAsync(DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken = default)
     {

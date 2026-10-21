@@ -1,0 +1,53 @@
+/* Shared tokens (--border, --muted, --bg...) come from app.css and follow data-theme. */
+.page {
+  max-width: 760px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--bg);
+  margin-bottom: 12px;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0 4px;
+  color: var(--accent, inherit);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.danger-outline {
+  border-color: var(--danger-text);
+  color: var(--danger-text);
+}
