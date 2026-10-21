@@ -67,7 +67,7 @@ public class NavSummaryGapRulesTests : IAsyncLifetime
     public async Task Blocking_gap_on_a_classified_day_makes_the_day_a_gap_and_the_week_to_review()
     {
         await Assign(Fx.Monday, 9, 17);
-        _gaps.Gaps.Add(Gap(SubmissionGapType.CellLocked, SubmissionGapSeverity.Blocking, Fx.Monday));
+        _gaps.Gaps.Add(Gap(SubmissionGapType.TaskNotFound, SubmissionGapSeverity.Blocking, Fx.Monday));
 
         var summary = await _sut.GetAsync(Fx.Monday);
 
@@ -82,7 +82,7 @@ public class NavSummaryGapRulesTests : IAsyncLifetime
     {
         await Assign(Fx.Monday, 9, 17);
         await Assign(Fx.Monday.AddDays(1), 9, 17);
-        _gaps.Gaps.Add(Gap(SubmissionGapType.CellLocked, SubmissionGapSeverity.Blocking, Fx.Monday.AddDays(1)));
+        _gaps.Gaps.Add(Gap(SubmissionGapType.TaskNotFound, SubmissionGapSeverity.Blocking, Fx.Monday.AddDays(1)));
 
         var days = (await _sut.GetAsync(Fx.Monday)).Days;
 

@@ -96,30 +96,50 @@ public static class TimesheetUi
         SlotKind.Override => "Manuel",
         SlotKind.ExcludedByOverride => "Pas du travail",
         SlotKind.Ignored => "Ignoré",
-        SlotKind.Removed => "Supprimé",
         _ => "Vide",
     };
 
-    /// <summary>A slot the user deleted ("Supprimer"): no activity left. Not the same as "Pas du travail", which keeps the activities.</summary>
+    /// <summary>A slot the user cleared ("Effacer"): no activity nor assignment left, shown as an empty row. Not the same as "Pas du travail", which keeps the activities.</summary>
     public static bool IsRemoved(SlotAssignment slot) => slot.Kind == SlotKind.Removed;
 
-    public static string RemoveConfirmationTitle(int slotCount) =>
-        slotCount == 1 ? "Supprimer ce créneau ?" : $"Supprimer ces {slotCount} créneaux ?";
+    /// <summary>Whether "Effacer" has something to clear: an assignment, a classification or activities.</summary>
+    public static bool HasContent(SlotAssignment slot) =>
+        !IsRemoved(slot) && (slot.Kind != SlotKind.Empty || slot.Evidence.Count > 0);
 
-    /// <summary>Irreversible-delete warning; the activity count is unknown before deleting, so it is not promised.</summary>
+    /// <summary>Task the "Confirmer" action stores for a predicted slot: its task, else its best classified alternative; null when nothing is predicted.</summary>
+    public static int? PredictedTask(SlotAssignment slot, IReadOnlyDictionary<int, ForecastTask> tasks)
+    {
+        if (slot.Kind is not (SlotKind.Activity or SlotKind.Meeting))
+        {
+            return null;
+        }
+
+        bool Assignable(int? id) => id is { } t && tasks.TryGetValue(t, out var task) && !task.IsIgnored;
+        if (Assignable(slot.TaskId))
+        {
+            return slot.TaskId;
+        }
+
+        return slot.Alternatives.FirstOrDefault(a => Assignable(a.TaskId))?.TaskId;
+    }
+
+    public static string RemoveConfirmationTitle(int slotCount) =>
+        slotCount == 1 ? "Effacer ce créneau ?" : $"Effacer ces {slotCount} créneaux ?";
+
+    /// <summary>Irreversible-clear warning; the activity count is unknown before clearing, so it is not promised.</summary>
     public static string RemoveConfirmationMessage(int slotCount) =>
-        (slotCount == 1 ? "Ce créneau de 15 minutes sera supprimé" : $"Ces {slotCount} créneaux de 15 minutes seront supprimés")
-        + " et les activités qui y sont associées seront supprimées définitivement. "
+        (slotCount == 1 ? "Le contenu de ce créneau de 15 minutes sera effacé" : $"Le contenu de ces {slotCount} créneaux de 15 minutes sera effacé")
+        + " : l'assignation est retirée et les activités qui y sont associées sont supprimées définitivement. "
         + "Les activités qui touchent aussi d'autres créneaux sont conservées. "
         + "Cette action est irréversible. Pour garder les activités, utilisez plutôt « Pas du travail ».";
 
-    /// <summary>Outcome of "Supprimer": slots removed, activities erased, and the ones kept because they touch other slots.</summary>
+    /// <summary>Outcome of "Effacer": slots cleared, activities erased, and the ones kept because they touch other slots.</summary>
     public static string RemovalResultMessage(SlotRemovalResult result)
     {
         if (result.SlotsRemoved == 0)
-            return "Aucun créneau à supprimer.";
+            return "Aucun créneau à effacer.";
 
-        var slots = $"{result.SlotsRemoved} {Plural(result.SlotsRemoved, "créneau supprimé", "créneaux supprimés")}";
+        var slots = $"{result.SlotsRemoved} {Plural(result.SlotsRemoved, "créneau effacé", "créneaux effacés")}";
         var erased = result.ActivitiesDeleted == 0
             ? "aucune activité effacée"
             : $"{result.ActivitiesDeleted} {Plural(result.ActivitiesDeleted, "activité effacée", "activités effacées")}";

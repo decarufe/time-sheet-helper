@@ -58,7 +58,6 @@ public static class DayStateLabels
         CellState.Deleted => new("Supprimé localement", "x", "danger"),
         CellState.Conflict => new("Conflit — Forecast modifié ailleurs", "warn", "danger"),
         CellState.Ignored => new("Ignoré (Ne pas envoyer)", "minus", "neutral"),
-        CellState.Locked => new("Verrouillé — non écrit", "lock", "locked"),
         CellState.NotAttempted => new("Non tenté (envoi interrompu)", "clock", "warn"),
         _ => throw new ArgumentOutOfRangeException(nameof(state), state, null),
     };
@@ -73,7 +72,7 @@ public static class DayStateLabels
         DayStatus.Modified => new("Modifié depuis l'envoi", "refresh", "warn"),
         DayStatus.Partial => new("Envoi partiel", "warn", "warn"),
         DayStatus.Conflict => new("Écart à résoudre", "warn", "danger"),
-        DayStatus.Locked => new("Verrouillé", "lock", "locked"),
+        DayStatus.LegacyLocked => Day(DayStatus.NotAttempted, hasHours),
         DayStatus.Error => new("Erreur d'envoi", "warn", "danger"),
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
     };
@@ -93,21 +92,12 @@ public static class DayStateLabels
         return Day(plan.Status, withHours.Count > 0);
     }
 
-    /// <summary>One line naming a Forecast registration that locks a day: its project, hours and why (approved or invoiced).</summary>
-    public static string LockingEntry(ForecastRemoteEntry entry)
-    {
-        var why = entry.Invoiced && entry.IsApproved ? "approuvée et facturée" : entry.Invoiced ? "facturée" : "approuvée";
-        var project = string.IsNullOrWhiteSpace(entry.ProjectName) ? "Projet inconnu" : entry.ProjectName;
-        return $"{project} — {entry.Hours.ToString("0.##", TimesheetUi.French)} h — {why}";
-    }
-
     /// <summary>Help line of a status, when the label needs one.</summary>
     public static string? DayHelp(DayStatus status) => status switch
     {
         DayStatus.SentUnknownFingerprint => "Sera comparé à Forecast avant tout nouvel envoi.",
         DayStatus.Partial => "Une partie des heures n'a pas été écrite : le rejeu relit Forecast et n'écrit que ce qui manque.",
         DayStatus.Conflict => "Forecast a été modifié ailleurs : choisissez comment traiter chaque conflit.",
-        DayStatus.Locked => "Période approuvée ou facturée dans Forecast : rien n'est écrit ni modifié.",
         DayStatus.Error => "L'envoi a échoué : vérifiez l'état du jour puis relancez-le.",
         _ => null,
     };
@@ -125,7 +115,6 @@ public static class DayStateLabels
         DayGate.ResolveConflicts => new("Écart à résoudre", false, false, false, "Choisissez comment traiter chaque conflit."),
         DayGate.ReadForecastFirst => new("Relire Forecast d'abord", true, false, true,
             "La lecture de Forecast était incomplète : rien ne sera écrit avant une lecture complète."),
-        DayGate.Locked => new("Verrouillé", false, false, false, "Jour approuvé ou facturé dans Forecast : rien n'est écrit ni modifié."),
         _ => throw new ArgumentOutOfRangeException(nameof(gate), gate, null),
     };
 
@@ -238,7 +227,6 @@ public static class DayStateLabels
                 ? $"Résolution : {ChoiceSummary(cell, r)}"
                 : $"Forecast {Hours(f)} ≠ brouillon {Hours(cell.DraftHours)} : cellule non modifiée.",
             CellState.Ignored => "Exclue de l'envoi pour la semaine.",
-            CellState.Locked => "Période approuvée / facturée dans Forecast.",
             CellState.NotAttempted => "Sera écrite au rejeu.",
             _ => "",
         };

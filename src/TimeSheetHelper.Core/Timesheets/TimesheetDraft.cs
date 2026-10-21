@@ -53,6 +53,19 @@ public sealed class SlotOverride
 }
 
 /// <summary>
+/// How many times the user confirmed or assigned slots of an activity group (group key) to a task.
+/// Weighs the engine's prediction for that group's activities towards the task chosen most often.
+/// </summary>
+public sealed class AssignmentFeedback
+{
+    public int Id { get; set; }
+    public required string GroupKey { get; set; }
+    public int ForecastTaskId { get; set; }
+    public int Count { get; set; }
+    public DateTime LastUtc { get; set; }
+}
+
+/// <summary>
 /// Tombstone of a 15-minute slot the user deleted. The engine ignores every activity in the slot, so events
 /// brought back by a later collector sync (same ExternalId, growing segment) do not reappear.
 /// </summary>

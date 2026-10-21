@@ -219,3 +219,34 @@ ul {
     display: flex;
     gap: 8px;
 }
+
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+}
+
+.toolbar select {
+    font-size: 0.85rem;
+    padding: 2px 4px;
+}
+
+.chips {
+    display: flex;
+    gap: 4px;
+}
+
+.chip.active {
+    border-color: var(--accent);
+    background: var(--row-alt);
+    font-weight: 600;
+}

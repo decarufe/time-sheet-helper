@@ -26,9 +26,6 @@ public enum ForecastCellStatus
     RowNotFound,
     Error,
 
-    /// <summary>The day holds registrations Forecast has approved or invoiced: nothing is registered for this cell.</summary>
-    Locked,
-
     /// <summary>What Forecast holds for the cell could not be established (read incomplete, outcome of a write unknown).</summary>
     Unknown,
 

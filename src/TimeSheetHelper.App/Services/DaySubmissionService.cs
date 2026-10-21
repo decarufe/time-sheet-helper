@@ -693,7 +693,6 @@ public sealed class DaySubmissionService(
     private static string Label(ForecastCellStatus status) => status switch
     {
         ForecastCellStatus.Mismatch => "Forecast a changé entre-temps",
-        ForecastCellStatus.Locked => "jour approuvé ou facturé",
         ForecastCellStatus.Unknown => "résultat inconnu",
         ForecastCellStatus.RowNotFound => "tâche introuvable dans Forecast",
         _ => "erreur de Forecast",
@@ -708,7 +707,6 @@ public sealed class DaySubmissionService(
         DayStatus.Modified => "modifié depuis l'envoi",
         DayStatus.Partial => "envoi partiel",
         DayStatus.Conflict => "conflit avec Forecast",
-        DayStatus.Locked => "verrouillé dans Forecast",
         _ => "erreur",
     };
 
@@ -719,7 +717,6 @@ public sealed class DaySubmissionService(
         DayGate.ReadForecastFirst => "Lecture de Forecast incomplète : relisez Forecast avant d'envoyer.",
         DayGate.ResolveConflicts => "Des conflits ou des cellules bloquées sont à régler d'abord.",
         DayGate.InProgress => "Un envoi de ce jour est déjà en cours.",
-        DayGate.Locked => "Jour approuvé ou facturé dans Forecast : rien n'est modifié.",
         _ => "Prêt à envoyer.",
     };
 }

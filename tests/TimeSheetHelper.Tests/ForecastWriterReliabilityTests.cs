@@ -306,7 +306,7 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
     }
 
     [Fact]
-    public async Task A_day_with_approved_registrations_blocks_the_cells_to_register_on_it()
+    public async Task Approved_registrations_do_not_block_the_cells_to_register_on_their_day()
     {
         _server.Entries.Add((FakeForecastClient.DevProject, Monday, 120, FakeForecastClient.MyId));
         _server.ApprovedDays.Add((FakeForecastClient.DevProject, Monday));
@@ -315,17 +315,14 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
             Draft(Entry(_dev, 0, 2m), Entry(_meetings, 0, 1m), Entry(_meetings, 1, 1m)), ForecastSubmitMode.Fill);
 
         Assert.Equal(ForecastCellStatus.Ok, Cell(report, _dev, 0).Status); // already there: nothing to write
-        var locked = Cell(report, _meetings, 0);
-        Assert.Equal(ForecastCellStatus.Locked, locked.Status);
-        Assert.Equal(ForecastEntryState.NotEntered, locked.EntryState);
-        Assert.Contains("approuvées", locked.Message);
-        Assert.Equal(ForecastCellStatus.Ok, Cell(report, _meetings, 1).Status); // another day: free
-        Assert.Single(_server.Creates);
-        Assert.False(report.Success);
+        Assert.Equal(ForecastCellStatus.Ok, Cell(report, _meetings, 0).Status);
+        Assert.Equal(ForecastCellStatus.Ok, Cell(report, _meetings, 1).Status);
+        Assert.Equal(2, _server.Creates.Count());
+        Assert.True(report.Success);
     }
 
     [Fact]
-    public async Task An_invoiced_registration_locks_the_day_too_and_a_submitted_one_only_warns()
+    public async Task An_invoiced_registration_does_not_block_and_a_submitted_one_only_warns()
     {
         _server.Entries.Add((FakeForecastClient.MeetingsProject, Monday, 60, FakeForecastClient.MyId));
         _server.InvoicedDays.Add((FakeForecastClient.MeetingsProject, Monday));
@@ -334,8 +331,7 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
 
         var report = await Writer().FillWeekAsync(Draft(Entry(_dev, 0, 1m), Entry(_dev, 1, 1m)), ForecastSubmitMode.DryRun);
 
-        Assert.Equal(ForecastCellStatus.Locked, Cell(report, _dev, 0).Status);
-        Assert.Contains("facturées", Cell(report, _dev, 0).Message);
+        Assert.Equal(ForecastCellStatus.Planned, Cell(report, _dev, 0).Status);
         var submitted = Cell(report, _dev, 1);
         Assert.Equal(ForecastCellStatus.Planned, submitted.Status);
         Assert.Contains(submitted.Findings, f => f.Kind == ForecastFindingKind.PendingApproval);
@@ -503,7 +499,7 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
     }
 
     [Fact]
-    public async Task A_report_with_a_locked_day_a_conflict_and_idle_time_gives_the_gaps_the_page_shows()
+    public async Task A_report_with_an_approved_day_a_conflict_and_idle_time_gives_the_gaps_the_page_shows()
     {
         _server.Entries.Add((FakeForecastClient.DevProject, Monday, 30, FakeForecastClient.MyId));
         _server.Entries.Add((FakeForecastClient.MeetingsProject, Monday.AddDays(1), 60, FakeForecastClient.MyId));
@@ -515,7 +511,6 @@ public sealed class ForecastWriterReliabilityTests : IDisposable
         var analysis = await new SubmissionGapService().AnalyzeAsync(draft, report);
 
         Assert.Contains(analysis.Gaps, g => g.Type == SubmissionGapType.ForecastLower && g.Severity == SubmissionGapSeverity.Blocking && g.IsApproximate);
-        Assert.Contains(analysis.Gaps, g => g.Type == SubmissionGapType.CellLocked && g.Cell!.ForecastTaskId == _review.Id);
         Assert.Contains(analysis.Gaps, g => g.Type == SubmissionGapType.ForecastTimeWithoutProject);
         Assert.False(analysis.Summary.CanFill);
         Assert.Equal(1m, analysis.Summary.ForecastNonProjectHours);
