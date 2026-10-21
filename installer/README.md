@@ -13,11 +13,11 @@ Deux formes d'installation, toutes deux **par utilisateur, sans droits administr
 
 Dans `%LOCALAPPDATA%\Programs\TimeSheetHelper` :
 
-| Élément                       | Rôle                                                                                                                                                                                                 |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TimeSheetHelper.exe`         | l'application d'arrière-plan : icône de notification, serveur web local (`http://localhost:5178`), sources. Elle démarre avec la session Windows (clé `HKCU\…\Run`). Le raccourci du menu Démarrer la lance avec `--open` : elle démarre si besoin et ouvre l'interface dans le **navigateur par défaut** (Edge, en général). L'icône de notification fait de même. |
-| `plugins\<paquet>\`           | les sources fournies (`windows-activity`, `devops`, `microsoft-365`), chargées au démarrage. Elles se désactivent depuis la page **Sources**.                                                        |
-| `vscode\*.vsix`               | l'extension VS Code (si construite), installée avec `code --install-extension` quand VS Code est présent.                                                                                            |
+| Élément               | Rôle                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TimeSheetHelper.exe` | l'application d'arrière-plan : icône de notification, serveur web local (`http://localhost:5178`), sources. Elle démarre avec la session Windows (clé `HKCU\…\Run`). Le raccourci du menu Démarrer la lance avec `--open` : elle démarre si besoin et ouvre l'interface dans le **navigateur par défaut** (Edge, en général). L'icône de notification fait de même. |
+| `plugins\<paquet>\`   | les sources fournies (`windows-activity`, `devops`, `microsoft-365`), chargées au démarrage. Elles se désactivent depuis la page **Sources**.                                                                                                                                                                                                                       |
+| `vscode\*.vsix`       | l'extension VS Code (si construite), installée avec `code --install-extension` quand VS Code est présent.                                                                                                                                                                                                                                                           |
 
 L'interface est servie en HTTP sur l'adresse `Urls` de `appsettings.json` (`appsettings.Local.json` l'emporte) et
 ouverte dans le navigateur. L'application reste dans la session de l'utilisateur : la
@@ -47,6 +47,87 @@ et les plugins dans le dossier), construit l'extension, retire les réglages loc
 puis construit `installer/TimeSheetHelper.Installer` (WiX). La version de MSI est la partie `X.Y.Z`
 (majeure et mineure ≤ 255).
 
+### Signature (avertissement « peut être dangereux »)
+
+Un MSI non signé déclenche l'avertissement SmartScreen du navigateur et de Windows au téléchargement. Avec un
+certificat de signature de code Authenticode (`.pfx`), le script signe les binaires `TimeSheetHelper*` puis le
+MSI (SHA-256, horodatés) et vérifie les signatures avec `signtool` (Windows SDK) :
+
+```powershell
+$env:SIGNING_CERT_PASSWORD = '<mot de passe>'
+pwsh ./installer/build-msi.ps1 -CertificatePath C:\certs\code-signing.pfx
+```
+
+Dans le workflow `release.yml`, ajoutez les secrets du dépôt `SIGNING_CERT_PFX_BASE64`
+(`[Convert]::ToBase64String([IO.File]::ReadAllBytes('code-signing.pfx'))`) et `SIGNING_CERT_PASSWORD`.
+Sans ces deux secrets, la release reste non signée (avec un avertissement explicite). Si un seul est
+configuré, le workflow échoue. Un certificat public ou un service de signature ne garantit pas à lui seul
+l'absence d'avertissement SmartScreen.
+
+#### Signature dans GitHub Actions
+
+Le certificat **public uniquement** est versionné dans `installer/code-signing.cer`. Le workflow vérifie que
+le PFX fourni par les secrets correspond à ce certificat, puis approuve le `.cer` dans
+`Cert:\CurrentUser\Root` sur le runner Windows GitHub **éphémère**. Cette approbation permet à
+`signtool verify /pa` de vérifier les signatures self-signed; elle ne modifie pas les postes des utilisateurs
+et ne donne aucune réputation SmartScreen publique.
+
+Configurez les deux secrets dans **Settings > Secrets and variables > Actions** du dépôt :
+
+- `SIGNING_CERT_PFX_BASE64` : contenu Base64 du PFX privé, jamais le `.cer`.
+- `SIGNING_CERT_PASSWORD` : mot de passe du PFX.
+
+Pour transmettre le PFX sans afficher son contenu ni le copier dans le presse-papiers :
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes(
+    "$env:LOCALAPPDATA\TimeSheetHelper\signing\code-signing.pfx")) |
+    gh secret set SIGNING_CERT_PFX_BASE64 --repo decarufe/time-sheet-helper
+if ($LASTEXITCODE -ne 0) { throw 'Configuration du secret PFX échouée.' }
+gh secret set SIGNING_CERT_PASSWORD --repo decarufe/time-sheet-helper
+# Saisir le mot de passe dans l'invite masquée de gh, jamais dans une commande ou dans le chat.
+```
+
+Le `.cer` public accompagne les artefacts et les releases, avec son SHA-256 dans `SHA256SUMS.txt`.
+Publiez aussi son empreinte par un canal indépendant : télécharger le certificat, le MSI et les sommes depuis
+la même release ne protège pas d'une substitution de l'ensemble. Le PFX temporaire est supprimé après la
+construction du MSI, même en cas d'échec. Ne versionnez et ne publiez jamais le PFX.
+Lors d'une rotation, remplacez le `.cer` versionné et les deux secrets ensemble.
+
+#### Créer un certificat self-signed local
+
+Pour développement ou déploiement interne, générez un certificat Authenticode self-signed sans infrastructure CA :
+
+```powershell
+pwsh ./installer/new-signing-certificate.ps1
+# Crée code-signing.cer et code-signing.pfx dans %LOCALAPPDATA%\TimeSheetHelper\signing
+# Demande le mot de passe du PFX en SecureString interactif (jamais visible)
+pwsh ./installer/new-signing-certificate.ps1 -OutputDirectory C:\certs -CertificateName my-signer
+# Personnalisé
+```
+
+Le script génère :
+- **code-signing.cer** : clé publique, partageable via un **canal sécurisé hors-bande** (e-mail chiffré, message direct IRC privé, appel) **distinct du téléchargement** du .pfx pour installation sur d'autres machines. L'empreinte SHA-256 doit être vérifiée par un canal indépendant (ex. appel, IRC privé).
+- **code-signing.pfx** : clé privée chiffrée avec le mot de passe SecureString. À **conserver secrètement ; jamais versionnée, commitée, ni partagée avec le dépôt**.
+
+Utilisé avec `build-msi.ps1` :
+
+```powershell
+$env:SIGNING_CERT_PASSWORD = '<mot de passe>'
+pwsh ./installer/build-msi.ps1 -CertificatePath $env:LOCALAPPDATA\TimeSheetHelper\signing\code-signing.pfx
+```
+
+**Mise en garde** :
+- **Scope** : Ce certificat convient aux tests, déploiements internes et environnements contrôlés uniquement. Pour les utilisateurs du grand public, un certificat CA (OV/EV) ou Azure Trusted Signing est fortement recommandé.
+- **Vérification locale** : `build-msi.ps1` utilise `signtool verify /pa` pour vérifier les signatures. Un certificat self-signed n'étant pas approuvé par défaut, `signtool` échoue avec « a certificate chain processed, but terminated in a root certificate which is not trusted ». Après avoir vérifié l'empreinte SHA-256 du `.cer` par un canal indépendant, vous pouvez faire confiance à ce certificat uniquement pour votre compte Windows :
+
+  ```powershell
+  Import-Certificate -FilePath "$env:LOCALAPPDATA\TimeSheetHelper\signing\code-signing.cer" -CertStoreLocation Cert:\CurrentUser\Root
+  ```
+
+  Relancez ensuite `build-msi.ps1`. Cet import modifie la confiance de votre compte; ne le faites que pour un certificat que vous contrôlez et ne demandez pas au grand public d'installer une racine self-signed.
+- **Confiance** : Installer le .cer accordera confiance à **TOUS les binaires signés avec cette clé**. N'installer que si vous contrôlez la chaîne qui a généré la clé et que vous acceptez le risque de substitution.
+- **Empreinte** : Vérifiez l'empreinte SHA-256 du fichier .cer via un canal indépendant (IRC privé, appel, message direct) distinct du canal de téléchargement des fichiers. Calculez-la avec : `Get-FileHash -Path code-signing.cer -Algorithm SHA256`
 ### Installer, mettre à jour, désinstaller
 
 ```powershell
@@ -85,16 +166,16 @@ jetons, et que l'on active, désactive, installe ou retire des plugins.
 
 ## Publier une version
 
-Le workflow **Release** (`.github/workflows/release.yml`) se lance à la main : *Actions > Release > Run workflow*,
+Le workflow **Release** (`.github/workflows/release.yml`) se lance à la main : _Actions > Release > Run workflow_,
 sur la branche `main`. Il exécute les tests, construit le MSI et le zip, génère les notes de version, crée le tag
 `vX.Y.Z` sur le dernier commit de `main` et publie la release GitHub (MSI, zip, `SHA256SUMS.txt`).
 
-| Entrée | Rôle |
-| --- | --- |
-| `bump` | `auto` (défaut) déduit l'incrément des commits conventionnels : `feat` = minor, `fix` et autres = patch, `!` ou `BREAKING CHANGE` = major (minor tant que la version est 0.x). `patch`, `minor`, `major` forcent l'incrément. |
-| `version` | Force un numéro (`1.4.0`, `2.0.0-rc.1`) au lieu de la suggestion ; doit être supérieur à la dernière version et le tag ne doit pas exister. Un suffixe `-…` publie une pré-version. |
-| `ai_notes` | Notes rédigées par l'IA (GitHub Models, permission `models: read`) ; en cas d'échec, notes automatiques classées par type de commit. |
-| `dry_run` | Construit tout et publie les fichiers en artefact du run, sans tag ni release. |
+| Entrée     | Rôle                                                                                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bump`     | `auto` (défaut) déduit l'incrément des commits conventionnels : `feat` = minor, `fix` et autres = patch, `!` ou `BREAKING CHANGE` = major (minor tant que la version est 0.x). `patch`, `minor`, `major` forcent l'incrément. |
+| `version`  | Force un numéro (`1.4.0`, `2.0.0-rc.1`) au lieu de la suggestion ; doit être supérieur à la dernière version et le tag ne doit pas exister. Un suffixe `-…` publie une pré-version.                                           |
+| `ai_notes` | Notes rédigées par l'IA (GitHub Models, permission `models: read`) ; en cas d'échec, notes automatiques classées par type de commit.                                                                                          |
+| `dry_run`  | Construit tout et publie les fichiers en artefact du run, sans tag ni release.                                                                                                                                                |
 
 La première version est `0.1.0`. Les scripts (`scripts/release/Get-ReleaseVersion.ps1`,
 `New-ReleaseNotes.ps1`) s'exécutent aussi en local pour prévisualiser la version et les notes.

@@ -17,9 +17,18 @@
 .PARAMETER SkipExtension
     Do not build the VS Code extension even if extensions/vscode exists.
 
+.PARAMETER CertificatePath
+    Optional Authenticode code-signing certificate (.pfx). When set, the application binaries and the .msi are signed
+    (SHA-256, timestamped) so Windows/SmartScreen shows a known publisher. Defaults to $env:SIGNING_CERT_PATH.
+    The password is read from $env:SIGNING_CERT_PASSWORD so it never appears on a command line.
+
+.PARAMETER TimestampUrl
+    RFC 3161 timestamp server used when signing.
+
 .EXAMPLE
     pwsh ./installer/build-msi.ps1
     pwsh ./installer/build-msi.ps1 -Version 1.2.0
+    $env:SIGNING_CERT_PASSWORD = '...'; pwsh ./installer/build-msi.ps1 -CertificatePath C:\certs\code-signing.pfx
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive console script with colored output.')]
 [CmdletBinding()]
@@ -28,7 +37,9 @@ param(
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
     [string]$OutputDir,
-    [switch]$SkipExtension
+    [switch]$SkipExtension,
+    [string]$CertificatePath = $env:SIGNING_CERT_PATH,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
 
 Set-StrictMode -Version Latest
@@ -48,6 +59,32 @@ function Invoke-Native {
     param([string]$FilePath, [string[]]$Arguments)
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) { throw "La commande « $FilePath $($Arguments -join ' ') » a échoué (code $LASTEXITCODE)." }
+}
+
+function Find-SignTool {
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+    $found = Get-ChildItem -Path $kits -Filter signtool.exe -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -eq 'x64' } | Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $found) { throw 'signtool.exe est introuvable. Installez le Windows SDK (winget install Microsoft.WindowsSDK.10.0.26100).' }
+    return $found.FullName
+}
+
+function Invoke-Sign {
+    # Signs files with the Authenticode certificate, then verifies them against the Windows trust policy.
+    param([string[]]$Files)
+    if (-not $Files) { return }
+    $arguments = @('sign', '/f', $CertificatePath, '/fd', 'SHA256', '/tr', $TimestampUrl, '/td', 'SHA256', '/q')
+    if ($env:SIGNING_CERT_PASSWORD) { $arguments += @('/p', $env:SIGNING_CERT_PASSWORD) }
+    Invoke-Native $signTool ($arguments + $Files)
+    Invoke-Native $signTool (@('verify', '/pa', '/q') + $Files)
+}
+
+$signTool = $null
+if ($CertificatePath) {
+    if (-not (Test-Path $CertificatePath)) { throw "Certificat de signature introuvable : $CertificatePath" }
+    $signTool = Find-SignTool
 }
 
 # --- Version -----------------------------------------------------------------------------------
@@ -108,6 +145,16 @@ foreach ($local in 'appsettings.Local.json', 'appsettings.Development.json') {
     Remove-Item (Join-Path $publishDir $local) -Force -ErrorAction SilentlyContinue
 }
 
+if ($signTool) {
+    # Only our own binaries: third-party and runtime files keep their original signatures.
+    Write-Step 'Signature des binaires de l''application'
+    $ownBinaries = Get-ChildItem -Path $publishDir -Recurse -File -Include 'TimeSheetHelper*.exe', 'TimeSheetHelper*.dll'
+    Invoke-Sign ($ownBinaries.FullName)
+}
+else {
+    Write-Warn 'Aucun certificat de signature (-CertificatePath / SIGNING_CERT_PATH) : le MSI ne sera pas signé et Windows avertira au téléchargement.'
+}
+
 # --- VS Code extension ---------------------------------------------------------------------------
 $wixProperties = @("-p:ProductVersion=$numericVersion", "-p:OutputName=$msiName", "-p:AppSourceDir=$publishDir")
 if ($SkipExtension) {
@@ -145,6 +192,10 @@ Invoke-Native dotnet (@('build', $wixProject, '-c', $Configuration, '-o', $Outpu
 
 $msi = Join-Path $OutputDir "$msiName.msi"
 if (-not (Test-Path $msi)) { throw "Le MSI attendu est introuvable : $msi" }
+if ($signTool) {
+    Write-Step 'Signature du MSI'
+    Invoke-Sign @($msi)
+}
 $sizeMb = [math]::Round((Get-Item $msi).Length / 1MB, 1)
 Write-Host ''
 Write-Host "Installateur prêt : $msi ($sizeMb Mo)" -ForegroundColor Green
