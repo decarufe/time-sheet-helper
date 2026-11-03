@@ -77,7 +77,7 @@
             <ul class="task-hours">
                 @foreach (var (taskId, hours) in taskHours)
                 {
-                    <li style="@TimesheetUi.TaskStyle(taskId)">
+                    <li style="@TimesheetUi.TaskStyle(taskId)" title="@TaskTip(taskId)">
                         <span class="swatch" aria-hidden="true"></span>
                         <span class="name">@TaskName(taskId)</span>
                         <span class="hours">@TimesheetUi.Hours(hours) h</span>
@@ -806,6 +806,8 @@
     private string TaskName(int taskId) =>
         TimesheetUi.TaskLabel(timeline?.Tasks.GetValueOrDefault(taskId), taskId);
 
+    private string? TaskTip(int taskId) => TaskTooltips.For(timeline?.Tasks.GetValueOrDefault(taskId));
+
     private string SlotLabel(SlotAssignment slot) => slot switch
     {
         { Kind: SlotKind.ExcludedByOverride } => "Pas du travail",
@@ -850,7 +852,9 @@
             .Take(3)
             .ToList();
         var parts = new List<string> { head };
-        if (label.Length > 0)
+        if (row.Slot.TaskId is { } taskId && row.Slot.IsWork && TaskTip(taskId) is { } tip)
+            parts.Add(tip);
+        else if (label.Length > 0)
             parts.Add(label);
         parts.AddRange(titles);
         return string.Join("\n", parts);

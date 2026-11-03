@@ -145,7 +145,7 @@ public sealed class DaySubmissionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task A_deleted_cell_is_not_recreated_by_the_creations_of_the_same_send()
+    public async Task Replacing_a_registration_with_another_task_deletes_then_creates_without_updating_the_old_task()
     {
         WithEditTools();
         await Service().SendAsync(Monday, NoResolutions);
@@ -154,9 +154,32 @@ public sealed class DaySubmissionServiceTests : IDisposable
         var result = await Service().SendAsync(Monday, NoResolutions);
 
         Assert.Equal((DayStatus.Sent, 2), (result.Status, result.Written));
+        Assert.Equal(
+            ["plan_time_registration_create", "confirm_time_registration_create", "delete_time_entry",
+                "plan_time_registration_create", "confirm_time_registration_create"],
+            _server.Calls.Where(c => c.Tool is "plan_time_registration_create" or "confirm_time_registration_create"
+                or "delete_time_entry" or "update_time_entry").Select(c => c.Tool));
+        Assert.DoesNotContain(_server.Calls, c => c.Tool == "update_time_entry");
         Assert.Equal([3382L, 200L], _server.Creates.Select(c => c.GetProperty("task_id").GetInt64()));
         var remaining = Assert.Single(_server.Entries);
         Assert.Equal((FakeForecastClient.MeetingsProject, 60), (remaining.ProjectId, remaining.Minutes));
+    }
+
+    [Fact]
+    public async Task Removing_all_draft_hours_from_a_sent_day_deletes_the_registration_without_creating()
+    {
+        WithEditTools();
+        await Service().SendAsync(Monday, NoResolutions);
+        await SetDraftAsync(Monday);
+
+        var result = await Service().SendAsync(Monday, NoResolutions);
+
+        Assert.Equal((DayStatus.Sent, 1), (result.Status, result.Written));
+        Assert.Single(_server.Creates);
+        Assert.Equal(1, _server.Calls.Count(c => c.Tool == "delete_time_entry"));
+        Assert.DoesNotContain(_server.Calls, c => c.Tool == "update_time_entry");
+        Assert.Empty(_server.Entries);
+        Assert.Contains(await Service().GetJournalAsync(Monday), entry => entry.Kind == JournalKind.Deleted);
     }
 
     [Fact]

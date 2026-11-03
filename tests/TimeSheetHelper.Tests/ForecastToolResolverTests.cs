@@ -105,7 +105,7 @@ public class ForecastToolResolverTests
     [Fact]
     public void The_edit_tool_of_forecast_mcp_is_never_taken_for_changing_or_removing_a_registration()
     {
-        // Real forecast-mcp: it shifts the date and replaces the notes of registrations, it cannot change their hours.
+        // The edit tool only shifts dates and replaces notes; update/delete must not be inferred from it.
         var tools = new[]
         {
             Tool("plan_time_registration_edit",
@@ -131,5 +131,19 @@ public class ForecastToolResolverTests
         // A configured name wins.
         Assert.Equal("delete_time_entry",
             ForecastToolResolver.Resolve([Tool("delete_time_entry")], ForecastToolRole.DeleteTimeEntry, new ForecastToolNames { DeleteTimeEntry = "delete_time_entry" })?.Name);
+    }
+
+    [Fact]
+    public void Current_Forecast_plan_tools_are_resolved_by_their_registration_ids_and_minutes()
+    {
+        var update = Tool("plan_time_registration_update",
+            """{"type":"object","properties":{"registration_id":{"type":"integer"},"minutes":{"type":"integer"},"task_id":{"type":"integer"}}}""");
+        var delete = Tool("plan_time_registration_delete",
+            """{"type":"object","properties":{"registration_ids":{"type":"array","items":{"type":"integer"}},"exclude_registration_ids":{"type":"array","items":{"type":"integer"}}}}""");
+
+        Assert.Equal("plan_time_registration_update",
+            ForecastToolResolver.Resolve([update, delete], ForecastToolRole.UpdateTimeEntry, new ForecastToolNames())?.Name);
+        Assert.Equal("plan_time_registration_delete",
+            ForecastToolResolver.Resolve([update, delete], ForecastToolRole.DeleteTimeEntry, new ForecastToolNames())?.Name);
     }
 }

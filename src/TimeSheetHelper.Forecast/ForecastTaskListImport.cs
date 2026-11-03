@@ -166,6 +166,25 @@ public sealed class ForecastTaskImporter(IDbContextFactory<TimeSheetDbContext> d
         return new ForecastTaskAddResult(id, null);
     }
 
+    /// <summary>Adds (or reactivates, even when inactive) the local copy of a task found in Forecast, so it can be assigned right away.</summary>
+    public async Task<ForecastTaskAddResult> AddFromRemoteAsync(ForecastTaskMatch match, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        var result = await AddAsync(match.ProjectName, match.Name, match.ProjectCode, match.Code, cancellationToken);
+        if (result.TaskId is not { } id || string.IsNullOrWhiteSpace(match.ClientName))
+            return result;
+
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var task = await db.ForecastTasks.FirstAsync(t => t.Id == id, cancellationToken);
+        if (string.IsNullOrWhiteSpace(task.ClientName))
+        {
+            task.ClientName = match.ClientName.Trim();
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return result;
+    }
+
     internal const string InvalidCode = "\0invalid";
 
     internal static string? NormalizeCode(string? code, System.Text.RegularExpressions.Regex pattern)

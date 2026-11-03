@@ -47,7 +47,7 @@ Compléter et Retirer modifient Forecast : une confirmation est demandée, et la
 | G4 | Lecture incomplète de Forecast : rien n'est écrit | `G4_IncompleteRead_WritesNothing`, `DayStateLabelsTests.G4_*` |
 | G5 | Jour modifié : mise à jour de la saisie existante, jamais une seconde saisie ni une saisie négative | `G5_*` |
 | G6 | Un conflit n'est jamais écrasé sans choix explicite ; Compléter = delta | `ConflictResolutionTests.G6_*`, `DayStateLabelsTests.G6_*` |
-| G7 | Aucune notion de verrou : un jour approuvé ou facturé dans Forecast reste envoyable comme les autres | `ApprovedOrInvoicedDay_IsStillSent`, `DayStateLabelsTests.Labels_ApprovedDay_CanStillBeSent` |
+| G7 | Une saisie envoyée, approuvée ou facturée n'est jamais modifiée ni supprimée ; les autres cellules du jour restent indépendantes | `ForecastWriterUpdateDeleteTests.A_submitted_approved_or_invoiced_registration_is_not_changed`, `DayStateLabelsTests.Labels_ApprovedDay_CanStillBeSent` |
 | G8 | Une tâche ignorée n'est jamais écrite (ni supprimée, ni réécrite si ignorée après envoi) | `G8_*` |
 | G9 | « Soumettre les jours prêts » n'envoie que les jours prêts, de façon idempotente | `SendReadyDaysTests.G9_*`, `DayStripWiringTests.G9_*` |
 | G10 | Empreinte du jour stable (ordre, culture) et sensible aux heures, tâches et jour | `DayFingerprintTests.G10_*` |
@@ -62,6 +62,6 @@ Chaque jour garde un journal : « Soumettre ce jour », « Saisie créée », «
 
 ## Limites
 
-- **Modification et suppression** : le serveur forecast-mcp n'offre pas d'outil de modification ni de suppression d'heures. Tant que ces outils ne sont pas détectés (ou forcés par `Forecast:Tools:UpdateTimeEntry` et `Forecast:Tools:DeleteTimeEntry`), les cellules Modifié, Supprimé, Compléter et Retirer sont bloquées avec « modifiez-la dans Forecast ». L'application ne crée jamais de saisie de remplacement ni de saisie négative pour contourner.
+- **Modification et suppression** : le catalogue MCP actuel offre `plan_time_registration_update` (durée en minutes, tâche, date ou notes) et `plan_time_registration_delete` (identifiants de saisies), chacun suivi de son outil `confirm_*`. L'application ne les utilise que si le schéma identifie la saisie ; un changement de tâche est un retrait suivi d'une création, jamais une modification d'identifiant de tâche implicite. Forecast refuse les modifications/suppressions de saisies envoyées, approuvées ou facturées, ainsi que le temps non-projet ; l'application les bloque localement lorsqu'elle peut l'établir et affiche tout refus du serveur. Les saisies de remplacement et les heures négatives ne servent jamais de contournement.
 - **Approbation** : l'envoi de la semaine pour approbation n'est pas automatisé ; soumettez-la vous-même dans Forecast.
 - **Teams** : lire les discussions Teams demande la permission Graph `Chat.Read` (ajoutée dans Entra, consentement administrateur, puis reconnexion). `ChatMessage.Read` ne suffit pas. Voir [microsoft365-setup.md](microsoft365-setup.md).

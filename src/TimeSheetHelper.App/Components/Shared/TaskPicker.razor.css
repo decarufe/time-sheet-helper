@@ -250,3 +250,30 @@ ul {
     background: var(--row-alt);
     font-weight: 600;
 }
+
+.remote {
+    margin-top: 8px;
+}
+
+.remote p {
+    margin: 0;
+}
+
+.remote-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+}
+
+.note {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.note.warn {
+    color: var(--idle);
+}

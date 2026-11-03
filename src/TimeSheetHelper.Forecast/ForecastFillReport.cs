@@ -47,8 +47,8 @@ public enum ForecastCapability
 }
 
 /// <summary>
-/// The writes the Forecast server offers. Forecast-mcp registers time but cannot change the hours of a registration nor remove one:
-/// <see cref="Update"/> and <see cref="Delete"/> are then <see cref="ForecastCapability.Unavailable"/> and <see cref="UnavailableReason"/> says why.
+/// The writes the Forecast server offers. <see cref="Update"/> and <see cref="Delete"/> are unavailable when the server has no matching
+/// tool (or the tool schema cannot identify the registration); <see cref="UnavailableReason"/> says why.
 /// </summary>
 public sealed record ForecastCapabilities(
     ForecastCapability Create, ForecastCapability Update, ForecastCapability Delete, string? UnavailableReason)

@@ -204,7 +204,7 @@ internal sealed class FakeForecastWriteApi : IForecastToolClient
         Entries[index] = Entries[index] with { Minutes = (int)(hours * 60) };
     }
 
-    /// <summary>The tools of the real forecast-mcp: creation only, nothing changes hours or removes a registration.</summary>
+    /// <summary>A read/create-only catalogue for tests that verify the app refuses unsupported writes.</summary>
     public FakeForecastWriteApi WithoutEditTools()
     {
         Tools.RemoveAll(t => t.Name is "update_time_entry" or "delete_time_entry");

@@ -106,7 +106,7 @@
                             <th scope="row" class="task-col">
                                 <span class="task-label">
                                     <span class="swatch" aria-hidden="true"></span>
-                                    <span class="task-name">@row.Name</span>
+                                    <span class="task-name" title="@TaskTip(row.TaskId)">@row.Name</span>
                                 </span>
                             </th>
                             @foreach (var day in days)
@@ -223,7 +223,7 @@
                         <div class="confirm" role="group" aria-label="@($"Assignation à confirmer pour {groupLabel}")">
                             <p>
                                 Assigné à
-                                <span class="task-chip" style="@TimesheetUi.TaskStyle(pending.TaskId)">
+                                <span class="task-chip" style="@TimesheetUi.TaskStyle(pending.TaskId)" title="@TaskTip(pending.TaskId)">
                                     <span class="swatch" aria-hidden="true"></span>@TaskName(pending.TaskId)
                                 </span>
                                 et déjà compté dans les totaux.
@@ -490,6 +490,8 @@
         TimesheetUi.TaskLabel(week.Tasks.GetValueOrDefault(taskId), taskId);
 
     private string TaskName(int taskId) => TimesheetUi.TaskLabel(proposal?.Tasks.GetValueOrDefault(taskId), taskId);
+
+    private string? TaskTip(int taskId) => TaskTooltips.For(proposal?.Tasks.GetValueOrDefault(taskId));
 
     private DayProposal? DayOf(DateOnly day) => proposal?.Days.FirstOrDefault(d => d.Date == day);
 

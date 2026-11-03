@@ -9,10 +9,10 @@ public enum ForecastToolRole
     CreateTimeEntry,
     CurrentUser,
 
-    /// <summary>Changes the duration of one registration, named by its id. forecast-mcp offers none (see <see cref="ForecastToolResolver.KnownName"/>).</summary>
+    /// <summary>Changes one registration, named by its id.</summary>
     UpdateTimeEntry,
 
-    /// <summary>Removes one registration, named by its id. forecast-mcp offers none.</summary>
+    /// <summary>Removes one registration, named by its id.</summary>
     DeleteTimeEntry,
 }
 
@@ -30,13 +30,13 @@ public static class ForecastToolResolver
     private static readonly HashSet<string> TimeNouns = ["time", "timesheet", "timereg", "registration", "entry", "hour", "timelog", "timeentry", "worklog"];
     private static readonly HashSet<string> SelfNouns = ["me", "whoami", "current", "self", "myself", "profile", "identity"];
 
-    // "edit" is left out on purpose: forecast-mcp's "plan_time_registration_edit" only shifts dates and replaces notes, it cannot change hours.
+    // "edit" is left out on purpose: plan_time_registration_edit shifts dates and replaces notes, not hours.
     private static readonly HashSet<string> UpdateVerbs = ["update", "modify", "patch", "change", "set", "adjust"];
     private static readonly HashSet<string> DeleteVerbs = ["delete", "remove"];
 
     /// <summary>
-    /// The tools of forecast-mcp that do each job. It has none to change the hours of a registration or to remove one
-    /// (checked in its catalogue): those roles are only found by configuration or by a tool that clearly does them.
+    /// Known Forecast MCP tools. Update and delete are selected only when their schemas identify the target registration
+    /// (and update also accepts a duration).
     /// </summary>
     internal static string? KnownName(ForecastToolRole role) => role switch
     {
@@ -44,6 +44,8 @@ public static class ForecastToolResolver
         ForecastToolRole.ListTimeEntries => "get_time_analysis",
         ForecastToolRole.CreateTimeEntry => "plan_time_registration_create",
         ForecastToolRole.CurrentUser => "get_current_person",
+        ForecastToolRole.UpdateTimeEntry => "plan_time_registration_update",
+        ForecastToolRole.DeleteTimeEntry => "plan_time_registration_delete",
         _ => null,
     };
 

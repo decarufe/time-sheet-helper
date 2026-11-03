@@ -57,6 +57,33 @@ public sealed class DayPlannerTests
     }
 
     [Fact]
+    public void Registrations_of_neighbouring_days_are_never_shown_on_an_empty_day()
+    {
+        var read = ForecastDayRead.From(Day, new ForecastEntryRead(
+        [
+            new ForecastRemoteEntry(null, "T1001", Day.AddDays(-1), 1m, null, EntryId: "e1", ProjectName: "Alpha"),
+            new ForecastRemoteEntry(null, "T1002", Day.AddDays(1), 1.5m, null, EntryId: "e2", ProjectName: "Beta"),
+        ], true, null));
+
+        var plan = Plan([Draft(1, 1m), Draft(2, 1.5m)], read, Sent(DayStatus.Sent, (1, 1m, "e1"), (2, 1.5m, "e2")));
+
+        Assert.Empty(read.Entries);
+        Assert.All(plan.Cells, c => Assert.Null(c.ForecastHours));
+        Assert.All(plan.Cells, c => Assert.Equal((CellState.New, CellOperation.Create), (c.State, c.Operation)));
+    }
+
+    [Fact]
+    public void An_empty_read_replaces_what_Forecast_held_before()
+    {
+        var before = Plan([Draft(1, 1m)], Read(Remote("T1001", 1m, "e1")), Sent(DayStatus.Sent, (1, 1m, "e1")));
+        var after = Plan([Draft(1, 1m)], Read(), Sent(DayStatus.Sent, (1, 1m, "e1")));
+
+        Assert.Equal(1m, Cell(before, 1).ForecastHours);
+        Assert.Null(Cell(after, 1).ForecastHours);
+        Assert.Equal((CellState.New, CellOperation.Create), (Cell(after, 1).State, Cell(after, 1).Operation));
+    }
+
+    [Fact]
     public void Hours_Forecast_already_holds_are_never_written_again()
     {
         var plan = Plan([Draft(1, 2m), Draft(1, 2m)], Read(Remote("T1001", 4m, "e1")));

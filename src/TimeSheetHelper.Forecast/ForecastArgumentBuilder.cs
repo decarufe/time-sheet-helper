@@ -115,8 +115,14 @@ public static class ForecastArgumentBuilder
             case ParameterRole.Limit when v.MaxResults is { } max:
                 return Type(definition) == "string" ? max.ToString(CultureInfo.InvariantCulture) : max;
             case ParameterRole.Hours when v.Hours is { } hours:
+                if (normalized == "billableminutes")
+                    return null;
                 return Duration(hours, normalized, definition);
             case ParameterRole.Entry:
+                if (Type(definition) == "array" && definition.TryGetProperty("items", out var itemDefinition))
+                    return v.EntryId is { } entryId
+                        ? JsonSerializer.SerializeToElement(new[] { Id(entryId, itemDefinition) })
+                        : null;
                 return Id(v.EntryId, definition);
             default:
                 return null;
@@ -145,7 +151,8 @@ public static class ForecastArgumentBuilder
             return ParameterRole.Notes;
         if (n is "maxresults" or "limit" or "pagesize" or "maxitems")
             return ParameterRole.Limit;
-        if (n is "id" or "entryid" or "timeentryid" or "timeregistrationid" or "registrationid" or "timeregid" or "worklogid" or "timelogid")
+        if (n is "id" or "entryid" or "timeentryid" or "timeregistrationid" or "registrationid" or "registrationids"
+            or "timeregid" or "worklogid" or "timelogid")
             return ParameterRole.Entry;
         return ParameterRole.None;
     }
@@ -181,8 +188,24 @@ public static class ForecastArgumentBuilder
         };
     }
 
-    private static string? Type(JsonElement definition) =>
-        definition.ValueKind == JsonValueKind.Object && definition.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+    private static string? Type(JsonElement definition)
+    {
+        if (definition.ValueKind != JsonValueKind.Object)
+            return null;
+        if (definition.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
+            return type.GetString();
+        foreach (var unionName in new[] { "anyOf", "oneOf" })
+        {
+            if (!definition.TryGetProperty(unionName, out var union) || union.ValueKind != JsonValueKind.Array)
+                continue;
+            foreach (var option in union.EnumerateArray())
+            {
+                if (Type(option) is { } optionType and not "null")
+                    return optionType;
+            }
+        }
+        return null;
+    }
 
     internal static string Normalize(string name) => new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 }
