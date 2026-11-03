@@ -124,8 +124,8 @@
                                             title="@(row.Task.IsFavorite ? "Retirer des favoris" : "Ajouter aux favoris")"
                                             @onclick="() => ToggleFavoriteAsync(row.Task)">@(row.Task.IsFavorite ? "★" : "☆")</button>
                                 </td>
-                                <td>@if (row.Task.ProjectCode is { } pc) { <code>@pc</code> } @row.Task.ProjectName</td>
-                                <td>@if (IsTaskCode(row.Task.ExternalId)) { <code>@row.Task.ExternalId</code> } @row.Task.TaskName@if (row.Task.ExcludeFromSubmission) { <span class="badge excluded"> Exclue de la soumission</span> }</td>
+                                <td title="@TaskTooltips.For(row.Task)">@if (row.Task.ProjectCode is { } pc) { <code>@pc</code> } @row.Task.ProjectName</td>
+                                <td title="@TaskTooltips.For(row.Task)">@if (IsTaskCode(row.Task.ExternalId)) { <code>@row.Task.ExternalId</code> } @row.Task.TaskName@if (row.Task.ExcludeFromSubmission) { <span class="badge excluded"> Exclue de la soumission</span> }</td>
                                 <td class="nowrap muted">@(row.Task.LastSeenUtc.ToLocalTime().ToString("yyyy-MM-dd"))</td>
                                 <td class="actions">
                                     <button disabled="@busy" aria-pressed="@row.Task.ExcludeFromSubmission"

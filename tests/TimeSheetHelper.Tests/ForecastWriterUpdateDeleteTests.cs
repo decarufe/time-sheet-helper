@@ -41,19 +41,20 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
         new(new ForecastApi(new FakeForecastConnector(_server), Options.Create(options ?? new ForecastOptions()), NullLogger<ForecastApi>.Instance),
             new Factory(CreateDb), NullLogger<ForecastTimesheetWriter>.Instance);
 
-    private int Writes => _server.Calls.Count(c => c is "update_time_entry" or "delete_time_entry" or "confirm_time_entry_update" or "confirm_time_entry_delete");
+    private int Writes => _server.Calls.Count(c => c is "update_time_entry" or "delete_time_entry"
+        or "confirm_time_registration_update" or "confirm_time_registration_delete");
 
     [Fact]
-    public async Task The_real_catalogue_offers_creation_only()
+    public async Task The_current_Forecast_plan_catalogue_offers_create_update_and_delete()
     {
-        _server.WithoutWriteTools();
+        _server.WithPlanTools();
 
         var capabilities = await Writer().GetCapabilitiesAsync();
 
         Assert.Equal(ForecastCapability.Available, capabilities.Create);
-        Assert.Equal(ForecastCapability.Unavailable, capabilities.Update);
-        Assert.Equal(ForecastCapability.Unavailable, capabilities.Delete);
-        Assert.Contains("modification", capabilities.UnavailableReason);
+        Assert.Equal(ForecastCapability.Available, capabilities.Update);
+        Assert.Equal(ForecastCapability.Available, capabilities.Delete);
+        Assert.Null(capabilities.UnavailableReason);
     }
 
     [Fact]
@@ -157,6 +158,26 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
         Assert.Equal(0, Writes);
     }
 
+    [Theory]
+    [InlineData("SUBMITTED", false)]
+    [InlineData("APPROVED", false)]
+    [InlineData(null, true)]
+    public async Task A_submitted_approved_or_invoiced_registration_is_not_changed(string? approvalStatus, bool invoiced)
+    {
+        _server.Entries[0] = _server.Entries[0] with { ApprovalStatus = approvalStatus, Invoiced = invoiced };
+
+        var update = await Writer().UpdateCellAsync(Day, _dev.Id, "501", 2m, 3m);
+        var delete = await Writer().DeleteCellAsync(Day, _dev.Id, "501", 2m);
+
+        Assert.Equal(ForecastCellStatus.Error, update.Status);
+        Assert.Equal(ForecastCellIssue.WriteRefused, update.Issue);
+        Assert.Equal(ForecastCellStatus.Error, delete.Status);
+        Assert.Equal(ForecastCellIssue.WriteRefused, delete.Issue);
+        Assert.Contains("envoyée, approuvée ou facturée", update.Message);
+        Assert.Equal(0, Writes);
+        Assert.Equal(120, _server.Entries.Single().Minutes);
+    }
+
     [Fact]
     public async Task A_day_holding_an_approved_registration_is_still_updated()
     {
@@ -190,18 +211,22 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
     public async Task A_plan_tool_is_staged_then_confirmed_with_one_registration()
     {
         _server.WithPlanTools();
-        var options = new ForecastOptions { Tools = { UpdateTimeEntry = "plan_time_entry_update", DeleteTimeEntry = "plan_time_entry_delete" } };
+        var options = new ForecastOptions { Tools = { UpdateTimeEntry = "plan_time_registration_update", DeleteTimeEntry = "plan_time_registration_delete" } };
 
         var update = await Writer(options).UpdateCellAsync(Day, _dev.Id, "501", 2m, 3m);
         var staged = _server.LastWrite!;
+        var updateCalls = _server.Calls.ToList();
         var delete = await Writer(options).DeleteCellAsync(Day, _dev.Id, "501", 3m);
 
         Assert.Equal(ForecastCellStatus.Updated, update.Status);
         Assert.Equal(ForecastCellStatus.Deleted, delete.Status);
-        var item = Assert.Single(((JsonElement)staged["entries"]!).EnumerateArray());
-        Assert.Equal(501, item.GetProperty("time_entry_id").GetInt64());
-        Assert.Equal(180, item.GetProperty("minutes").GetInt32());
-        Assert.Equal(["plan_time_entry_update", "confirm_time_entry_update", "plan_time_entry_delete", "confirm_time_entry_delete"],
+        Assert.Equal(501L, staged["registration_id"]);
+        Assert.Equal(180L, staged["minutes"]);
+        var deletedIds = Assert.IsType<JsonElement>(_server.LastWrite!["registration_ids"]);
+        Assert.Equal(501L, Assert.Single(deletedIds.EnumerateArray()).GetInt64());
+        Assert.Equal(["plan_time_registration_update", "confirm_time_registration_update"],
+            updateCalls.Where(c => c.StartsWith("plan_") || c.StartsWith("confirm_")));
+        Assert.Equal(["plan_time_registration_update", "confirm_time_registration_update", "plan_time_registration_delete", "confirm_time_registration_delete"],
             _server.Calls.Where(c => c.StartsWith("plan_") || c.StartsWith("confirm_")));
         Assert.Empty(_server.Entries);
     }
@@ -211,7 +236,7 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
     {
         _server.WithPlanTools();
         _server.RefusePlan = true;
-        var options = new ForecastOptions { Tools = { DeleteTimeEntry = "plan_time_entry_delete" } };
+        var options = new ForecastOptions { Tools = { DeleteTimeEntry = "plan_time_registration_delete" } };
 
         var cell = await Writer(options).DeleteCellAsync(Day, _dev.Id, "501", 2m);
 
@@ -222,7 +247,7 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
         Assert.Single(_server.Entries);
     }
 
-    private sealed record Registration(string Id, DateOnly Date, int Minutes, string TaskCode, string? ApprovalStatus = null);
+    private sealed record Registration(string Id, DateOnly Date, int Minutes, string TaskCode, string? ApprovalStatus = null, bool Invoiced = false);
 
     /// <summary>A Forecast MCP server whose registrations have stable ids, with update and delete tools unless removed.</summary>
     private sealed class Server : IForecastToolClient
@@ -260,18 +285,20 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
         public void WithPlanTools()
         {
             Tools.RemoveAll(t => t.Name is "update_time_entry" or "delete_time_entry");
-            Tools.Add(Tool("plan_time_entry_update",
-                """{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"time_entry_id":{"type":"integer"},"minutes":{"type":"integer"}},"required":["time_entry_id","minutes"]}}},"required":["entries"]}"""));
-            Tools.Add(Tool("confirm_time_entry_update", """{"type":"object","properties":{"action_id":{"type":"string"}},"required":["action_id"]}"""));
-            Tools.Add(Tool("plan_time_entry_delete",
-                """{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"time_entry_id":{"type":"integer"}},"required":["time_entry_id"]}}},"required":["entries"]}"""));
-            Tools.Add(Tool("confirm_time_entry_delete", """{"type":"object","properties":{"action_id":{"type":"string"}},"required":["action_id"]}"""));
+            Tools.Add(Tool("plan_time_registration_update",
+                """{"type":"object","properties":{"registration_id":{"type":"integer"},"minutes":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},"billable_minutes":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},"task_id":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},"date":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"notes":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null}},"required":["registration_id"]}"""));
+            Tools.Add(Tool("confirm_time_registration_update", """{"type":"object","properties":{"action_id":{"type":"string"}},"required":["action_id"]}"""));
+            Tools.Add(Tool("plan_time_registration_delete",
+                """{"type":"object","properties":{"registration_ids":{"type":"array","items":{"type":"integer"}},"exclude_registration_ids":{"anyOf":[{"items":{"type":"integer"},"type":"array"},{"type":"null"}],"default":null}},"required":["registration_ids"]}"""));
+            Tools.Add(Tool("confirm_time_registration_delete", """{"type":"object","properties":{"action_id":{"type":"string"},"exclude_registration_ids":{"anyOf":[{"items":{"type":"integer"},"type":"array"},{"type":"null"}],"default":null}},"required":["action_id"]}"""));
         }
 
-        /// <summary>The tools of the real forecast-mcp: its "edit" tool shifts dates and notes, nothing changes hours or removes.</summary>
+        /// <summary>A read/create-only catalogue with an edit tool that cannot change hours or remove registrations.</summary>
         public void WithoutWriteTools()
         {
-            Tools.RemoveAll(t => t.Name is "update_time_entry" or "delete_time_entry");
+            Tools.RemoveAll(t => t.Name is "update_time_entry" or "delete_time_entry"
+                or "plan_time_registration_update" or "confirm_time_registration_update"
+                or "plan_time_registration_delete" or "confirm_time_registration_delete");
             Tools.Add(Tool("plan_time_registration_edit",
                 """{"type":"object","properties":{"entries":{"type":"array","items":{"type":"object","properties":{"time_registration_id":{"type":"integer"},"offset_days":{"type":"integer"},"notes":{"type":"string"}}}}}}"""));
             Tools.Add(Tool("confirm_time_registration_edit", """{"type":"object","properties":{"action_id":{"type":"string"}},"required":["action_id"]}"""));
@@ -298,6 +325,7 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
                         minutes = e.Minutes,
                         person_id = FakeForecastClient.MyId,
                         approval_status = e.ApprovalStatus,
+                        invoiced = e.Invoiced,
                         task = new { company_task_id = e.TaskCode },
                     });
                     return Reply(new { entries = items, has_more = AlwaysHasMore });
@@ -316,23 +344,26 @@ public sealed class ForecastWriterUpdateDeleteTests : IDisposable
                     if (TimeoutAfterWrite)
                         throw new TimeoutException("délai dépassé");
                     return Reply(new { ok = true });
-                case "plan_time_entry_update":
-                case "plan_time_entry_delete":
+                case "plan_time_registration_update":
+                case "plan_time_registration_delete":
                     LastWrite = arguments;
                     if (RefusePlan)
                         return Reply(new { ok = false, outcome = "refused", message = "non autorisé" });
                     _staged = (toolName, arguments);
                     return Reply(new { ok = true, action_id = "a1" });
-                case "confirm_time_entry_update":
-                case "confirm_time_entry_delete":
+                case "confirm_time_registration_update":
+                case "confirm_time_registration_delete":
                     if (_staged is not { } staged || (string?)arguments["action_id"] != "a1")
                         return Reply(new { ok = false, outcome = "failed", message = "no such action" });
                     _staged = null;
-                    var item = ((JsonElement)staged.Args["entries"]!).EnumerateArray().Single();
-                    var values = new Dictionary<string, object?> { ["time_entry_id"] = item.GetProperty("time_entry_id").GetInt64() };
-                    if (item.TryGetProperty("minutes", out var minutes))
-                        values["minutes"] = minutes.GetInt32();
-                    return Apply(staged.Tool.EndsWith("_delete"), values)
+                    var delete = staged.Tool.EndsWith("_delete", StringComparison.Ordinal);
+                    var id = delete
+                        ? ((JsonElement)staged.Args["registration_ids"]!).EnumerateArray().Single().GetInt64()
+                        : Convert.ToInt64(staged.Args["registration_id"], System.Globalization.CultureInfo.InvariantCulture);
+                    var values = new Dictionary<string, object?> { ["time_entry_id"] = id };
+                    if (staged.Args.TryGetValue("minutes", out var value) && value is long minutes)
+                        values["minutes"] = minutes;
+                    return Apply(delete, values)
                         ? Reply(new { ok = true })
                         : Reply(new { ok = false, outcome = "failed", message = "not found" });
                 default:

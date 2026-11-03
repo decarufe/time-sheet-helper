@@ -139,7 +139,23 @@ public static class TaskPickerView
         groups.SelectMany(g => g.Tasks).FirstOrDefault();
 
     public static bool Matches(ForecastTask task, string term) =>
-        Contains(task.TaskName, term) || Contains(task.ProjectName, term) || Contains(task.ClientName, term) || Contains(task.ProjectCode, term);
+        Contains(task.TaskName, term) || Contains(task.ProjectName, term) || Contains(task.ClientName, term) || Contains(task.ProjectCode, term)
+        || (TryParseTaskNumber(term, out var code) && string.Equals(task.ExternalId, code, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>"T35647", "35647" or " t35647 " → "T35647"; false for anything else.</summary>
+    public static bool TryParseTaskNumber(string? query, out string code)
+    {
+        code = "";
+        var text = query?.Trim();
+        if (string.IsNullOrEmpty(text))
+            return false;
+        if (text[0] is 'T' or 't')
+            text = text[1..];
+        if (text.Length is 0 or > 7 || !text.All(char.IsAsciiDigit))
+            return false;
+        code = "T" + text;
+        return true;
+    }
 
     private static IEnumerable<ForecastTask> Sort(IEnumerable<ForecastTask> tasks, TaskSort sort, IReadOnlyDictionary<int, TaskUsage> usage)
     {

@@ -66,6 +66,46 @@ public class ForecastArgumentBuilderTests
         Assert.Equal("Revue", args.Values["notes"]);
     }
 
+    [Fact]
+    public void A_registration_id_list_is_built_for_Forecasts_delete_plan()
+    {
+        var tool = Tool("""
+            {"type":"object","properties":{
+              "registration_ids":{"type":"array","items":{"type":"integer"}},
+              "exclude_registration_ids":{"type":"array","items":{"type":"integer"}}},
+             "required":["registration_ids"]}
+            """);
+
+        var args = ForecastArgumentBuilder.BuildWrite(tool, new ForecastArgumentValues { EntryId = "501" });
+
+        Assert.True(args.IsComplete);
+        var ids = Assert.IsType<JsonElement>(args.Values["registration_ids"]);
+        Assert.Equal(JsonValueKind.Array, ids.ValueKind);
+        Assert.Equal(501L, Assert.Single(ids.EnumerateArray()).GetInt64());
+        Assert.False(args.Values.ContainsKey("exclude_registration_ids"));
+    }
+
+    [Fact]
+    public void Forecast_update_schema_uses_minutes_without_changing_billable_minutes()
+    {
+        var tool = Tool("""
+            {"type":"object","properties":{
+              "registration_id":{"type":"integer"},
+              "minutes":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},
+              "billable_minutes":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},
+              "task_id":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}},
+             "required":["registration_id"]}
+            """);
+
+        var args = ForecastArgumentBuilder.BuildWrite(tool, new ForecastArgumentValues { EntryId = "501", Hours = 1.5m });
+
+        Assert.True(args.IsComplete);
+        Assert.Equal(501L, args.Values["registration_id"]);
+        Assert.Equal(90L, args.Values["minutes"]);
+        Assert.DoesNotContain("billable_minutes", args.Values.Keys);
+        Assert.DoesNotContain("task_id", args.Values.Keys);
+    }
+
     [Theory]
     [InlineData("""{"hours":{"type":"number"}}""", "hours", 1.5)]
     [InlineData("""{"timeRegistered":{"type":"integer"}}""", "timeRegistered", 90)]

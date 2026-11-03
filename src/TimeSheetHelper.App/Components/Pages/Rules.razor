@@ -67,7 +67,7 @@
                                     <span class="muted">@UiLabels.Operator(rule.Operator)</span>
                                     <code>@rule.Pattern</code>
                                 </td>
-                                <td>@TaskName(rule.ForecastTaskId)</td>
+                                <td title="@TaskTooltips.For(taskById.GetValueOrDefault(rule.ForecastTaskId))">@TaskName(rule.ForecastTaskId)</td>
                                 <td><span class="origin origin-@rule.Origin">@UiLabels.Origin(rule.Origin)</span></td>
                                 <td>
                                     <label class="switch">

@@ -383,6 +383,11 @@ public sealed class ForecastTimesheetWriter(
                 $"Forecast contient {entry.Hours:0.##} h, pas les {expected:0.##} h attendues : la saisie a changé, rien n'est modifié.",
                 ForecastEntryState.NotApplicable);
 
+        if (entry.IsSubmitted || entry.IsApproved || entry.Invoiced)
+            return Cell(ForecastCellStatus.Error, entry.Hours,
+                $"Cette saisie est envoyée, approuvée ou facturée dans Forecast : elle ne peut pas être {(delete ? "supprimée" : "modifiée")}.",
+                ForecastEntryState.NotApplicable, ForecastCellIssue.WriteRefused);
+
         string? unknownOutcome = null;
         try
         {

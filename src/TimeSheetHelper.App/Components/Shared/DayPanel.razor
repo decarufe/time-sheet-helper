@@ -61,7 +61,7 @@
                         {
                             ConflictResolution? choice = Choices.TryGetValue(cell.ForecastTaskId, out var chosen) ? chosen : null;
                             <tr class="@(cell.State == CellState.Ignored ? "ignored" : null)">
-                                <th scope="row" class="task">@cell.TaskDisplayName</th>
+                                <th scope="row" class="task" title="@cell.TaskDisplayName">@cell.TaskDisplayName</th>
                                 <td class="num">@Number(cell.DraftHours)</td>
                                 <td class="num">@Number(cell.ForecastHours)</td>
                                 <td class="num">@Number(cell.SentHours)</td>

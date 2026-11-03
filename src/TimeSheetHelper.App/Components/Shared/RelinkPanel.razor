@@ -16,7 +16,7 @@
     @if (selected is not null)
     {
         <div class="selected" role="status">
-            <span>
+            <span title="@TaskTooltips.For(selected.Code, selected.Name, selected.ProjectCode, selected.ProjectName, selected.ClientName)">
                 Tâche choisie : <strong>@selected.Code</strong> — @selected.Name
                 <span class="muted">(@Where(selected))</span>
             </span>
