@@ -42,6 +42,61 @@ public sealed class TimesheetUiTests
         Assert.Null(TimesheetUi.PredictedTask(Predicted(SlotKind.Ignored, 9), tasks));
     }
 
+    private static Dictionary<int, ForecastTask> CandidateTasks()
+    {
+        var tasks = Enumerable.Range(1, 7).ToDictionary(i => i, i => new ForecastTask { Id = i, ExternalId = $"{i}", ProjectName = "P", TaskName = $"T{i}" });
+        tasks[9] = new ForecastTask { Id = 9, ExternalId = ForecastTask.IgnoredExternalId, ProjectName = "-", TaskName = "-" };
+        return tasks;
+    }
+
+    [Fact]
+    public void Unclear_means_a_predicted_work_slot_below_the_medium_confidence()
+    {
+        SlotAssignment S(SlotKind kind, double confidence) => new(Fx.Mon(9), kind, 1, null, confidence, [], [], TimeSpan.Zero);
+
+        Assert.True(TimesheetUi.IsUnclear(S(SlotKind.Activity, 0.5)));
+        Assert.True(TimesheetUi.IsUnclear(S(SlotKind.Meeting, 0.79)));
+        Assert.False(TimesheetUi.IsUnclear(S(SlotKind.Activity, 0.8)));
+        Assert.False(TimesheetUi.IsUnclear(S(SlotKind.Override, 0.1)));
+    }
+
+    [Fact]
+    public void Top_candidates_are_the_five_best_assignable_tasks_with_the_winner_first_and_without_ignore_or_groups()
+    {
+        var slot = new SlotAssignment(Fx.Mon(9), SlotKind.Activity, 3, null, 0.4,
+            [new(null, "repo:x", 1, 0.3), new(9, null, 1, 0.25), new(1, null, 1, 0.2), new(2, null, 1, 0.15), new(3, null, 1, 0.1), new(4, null, 1, 0.08), new(5, null, 1, 0.05), new(6, null, 1, 0.02)],
+            [], TimeSpan.Zero);
+
+        var top = TimesheetUi.TopCandidates(slot, CandidateTasks());
+
+        Assert.Equal([3, 1, 2, 4, 5], top.Select(c => c.TaskId!.Value));
+        Assert.Equal(0.4, top[0].Share);
+    }
+
+    [Fact]
+    public void Top_candidates_of_an_unclassified_slot_come_from_its_classified_alternatives()
+    {
+        var slot = new SlotAssignment(Fx.Mon(9), SlotKind.Activity, null, "repo:x", 0.5, [new(2, null, 1, 0.3), new(1, null, 1, 0.2)], [], TimeSpan.Zero);
+
+        Assert.Equal([2, 1], TimesheetUi.TopCandidates(slot, CandidateTasks()).Select(c => c.TaskId!.Value));
+    }
+
+    [Fact]
+    public void Suggested_comment_prefers_the_meeting_title_then_repo_then_folder_then_title()
+    {
+        SlotAssignment S(string? notes = null, string? key = null) => new(Fx.Mon(9), SlotKind.Activity, null, key, 0.5, [], [], TimeSpan.Zero, notes);
+        var repo = Fx.Act(TimeSheetHelper.Core.Activities.ActivitySource.VsCode, Fx.Mon(9), Fx.Mon(9, 5), a => { a.Repo = "contoso/api"; a.Folder = "c:\\src"; a.Title = "w"; });
+        var folder = Fx.Act(TimeSheetHelper.Core.Activities.ActivitySource.VsCode, Fx.Mon(9), Fx.Mon(9, 5), a => { a.Folder = "c:\\src"; a.Title = "w"; });
+        var title = Fx.Act(TimeSheetHelper.Core.Activities.ActivitySource.VsCode, Fx.Mon(9), Fx.Mon(9, 5), a => a.Title = "Revue de budget");
+
+        Assert.Equal("Planif", TimesheetUi.SuggestedComment(S(notes: "Planif"), [repo]));
+        Assert.Equal("daily", TimesheetUi.SuggestedComment(S(key: "meeting:daily"), [repo]));
+        Assert.Equal("Travail sur contoso/api", TimesheetUi.SuggestedComment(S(), [repo, title]));
+        Assert.Equal("Travail dans c:\\src", TimesheetUi.SuggestedComment(S(), [folder]));
+        Assert.Equal("Revue de budget", TimesheetUi.SuggestedComment(S(), [title]));
+        Assert.Null(TimesheetUi.SuggestedComment(S(), []));
+    }
+
     [Fact]
     public void Meeting_group_keys_propose_the_meeting_title_as_new_task_name()
     {

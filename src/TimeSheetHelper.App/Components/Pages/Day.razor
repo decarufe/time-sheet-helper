@@ -179,7 +179,26 @@
                     @if (expandedRow)
                     {
                         <div class="evidence">
-                            @if (slot.Alternatives.Count > 0)
+                            @if (!IsSubmitted && TimesheetUi.IsUnclear(slot) && TimesheetUi.TopCandidates(slot, timeline!.Tasks) is { Count: > 0 } top)
+                            {
+                                <div class="candidates">
+                                    <p>Assignation peu claire — candidats les plus probables :</p>
+                                    <ul>
+                                        @foreach (var candidate in top)
+                                        {
+                                            var candidateTask = candidate.TaskId!.Value;
+                                            <li style="@TimesheetUi.TaskStyle(candidateTask)">
+                                                <span class="cand-name">@TaskName(candidateTask)</span>
+                                                <span class="conf @TimesheetUi.ConfidenceClass(candidate.Share)">@TimesheetUi.Percent(candidate.Share)</span>
+                                                <button type="button" class="cand-assign" disabled="@busy"
+                                                        title="Assigner ce créneau à @TaskName(candidateTask) avec un commentaire déduit des activités"
+                                                        @onclick="() => AssignCandidateAsync(slot, candidateTask)">Assigner</button>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            else if (slot.Alternatives.Count > 0)
                             {
                                 <p class="alternatives">
                                     Autres candidats :
@@ -672,6 +691,18 @@
             Inform(groups.Count == 1
                 ? (count > 1 ? $"{count} créneaux confirmés : {TaskName(groups[0].Key)}." : $"Créneau confirmé : {TaskName(groups[0].Key)}.")
                 : $"{count} créneaux confirmés.");
+        });
+    }
+
+    private async Task AssignCandidateAsync(SlotAssignment slot, int taskId)
+    {
+        var comment = TimesheetUi.SuggestedComment(slot, Evidence(slot));
+        await RunAsync(async () =>
+        {
+            await Weeks.AssignSlotStartsAsync([slot.SlotStartUtc], taskId, comment);
+            selection = null;
+            await LoadAsync();
+            Inform($"Créneau assigné à {TaskName(taskId)}.");
         });
     }
 
