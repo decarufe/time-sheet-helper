@@ -12,9 +12,9 @@
 <a class="@ButtonClass shell-about" href="apropos" data-tip="À propos" aria-label="À propos">
     <Icon Name="info" />
 </a>
-<button type="button" class="@ButtonClass shell-theme" data-tip="Thème (Alt+T)"
-        aria-label="Basculer le thème clair/sombre" @onclick="OnToggleTheme">
-    <Icon Name="@(Theme == ShellTheme.Dark ? "sun" : "moon")" />
+<button type="button" class="@ButtonClass shell-theme" data-tip="@ThemeLabel (Alt+T)"
+        aria-label="Changer le thème : @ThemeLabel" @onclick="OnToggleTheme">
+    <Icon Name="@(Theme switch { ShellTheme.Dark => "moon", ShellTheme.Light => "sun", _ => "monitor" })" />
 </button>
 
 @code {
@@ -28,6 +28,13 @@
 
     /// <summary>Class of the buttons: "rail-link" in the rail, "icon-btn" in the header.</summary>
     [Parameter] public string ButtonClass { get; set; } = "icon-btn";
+
+    private string ThemeLabel => Theme switch
+    {
+        ShellTheme.Dark => "Thème sombre",
+        ShellTheme.Light => "Thème clair",
+        _ => "Thème du système",
+    };
 
     private string TrackLabel => Tracking == TrackingState.Paused
         ? "Surveillance en pause — cliquer pour reprendre"

@@ -69,16 +69,18 @@ export function init(dotNetRef) {
 
 export function getPrefs() {
   const stored = read(THEME_KEY);
-  const theme = stored === "light" || stored === "dark"
-    ? stored
-    : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const theme = stored === "light" || stored === "dark" ? stored : "system";
   return { theme, panel: read(PANEL_KEY) !== "0" };
 }
 
 export function setTheme(theme) {
-  if (theme !== "light" && theme !== "dark") return;
-  document.documentElement.dataset.theme = theme;
-  write(THEME_KEY, theme);
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+    write(THEME_KEY, theme);
+  } else if (theme === "system") {
+    delete document.documentElement.dataset.theme;
+    try { localStorage.removeItem(THEME_KEY); } catch { /* storage unavailable */ }
+  }
 }
 
 export function setPanel(open) {
