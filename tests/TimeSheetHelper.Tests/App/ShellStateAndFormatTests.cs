@@ -20,12 +20,12 @@ public class ShellStateTests
     }
 
     [Fact]
-    public void Panel_is_open_and_theme_light_by_default()
+    public void Panel_is_open_and_theme_follows_the_system_by_default()
     {
         var state = new ShellState(Monday);
 
         Assert.True(state.PanelOpen);
-        Assert.Equal(ShellTheme.Light, state.Theme);
+        Assert.Equal(ShellTheme.System, state.Theme);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class ShellStateTests
         state.Changed += () => changes++;
 
         state.SetPanel(true);
-        state.SetTheme(ShellTheme.Light);
+        state.SetTheme(ShellTheme.System);
         Assert.Equal(0, changes);
 
         state.SetPanel(false);

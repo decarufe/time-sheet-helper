@@ -211,8 +211,18 @@
 
     private async Task ToggleThemeAsync()
     {
-        Shell.SetTheme(Shell.Theme == ShellTheme.Dark ? ShellTheme.Light : ShellTheme.Dark);
-        await CallModuleAsync("setTheme", Shell.Theme == ShellTheme.Dark ? "dark" : "light");
+        Shell.SetTheme(Shell.Theme switch
+        {
+            ShellTheme.System => ShellTheme.Light,
+            ShellTheme.Light => ShellTheme.Dark,
+            _ => ShellTheme.System,
+        });
+        await CallModuleAsync("setTheme", Shell.Theme switch
+        {
+            ShellTheme.Dark => "dark",
+            ShellTheme.Light => "light",
+            _ => "system",
+        });
     }
 
     private async Task OpenDrawerAsync()
@@ -256,7 +266,12 @@
         try
         {
             var prefs = await module.InvokeAsync<ShellPrefs>("getPrefs");
-            Shell.SetTheme(prefs.Theme == "dark" ? ShellTheme.Dark : ShellTheme.Light);
+            Shell.SetTheme(prefs.Theme switch
+            {
+                "dark" => ShellTheme.Dark,
+                "light" => ShellTheme.Light,
+                _ => ShellTheme.System,
+            });
             Shell.SetPanel(prefs.Panel);
         }
         catch (Exception ex) when (IsInteropFailure(ex))
