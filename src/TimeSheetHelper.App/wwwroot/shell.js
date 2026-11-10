@@ -5,11 +5,19 @@ const PANEL_KEY = "tsh.panel";
 let listener = null;
 
 function read(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 function write(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* storage unavailable: preference kept for the session only */ }
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable: preference kept for the session only */
+  }
 }
 
 function isEditable(target) {
@@ -21,8 +29,7 @@ function isEditable(target) {
 
 // AltGr (reported as Ctrl+Alt on Windows) types characters such as "[" and "]" on AZERTY/CSA layouts.
 function isAltGraph(e) {
-  return (e.ctrlKey && e.altKey && !e.metaKey)
-    || (typeof e.getModifierState === "function" && e.getModifierState("AltGraph"));
+  return (e.ctrlKey && e.altKey && !e.metaKey) || (typeof e.getModifierState === "function" && e.getModifierState("AltGraph"));
 }
 
 // Alt+digit gives a symbol on some layouts (AZERTY, macOS Option): fall back to the physical key.
@@ -62,23 +69,31 @@ export function init(dotNetRef) {
     const handled = isAltGraph(e) || !e.altKey ? !chord.inEditableField : !(e.ctrlKey || e.metaKey);
     if (!handled) return;
     e.preventDefault();
-    dotNetRef.invokeMethodAsync("OnShortcut", chord).catch(() => { /* circuit gone */ });
+    dotNetRef.invokeMethodAsync("OnShortcut", chord).catch(() => {
+      /* circuit gone */
+    });
   };
   document.addEventListener("keydown", listener);
 }
 
 export function getPrefs() {
   const stored = read(THEME_KEY);
-  const theme = stored === "light" || stored === "dark"
-    ? stored
-    : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const theme = stored === "light" || stored === "dark" ? stored : "system";
   return { theme, panel: read(PANEL_KEY) !== "0" };
 }
 
 export function setTheme(theme) {
-  if (theme !== "light" && theme !== "dark") return;
-  document.documentElement.dataset.theme = theme;
-  write(THEME_KEY, theme);
+  if (theme === "light" || theme === "dark") {
+    document.documentElement.dataset.theme = theme;
+    write(THEME_KEY, theme);
+  } else if (theme === "system") {
+    delete document.documentElement.dataset.theme;
+    try {
+      localStorage.removeItem(THEME_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }
 }
 
 export function setPanel(open) {
@@ -91,8 +106,9 @@ const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex]
 let trap = null;
 
 function focusables(root) {
-  return Array.from(root.querySelectorAll(FOCUSABLE))
-    .filter((el) => !el.disabled && !el.closest("[inert]") && el.getClientRects().length > 0);
+  return Array.from(root.querySelectorAll(FOCUSABLE)).filter(
+    (el) => !el.disabled && !el.closest("[inert]") && el.getClientRects().length > 0
+  );
 }
 
 function releaseTrap() {

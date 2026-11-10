@@ -3,11 +3,11 @@ using TimeSheetHelper.App.Components.Shared;
 
 namespace TimeSheetHelper.App.Components.Layout;
 
-public enum ShellTheme { Light, Dark }
+public enum ShellTheme { System, Light, Dark }
 
 /// <summary>
 /// State of the navigation shell, one per Blazor circuit (Scoped). The panel and theme preferences are persisted
-/// in localStorage by shell.js ("tsh.panel" = "1"/"0", "tsh.theme" = "light"/"dark"); MainLayout writes them back.
+/// in localStorage by shell.js ("tsh.panel" = "1"/"0", "tsh.theme" = "light"/"dark", absent = follow Windows); MainLayout writes them back.
 /// </summary>
 public sealed class ShellState
 {
@@ -24,7 +24,7 @@ public sealed class ShellState
 
     public bool PanelOpen { get; private set; } = true;
 
-    public ShellTheme Theme { get; private set; } = ShellTheme.Light;
+    public ShellTheme Theme { get; private set; } = ShellTheme.System;
 
     /// <summary>Page actions rendered by WeekHeader on the right of the title.</summary>
     public RenderFragment? HeaderActions { get; private set; }

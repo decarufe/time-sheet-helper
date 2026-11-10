@@ -179,7 +179,26 @@
                     @if (expandedRow)
                     {
                         <div class="evidence">
-                            @if (slot.Alternatives.Count > 0)
+                            @if (!IsSubmitted && TimesheetUi.IsUnclear(slot) && TimesheetUi.TopCandidates(slot, timeline!.Tasks) is { Count: > 0 } top)
+                            {
+                                <div class="candidates">
+                                    <p>Assignation peu claire — candidats les plus probables :</p>
+                                    <ul>
+                                        @foreach (var candidate in top)
+                                        {
+                                            var candidateTask = candidate.TaskId!.Value;
+                                            <li style="@TimesheetUi.TaskStyle(candidateTask)">
+                                                <span class="cand-name">@TaskName(candidateTask)</span>
+                                                <span class="conf @TimesheetUi.ConfidenceClass(candidate.Share)">@TimesheetUi.Percent(candidate.Share)</span>
+                                                <button type="button" class="cand-assign" disabled="@busy"
+                                                        title="Assigner ce créneau à @TaskName(candidateTask) avec un commentaire déduit des activités"
+                                                        @onclick="() => AssignCandidateAsync(slot, candidateTask)">Assigner</button>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            else if (slot.Alternatives.Count > 0)
                             {
                                 <p class="alternatives">
                                     Autres candidats :
@@ -242,6 +261,8 @@
             </span>
             <span class="spacer"></span>
             <button type="button" class="primary" @onclick="() => picker = PickerMode.Assign" disabled="@busy">Assigner à…</button>
+            <button type="button" @onclick="() => picker = PickerMode.Sync" disabled="@(busy || sel.Indices.Count < 2)"
+                    title="Applique la tâche et le commentaire d'une source aux autres créneaux sélectionnés.">Synchroniser…</button>
             <button type="button" class="confirm" @onclick="() => ConfirmAsync(SelectedSlots().ToList())" disabled="@(busy || !SelectionHasPrediction)"
                     title="Accepte la tâche prédite de chaque créneau sélectionné ; le moteur en tient compte pour ses prochaines prédictions.">✓ Confirmer</button>
             <button type="button" class="not-work" @onclick="() => AssignAsync(null)" disabled="@busy"
@@ -277,7 +298,13 @@
                    OnCancel="() => pendingRemoval = null" />
 }
 
-@if (picker != PickerMode.None && selection is not null)
+@if (picker == PickerMode.Sync && selection is not null && timeline is not null)
+{
+    <SyncSourcePicker Sources="SyncSourcesOfSelection()" Tasks="timeline.Tasks"
+                      OnSelected="SyncAsync" OnCancel="() => picker = PickerMode.None" />
+}
+
+@if (picker is PickerMode.Assign or PickerMode.Rule && selection is not null)
 {
     <TaskPicker Title="@(picker == PickerMode.Assign ? "Assigner les créneaux à…" : "Créer une règle vers…")"
                 Subtitle="@SelectionDescription()"
@@ -290,7 +317,7 @@
 }
 
 @code {
-    private enum PickerMode { None, Assign, Rule }
+    private enum PickerMode { None, Assign, Rule, Sync }
 
     private sealed record VisibleSlot(SlotAssignment Slot, DateTime Local);
 
@@ -646,6 +673,27 @@
         });
     }
 
+    private IReadOnlyList<TimesheetUi.SyncSource> SyncSourcesOfSelection() =>
+        timeline is null ? [] : TimesheetUi.SyncChoices(SelectedSlots().ToList(), timeline.Tasks);
+
+    /// <summary>Replicates the chosen source's task and comment onto the other selected slots.</summary>
+    private async Task SyncAsync(TimesheetUi.SyncSource source)
+    {
+        picker = PickerMode.None;
+        var inSource = source.SlotStartsUtc.ToHashSet();
+        var targets = SelectedStarts().Where(s => !inSource.Contains(s)).ToList();
+        if (targets.Count == 0)
+            return;
+
+        await RunAsync(async () =>
+        {
+            await Weeks.AssignSlotStartsAsync(targets, source.TaskId, source.Comment);
+            selection = null;
+            await LoadAsync();
+            Inform(TimesheetUi.SyncResultMessage(targets.Count, source.TaskId is { } id ? TaskName(id) : null));
+        });
+    }
+
     private int? PredictedTask(SlotAssignment slot) =>
         timeline is null ? null : TimesheetUi.PredictedTask(slot, timeline.Tasks);
 
@@ -672,6 +720,18 @@
             Inform(groups.Count == 1
                 ? (count > 1 ? $"{count} créneaux confirmés : {TaskName(groups[0].Key)}." : $"Créneau confirmé : {TaskName(groups[0].Key)}.")
                 : $"{count} créneaux confirmés.");
+        });
+    }
+
+    private async Task AssignCandidateAsync(SlotAssignment slot, int taskId)
+    {
+        var comment = TimesheetUi.SuggestedComment(slot, Evidence(slot));
+        await RunAsync(async () =>
+        {
+            await Weeks.AssignSlotStartsAsync([slot.SlotStartUtc], taskId, comment);
+            selection = null;
+            await LoadAsync();
+            Inform($"Créneau assigné à {TaskName(taskId)}.");
         });
     }
 

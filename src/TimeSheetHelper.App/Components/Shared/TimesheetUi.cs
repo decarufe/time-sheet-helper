@@ -123,6 +123,50 @@ public static class TimesheetUi
         return slot.Alternatives.FirstOrDefault(a => Assignable(a.TaskId))?.TaskId;
     }
 
+    public const int MaxCandidates = 5;
+
+    /// <summary>A work slot predicted by the engine whose winner is not clear enough to trust: the user should pick among candidates.</summary>
+    public static bool IsUnclear(SlotAssignment slot) =>
+        slot.Kind is SlotKind.Activity or SlotKind.Meeting && slot.Confidence < MediumConfidence;
+
+    /// <summary>The most probable assignable tasks of a slot (winner included), best first, one entry per task; groups without a task and "Ignoré" are left out.</summary>
+    public static IReadOnlyList<SlotCandidate> TopCandidates(SlotAssignment slot, IReadOnlyDictionary<int, ForecastTask> tasks, int max = MaxCandidates)
+    {
+        var all = new List<SlotCandidate>();
+        if (slot.TaskId is not null)
+            all.Add(new SlotCandidate(slot.TaskId, slot.GroupKey, 0, slot.Confidence));
+        all.AddRange(slot.Alternatives);
+
+        return all
+            .Where(c => c.TaskId is { } id && tasks.TryGetValue(id, out var task) && !task.IsIgnored)
+            .GroupBy(c => c.TaskId!.Value)
+            .Select(g => g.OrderByDescending(c => c.Share).First())
+            .OrderByDescending(c => c.Share)
+            .Take(max)
+            .ToList();
+    }
+
+    /// <summary>Comment stored with an instant assignment: the meeting title, else the repo, folder or most frequent window title of the slot's activities; null when nothing is known.</summary>
+    public static string? SuggestedComment(SlotAssignment slot, IEnumerable<ActivityEvent> activities)
+    {
+        if (!string.IsNullOrWhiteSpace(slot.Notes))
+            return slot.Notes.Trim();
+        if (MeetingTitle(slot.GroupKey) is { } meeting)
+            return meeting;
+
+        var list = activities.ToList();
+        static string? MostFrequent(IEnumerable<string?> values) =>
+            values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim())
+                .GroupBy(v => v, StringComparer.CurrentCultureIgnoreCase)
+                .OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault();
+
+        if (MostFrequent(list.Select(a => a.Repo)) is { } repo)
+            return $"Travail sur {repo}";
+        if (MostFrequent(list.Select(a => a.Folder)) is { } folder)
+            return $"Travail dans {folder}";
+        return MostFrequent(list.Select(a => a.Title ?? a.Subject));
+    }
+
     public static string RemoveConfirmationTitle(int slotCount) =>
         slotCount == 1 ? "Effacer ce créneau ?" : $"Effacer ces {slotCount} créneaux ?";
 

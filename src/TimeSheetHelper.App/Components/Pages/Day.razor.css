@@ -533,6 +533,26 @@ a.button:hover {
     color: var(--muted);
 }
 
+.candidates {
+    margin: 0 0 8px;
+}
+
+.candidates p {
+    margin: 0 0 4px;
+    color: var(--muted);
+}
+
+.evidence .candidates li {
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    border-left: 3px solid hsl(var(--task-h) 60% 50%);
+    padding-left: 8px;
+}
+
+.cand-assign {
+    padding: 2px 10px;
+}
+
 .ev-time {
     font-variant-numeric: tabular-nums;
     color: var(--muted);

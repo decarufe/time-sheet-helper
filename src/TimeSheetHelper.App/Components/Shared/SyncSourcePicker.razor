@@ -1,0 +1,73 @@
+@using TimeSheetHelper.Core.Forecast
+@using TimeSheetHelper.Engine
+@using TimeSheetHelper.Engine.Allocation
+@inject SlotAllocator Allocator
+
+<div class="picker-backdrop" @onclick="CancelAsync"></div>
+<div class="picker" role="dialog" aria-modal="true" aria-labelledby="@titleId" aria-label="Synchroniser les créneaux" @onkeydown="OnKeyDownAsync">
+    <header>
+        <h2 id="@titleId">Synchroniser sur…</h2>
+        <button type="button" class="close" @onclick="CancelAsync" aria-label="Fermer">✕</button>
+    </header>
+    <p class="subtitle">@(Sources.Count == 0
+        ? "Aucun créneau sélectionné n'a de tâche à répliquer (créneaux vides, non classés ou déjà identiques). Assignez d'abord une tâche à l'un d'eux."
+        : "Choisissez la source : sa tâche et son commentaire seront appliqués aux autres créneaux sélectionnés.")</p>
+    <ul class="sources">
+        @foreach (var source in Sources)
+        {
+            var current = source;
+            var task = current.TaskId is { } id && Tasks.TryGetValue(id, out var found) ? found : null;
+            <li>
+                <button type="button" class="source" style="@(current.TaskId is { } tid ? TimesheetUi.TaskStyle(tid) : null)"
+                        title="@TaskTooltips.For(task)" @onclick="() => SelectAsync(current)">
+                    <span class="swatch" aria-hidden="true"></span>
+                    <span class="name">@(current.TaskId is { } taskId ? TimesheetUi.TaskLabel(task, taskId) : "Pas du travail")</span>
+                    @if (!string.IsNullOrEmpty(current.Comment))
+                    {
+                        <span class="comment">« @current.Comment »</span>
+                    }
+                    <span class="meta">@current.Count @(current.Count > 1 ? "créneaux" : "créneau") · @Spans(current)</span>
+                </button>
+            </li>
+        }
+    </ul>
+    <div class="buttons">
+        <button type="button" @onclick="CancelAsync">Annuler</button>
+    </div>
+</div>
+
+@code {
+    private readonly string titleId = $"sync-title-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired] public IReadOnlyList<TimesheetUi.SyncSource> Sources { get; set; } = [];
+
+    [Parameter, EditorRequired] public IReadOnlyDictionary<int, ForecastTask> Tasks { get; set; } = new Dictionary<int, ForecastTask>();
+
+    [Parameter] public EventCallback<TimesheetUi.SyncSource> OnSelected { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Task SelectAsync(TimesheetUi.SyncSource source) => OnSelected.InvokeAsync(source);
+
+    private Task CancelAsync() => OnCancel.InvokeAsync();
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) => e.Key == "Escape" ? CancelAsync() : Task.CompletedTask;
+
+    private string Spans(TimesheetUi.SyncSource source)
+    {
+        var spans = new List<string>();
+        var starts = source.SlotStartsUtc;
+        for (var i = 0; i < starts.Count;)
+        {
+            var j = i;
+            while (j + 1 < starts.Count && TimesheetUi.AreAdjacent(starts[j], starts[j + 1]))
+                j++;
+            spans.Add($"{Local(starts[i]):HH:mm} – {Local(starts[j].Add(EngineOptions.SlotLength)):HH:mm}");
+            i = j + 1;
+        }
+        return string.Join(", ", spans);
+    }
+
+    private DateTime Local(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Allocator.TimeZone);
+}
