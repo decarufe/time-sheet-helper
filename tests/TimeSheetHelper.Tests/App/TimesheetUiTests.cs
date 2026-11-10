@@ -133,6 +133,123 @@ public sealed class TimesheetUiTests
     public void Adjacent_is_exact_to_the_second(int offsetSeconds, bool expected) =>
         Assert.Equal(expected, TimesheetUi.AreAdjacent(Fx.Mon(9), Fx.Mon(9).AddSeconds(offsetSeconds)));
 
+    private static readonly Dictionary<int, ForecastTask> SyncTasks = new()
+    {
+        [1] = new() { Id = 1, ExternalId = "1", ProjectName = "P", TaskName = "A" },
+        [2] = new() { Id = 2, ExternalId = "2", ProjectName = "P", TaskName = "B" },
+    };
+
+    private static SlotAssignment Sync(DateTime start, SlotKind kind, int? taskId, string? notes = null) =>
+        new(start, kind, taskId, null, 1.0, [], [], TimeSpan.Zero, notes);
+
+    [Fact]
+    public void Sync_sources_list_each_distinct_task_and_comment_once_with_their_slots()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.Override, 1, "x"), Sync(Fx.Mon(9, 15), SlotKind.Override, 2, "y"), Sync(Fx.Mon(9, 30), SlotKind.Override, 1, "x")],
+            SyncTasks);
+
+        Assert.Equal(2, sources.Count);
+        Assert.Equal((1, "x", 2), (sources[0].TaskId, sources[0].Comment, sources[0].Count));
+        Assert.Equal([Fx.Mon(9), Fx.Mon(9, 30)], sources[0].SlotStartsUtc);
+        Assert.Equal((2, "y"), (sources[1].TaskId, sources[1].Comment));
+    }
+
+    [Fact]
+    public void Sync_sources_separate_the_same_task_with_different_comments()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.Override, 1, "a"), Sync(Fx.Mon(9, 15), SlotKind.Override, 1, "b"), Sync(Fx.Mon(9, 30), SlotKind.Override, 1)],
+            SyncTasks);
+
+        Assert.Equal(3, sources.Count);
+    }
+
+    [Fact]
+    public void Sync_sources_ignore_case_and_surrounding_whitespace_in_comments()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.Override, 1, "Revue de code"), Sync(Fx.Mon(9, 15), SlotKind.Override, 1, "  revue DE code "), Sync(Fx.Mon(9, 30), SlotKind.Override, 1, "  ")],
+            SyncTasks);
+
+        Assert.Equal(2, sources.Count);
+        Assert.Equal("Revue de code", sources[0].Comment);
+        Assert.Equal(2, sources[0].Count);
+        Assert.Null(sources[1].Comment);
+    }
+
+    [Fact]
+    public void Sync_sources_use_the_predicted_task_of_unconfirmed_slots()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.Activity, 1), Sync(Fx.Mon(9, 15), SlotKind.Override, 1)],
+            SyncTasks);
+
+        var source = Assert.Single(sources);
+        Assert.Equal((1, 2), (source.TaskId, source.Count));
+    }
+
+    [Fact]
+    public void Sync_sources_offer_not_work_as_a_source_without_task_and_ignoring_its_comment()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.ExcludedByOverride, null, "a"), Sync(Fx.Mon(9, 15), SlotKind.ExcludedByOverride, null, "b"), Sync(Fx.Mon(9, 30), SlotKind.Override, 1)],
+            SyncTasks);
+
+        Assert.Equal(2, sources.Count);
+        Assert.True(sources[0].IsNotWork);
+        Assert.Equal(2, sources[0].Count);
+        Assert.Null(sources[0].TaskId);
+    }
+
+    [Fact]
+    public void Sync_sources_leave_out_empty_removed_and_unclassified_slots()
+    {
+        var unclassified = new SlotAssignment(Fx.Mon(10), SlotKind.Activity, null, "repo:x", 0.5, [], [], TimeSpan.Zero);
+
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(9), SlotKind.Empty, null), Sync(Fx.Mon(9, 15), SlotKind.Removed, null), unclassified, Sync(Fx.Mon(9, 30), SlotKind.Override, 2)],
+            SyncTasks);
+
+        Assert.Equal(2, Assert.Single(sources).TaskId);
+    }
+
+    [Fact]
+    public void Sync_sources_keep_non_contiguous_slots_in_one_source()
+    {
+        var sources = TimesheetUi.SyncSources(
+            [Sync(Fx.Mon(14), SlotKind.Override, 1, "x"), Sync(Fx.Mon(9), SlotKind.Override, 1, "x")],
+            SyncTasks);
+
+        var source = Assert.Single(sources);
+        Assert.Equal([Fx.Mon(9), Fx.Mon(14)], source.SlotStartsUtc);
+    }
+
+    [Fact]
+    public void Sync_choices_offer_a_single_source_when_other_selected_slots_have_nothing_to_replace()
+    {
+        var empty = Sync(Fx.Mon(9, 15), SlotKind.Empty, null);
+
+        var choices = TimesheetUi.SyncChoices([Sync(Fx.Mon(9), SlotKind.Override, 1, "x"), empty], SyncTasks);
+
+        Assert.Equal(1, Assert.Single(choices).TaskId);
+    }
+
+    [Fact]
+    public void Sync_choices_are_empty_when_every_selected_slot_already_shares_the_same_source()
+    {
+        var choices = TimesheetUi.SyncChoices([Sync(Fx.Mon(9), SlotKind.Override, 1, "x"), Sync(Fx.Mon(9, 15), SlotKind.Override, 1, "x")], SyncTasks);
+
+        Assert.Empty(choices);
+    }
+
+    [Fact]
+    public void Sync_choices_are_empty_for_a_single_slot_or_when_no_slot_has_a_task()
+    {
+        Assert.Empty(TimesheetUi.SyncChoices([Sync(Fx.Mon(9), SlotKind.Override, 1)], SyncTasks));
+        Assert.Empty(TimesheetUi.SyncChoices([Sync(Fx.Mon(9), SlotKind.Empty, null), Sync(Fx.Mon(9, 15), SlotKind.Empty, null)], SyncTasks));
+    }
+
     [Fact]
     public void Slots_around_midnight_are_adjacent_across_the_day_change()
     {

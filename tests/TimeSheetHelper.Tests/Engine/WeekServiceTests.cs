@@ -265,6 +265,23 @@ public class WeekServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Syncing_a_source_replaces_the_task_and_comment_of_the_other_slots()
+    {
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9)], _dev.Id, "revue");
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9, 15), Fx.Mon(10)], _support.Id, "ancien");
+
+        // Same call as the Day page "Synchroniser…" action: the source's task and comment go to the other slots.
+        await _sut.AssignSlotStartsAsync([Fx.Mon(9, 15), Fx.Mon(10)], _dev.Id, "revue");
+
+        var slots = (await _sut.GetDayTimelineAsync(Fx.Monday)).Slots;
+        foreach (var start in new[] { Fx.Mon(9), Fx.Mon(9, 15), Fx.Mon(10) })
+        {
+            var slot = slots.Single(s => s.SlotStartUtc == start);
+            Assert.Equal((_dev.Id, "revue"), (slot.TaskId, slot.Notes));
+        }
+    }
+
+    [Fact]
     public async Task Assignments_teach_the_dominant_group_and_reassigning_or_clearing_withdraws_it()
     {
         await _host.AddActivitiesAsync(
