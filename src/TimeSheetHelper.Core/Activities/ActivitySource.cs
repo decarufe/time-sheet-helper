@@ -12,6 +12,7 @@ public readonly record struct ActivitySource(string Id) : IComparable<ActivitySo
     public static readonly ActivitySource Locked = new("Locked");
     public static readonly ActivitySource VsCode = new("VsCode");
     public static readonly ActivitySource ClaudeCode = new("ClaudeCode");
+    public static readonly ActivitySource Copilot = new("Copilot");
     public static readonly ActivitySource GitHub = new("GitHub");
     public static readonly ActivitySource AzureDevOps = new("AzureDevOps");
     public static readonly ActivitySource LocalGit = new("LocalGit");

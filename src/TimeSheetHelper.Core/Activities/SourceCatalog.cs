@@ -57,6 +57,7 @@ public sealed class SourceCatalog : ISourceCatalog
         catalog.Register(ActivitySource.Locked, new("Verrouillé", SourceBehavior.NonWork));
         catalog.Register(ActivitySource.VsCode, new("VS Code", SourceBehavior.Presence, IsEditing: true, DefaultWeight: 1.5));
         catalog.Register(ActivitySource.ClaudeCode, new("Claude Code", SourceBehavior.Presence, DefaultWeight: 1.2));
+        catalog.Register(ActivitySource.Copilot, new("GitHub Copilot", SourceBehavior.Presence, DefaultWeight: 1.2));
         catalog.Register(ActivitySource.GitHub, new("GitHub"));
         catalog.Register(ActivitySource.AzureDevOps, new("Azure DevOps"));
         catalog.Register(ActivitySource.LocalGit, new("Git local"));

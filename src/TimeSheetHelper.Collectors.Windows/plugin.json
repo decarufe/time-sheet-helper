@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "entryAssembly": "TimeSheetHelper.Collectors.Windows.dll",
-  "description": "Fenêtre active, extension VS Code et sessions Claude Code.",
+  "description": "Fenêtre active, extension VS Code, sessions Claude Code et conversations GitHub Copilot.",
   "author": "Time Sheet Helper"
 }

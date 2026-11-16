@@ -9,7 +9,7 @@ namespace TimeSheetHelper.Engine.Allocation;
 /// <summary>How an activity takes part in slot allocation.</summary>
 public enum ActivityRole
 {
-    /// <summary>Interval of active work (Focus, VsCode, ClaudeCode).</summary>
+    /// <summary>Interval of active work (Focus, VsCode, ClaudeCode, Copilot).</summary>
     Active,
 
     /// <summary>Idle or locked time: removes active time, never work by itself.</summary>
