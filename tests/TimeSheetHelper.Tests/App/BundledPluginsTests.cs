@@ -53,14 +53,14 @@ public sealed class BundledPluginsTests : IDisposable
         Assert.Equal(["devops", "microsoft-365", "windows-activity"], host.Packages.Select(p => p.Manifest.Id).Order());
         Assert.All(host.Packages, p => Assert.True(p.IsBundled));
         Assert.Equal(
-            ["azure-devops", "claude-code", "focus-tracker", "github", "local-git", "microsoft-365", "vscode"],
+            ["azure-devops", "claude-code", "copilot", "focus-tracker", "github", "local-git", "microsoft-365", "vscode"],
             host.Plugins.Select(p => p.Id).Order());
 
         // Pull sources start; the window tracker and the editor receiver wait for the real application.
         Assert.All(host.Plugins.Where(p => p.Descriptor.Mode == SourceExecutionMode.Pull),
             p => Assert.True(p.State == PluginRunState.Running, $"{p.Id}: {p.State} {p.Error}"));
         Assert.Equal(
-            ["azuredevops", "calendar", "claudecode", "email", "github", "localgit", "teams"],
+            ["azuredevops", "calendar", "claudecode", "copilot", "email", "github", "localgit", "teams"],
             host.Collectors.Select(c => c.Name).Order());
         await host.StopAsync(default);
     }
@@ -74,7 +74,7 @@ public sealed class BundledPluginsTests : IDisposable
         var emitted = host.Plugins.SelectMany(p => p.Descriptor.Emits).ToList();
 
         Assert.Equal(
-            ["AzureDevOps", "Calendar", "ClaudeCode", "Email", "Focus", "GitHub", "Idle", "LocalGit", "Locked", "Teams", "VsCode"],
+            ["AzureDevOps", "Calendar", "ClaudeCode", "Copilot", "Email", "Focus", "GitHub", "Idle", "LocalGit", "Locked", "Teams", "VsCode"],
             emitted.Select(e => e.Source.Id).Order(StringComparer.Ordinal));
         Assert.All(emitted, e => Assert.Equal(SourceCatalog.Default.Get(e.Source), e.Traits));
         await host.StopAsync(default);

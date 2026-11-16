@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TimeSheetHelper.Collectors.Windows.ClaudeCode;
+using TimeSheetHelper.Collectors.Windows.Copilot;
 using TimeSheetHelper.Collectors.Windows.VsCode;
 using TimeSheetHelper.Core.Activities;
 using TimeSheetHelper.Core.Collectors;
@@ -171,5 +172,29 @@ public sealed class ClaudeCodePlugin : ISourcePlugin
         services.AddSingleton<ClaudeCodeTranscriptCollector>();
         var provider = services.BuildServiceProvider();
         return new ServiceSourceInstance(provider, [provider.GetRequiredService<ClaudeCodeTranscriptCollector>()]);
+    }
+}
+
+/// <summary>Reads GitHub Copilot conversations (VS Code, VS Code Insiders, Copilot CLI).</summary>
+public sealed class CopilotPlugin : ISourcePlugin
+{
+    public const string PluginId = "copilot";
+
+    public SourceDescriptor Describe() => new()
+    {
+        Id = PluginId,
+        DisplayName = "GitHub Copilot",
+        Description = "Lit les conversations GitHub Copilot de VS Code, VS Code Insiders et Copilot CLI (%USERPROFILE%\\.copilot) : seuls les horodatages et le dossier du projet sont conservés, jamais le texte des échanges.",
+        Mode = SourceExecutionMode.Pull,
+        Platform = "windows",
+        Emits = [new(ActivitySource.Copilot, new("GitHub Copilot", SourceBehavior.Presence, DefaultWeight: 1.2))],
+    };
+
+    public ISourceInstance Create(IPluginContext context)
+    {
+        var services = new ServiceCollection().AddPluginContext(context);
+        services.AddSingleton<CopilotCollector>();
+        var provider = services.BuildServiceProvider();
+        return new ServiceSourceInstance(provider, [provider.GetRequiredService<CopilotCollector>()]);
     }
 }

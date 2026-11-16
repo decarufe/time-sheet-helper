@@ -18,7 +18,7 @@ public sealed class LocalGitCollector(
     ILogger<LocalGitCollector> logger) : ICollector
 {
     internal const string GitMissingMessage = "git introuvable : installez Git ou ajoutez-le au PATH.";
-    private static readonly ActivitySource[] FolderSources = [ActivitySource.Focus, ActivitySource.VsCode, ActivitySource.ClaudeCode];
+    private static readonly ActivitySource[] FolderSources = [ActivitySource.Focus, ActivitySource.VsCode, ActivitySource.ClaudeCode, ActivitySource.Copilot];
 
     public string Name => "localgit";
 
