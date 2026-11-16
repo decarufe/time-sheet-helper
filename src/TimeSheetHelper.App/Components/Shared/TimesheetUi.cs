@@ -206,6 +206,78 @@ public static class TimesheetUi
     public static bool AreConsecutive(IReadOnlyList<DateTime> slotStartsUtc) =>
         slotStartsUtc.Count > 0 && slotStartsUtc.Zip(slotStartsUtc.Skip(1), AreAdjacent).All(adjacent => adjacent);
 
+    /// <summary>
+    /// A distinct task and comment found among the selected slots, offered by "Synchroniser…" as the model to copy onto
+    /// the other selected slots. <see cref="TaskId"/> is null for "Pas du travail".
+    /// </summary>
+    /// <param name="SlotStartsUtc">Starts of the slots carrying this task and comment, ascending (not necessarily contiguous).</param>
+    public sealed record SyncSource(int? TaskId, string? Comment, IReadOnlyList<DateTime> SlotStartsUtc)
+    {
+        public int Count => SlotStartsUtc.Count;
+
+        public bool IsNotWork => TaskId is null;
+    }
+
+    /// <summary>
+    /// Each distinct (task, comment) of the slots, in time order of their first slot. A slot counts with its assigned task,
+    /// or its predicted task when unconfirmed; "Pas du travail" slots form one source whose comment is ignored (it is not
+    /// stored for not-work). Comments are compared ignoring case and surrounding spaces; a blank one is no comment.
+    /// Empty, cleared and unclassified slots have nothing to copy and are left out.
+    /// </summary>
+    public static IReadOnlyList<SyncSource> SyncSources(IReadOnlyList<SlotAssignment> slots, IReadOnlyDictionary<int, ForecastTask> tasks)
+    {
+        var groups = new List<(int? TaskId, string? Comment, List<DateTime> Starts)>();
+        foreach (var slot in slots.OrderBy(s => s.SlotStartUtc))
+        {
+            int? taskId;
+            string? comment;
+            switch (slot.Kind)
+            {
+                case SlotKind.ExcludedByOverride:
+                    (taskId, comment) = (null, null);
+                    break;
+                case SlotKind.Override when slot.TaskId is { } assigned:
+                    (taskId, comment) = (assigned, NormalizeComment(slot.Notes));
+                    break;
+                case SlotKind.Activity or SlotKind.Meeting when PredictedTask(slot, tasks) is { } predicted:
+                    (taskId, comment) = (predicted, NormalizeComment(slot.Notes));
+                    break;
+                default:
+                    continue;
+            }
+
+            var index = groups.FindIndex(g => g.TaskId == taskId && string.Equals(g.Comment, comment, StringComparison.CurrentCultureIgnoreCase));
+            if (index < 0)
+                groups.Add((taskId, comment, [slot.SlotStartUtc]));
+            else
+                groups[index].Starts.Add(slot.SlotStartUtc);
+        }
+
+        return groups.Select(g => new SyncSource(g.TaskId, g.Comment, g.Starts)).ToList();
+    }
+
+    /// <summary>
+    /// The sources worth offering for the selection: those that would change at least one other selected slot. Empty for a
+    /// single slot, when no slot has a task, or when every selected slot already shares the same task and comment.
+    /// </summary>
+    public static IReadOnlyList<SyncSource> SyncChoices(IReadOnlyList<SlotAssignment> slots, IReadOnlyDictionary<int, ForecastTask> tasks)
+    {
+        if (slots.Count < 2)
+            return [];
+        return SyncSources(slots, tasks).Where(source => source.Count < slots.Count).ToList();
+    }
+
+    /// <summary>Outcome of "Synchroniser…": how many slots received the source's task (or "Pas du travail" when <paramref name="taskName"/> is null).</summary>
+    public static string SyncResultMessage(int slotCount, string? taskName)
+    {
+        var slots = $"{slotCount} {Plural(slotCount, "créneau synchronisé", "créneaux synchronisés")}";
+        return taskName is null
+            ? $"{slots} : {Plural(slotCount, "marqué", "marqués")} comme hors travail."
+            : $"{slots} sur « {taskName} ».";
+    }
+
+    private static string? NormalizeComment(string? notes) => string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+
     /// <summary>Traits of the sources, set at startup from the plugin catalog; the built-in ones until then.</summary>
     public static ISourceCatalog Sources { get; set; } = SourceCatalog.Default;
 
